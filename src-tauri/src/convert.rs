@@ -83,11 +83,11 @@ pub struct LoadResult {
     pub meta: crate::parser::session::SessionMeta,
 }
 
-/// Format a timestamp as "3:04:05 PM".
+/// Format a timestamp as "yyyy-mm-dd hh:mm:ss".
 fn format_time(ts: &chrono::DateTime<chrono::Utc>) -> String {
     use chrono::Local;
     let local = ts.with_timezone(&Local);
-    local.format("%-I:%M:%S %p").to_string()
+    local.format("%Y-%m-%d %H:%M:%S").to_string()
 }
 
 /// Shorten model name: "claude-opus-4-6" -> "opus4.6"

@@ -3,10 +3,11 @@ import type { SessionInfo } from "../types";
 import {
   formatTokens,
   formatDuration,
+  formatExactTime,
   truncate,
   groupByDate,
+  shortModel,
 } from "../lib/format";
-import { shortModel } from "../lib/format";
 import { getModelColor, spinnerFrames } from "../lib/theme";
 
 interface SessionPickerProps {
@@ -131,6 +132,11 @@ export function SessionPicker({
                     {session.duration_ms > 0 && (
                       <span className="picker__session-stat">
                         {formatDuration(session.duration_ms)}
+                      </span>
+                    )}
+                    {session.mod_time && (
+                      <span className="picker__session-time">
+                        {formatExactTime(session.mod_time)}
                       </span>
                     )}
                   </div>

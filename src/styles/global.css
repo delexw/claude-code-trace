@@ -509,6 +509,13 @@ body {
   gap: 2px;
 }
 
+.picker__session-time {
+  margin-left: auto;
+  color: var(--text-muted);
+  font-size: 10px;
+  flex-shrink: 0;
+}
+
 .picker__empty {
   display: flex;
   align-items: center;

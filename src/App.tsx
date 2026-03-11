@@ -64,6 +64,15 @@ export function App() {
     [session.loadSession],
   );
 
+  // Auto-select newest message (last index) when messages load
+  useEffect(() => {
+    if (session.messages.length > 0 && view === "list") {
+      setSelectedMessage((prev) =>
+        prev >= session.messages.length ? session.messages.length - 1 : prev
+      );
+    }
+  }, [session.messages.length, view]);
+
   // Toggle message expand
   const toggleMessage = useCallback((index: number) => {
     setExpandedMessages((prev) => {
@@ -96,13 +105,15 @@ export function App() {
     setExpandedMessages(new Set());
   }, []);
 
+  // Visual top = newest message = last index (display is reversed)
   const jumpToTop = useCallback(() => {
-    setSelectedMessage(0);
-  }, []);
-
-  const jumpToBottom = useCallback(() => {
     setSelectedMessage(Math.max(session.messages.length - 1, 0));
   }, [session.messages.length]);
+
+  // Visual bottom = oldest message = index 0
+  const jumpToBottom = useCallback(() => {
+    setSelectedMessage(0);
+  }, []);
 
   const openDebug = useCallback(() => {
     if (session.sessionPath) {
@@ -169,19 +180,22 @@ export function App() {
     switch (e.key) {
       case "j":
         e.preventDefault();
-        setSelectedMessage((i) => Math.min(i + 1, session.messages.length - 1));
+        // Display is reversed (newest first), so j (down) decreases index
+        setSelectedMessage((i) => Math.max(i - 1, 0));
         break;
       case "k":
         e.preventDefault();
-        setSelectedMessage((i) => Math.max(i - 1, 0));
+        setSelectedMessage((i) => Math.min(i + 1, session.messages.length - 1));
         break;
       case "G":
         e.preventDefault();
-        jumpToBottom();
+        // G = visual bottom = oldest message = index 0
+        jumpToTop();
         break;
       case "g":
         e.preventDefault();
-        jumpToTop();
+        // g = visual top = newest message = last index
+        jumpToBottom();
         break;
       case "Tab":
         e.preventDefault();

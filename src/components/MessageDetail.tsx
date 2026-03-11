@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import type { DisplayMessage, DisplayItem } from "../types";
-import { shortModel, formatTokens, formatDuration, formatTime } from "../lib/format";
+import { shortModel, formatTokens, formatDuration, formatExactTime } from "../lib/format";
 import { getModelColor, getTeamColor, toolCategoryIcons } from "../lib/theme";
 
 interface MessageDetailProps {
@@ -16,7 +16,7 @@ export function MessageDetail({ message: msg, onBack }: MessageDetailProps) {
 
   const model = msg.model ? shortModel(msg.model) : "";
   const modelColor = msg.model ? getModelColor(msg.model) : undefined;
-  const time = formatTime(msg.timestamp);
+  const time = formatExactTime(msg.timestamp);
 
   const toggleItem = useCallback((index: number) => {
     setExpandedItems((prev) => {

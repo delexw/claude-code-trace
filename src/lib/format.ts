@@ -106,26 +106,29 @@ export function contextPercent(msgs: DisplayMessage[]): number {
   return -1;
 }
 
+
 /**
- * Formats a timestamp string for display.
+ * Formats a timestamp as yyyy-mm-dd hh:mm:ss.
  */
-export function formatTime(ts: string): string {
+export function formatExactTime(ts: string): string {
   if (!ts) return "";
   try {
     const d = new Date(ts);
     if (isNaN(d.getTime())) return "";
-    return d.toLocaleTimeString(undefined, {
-      hour: "numeric",
-      minute: "2-digit",
-      second: "2-digit",
-    });
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    const hh = String(d.getHours()).padStart(2, "0");
+    const mi = String(d.getMinutes()).padStart(2, "0");
+    const ss = String(d.getSeconds()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
   } catch {
     return "";
   }
 }
 
 /**
- * Groups sessions by date category.
+ * Groups sessions by date category, sorted by mod_time descending within each group.
  */
 export function groupByDate<T extends { mod_time: string }>(
   items: T[]
@@ -153,6 +156,15 @@ export function groupByDate<T extends { mod_time: string }>(
     else cat = "Older";
 
     (groups[cat] ??= []).push(item);
+  }
+
+  // Sort each group by mod_time descending (most recent first)
+  for (const cat of order) {
+    if (groups[cat]) {
+      groups[cat].sort(
+        (a, b) => new Date(b.mod_time).getTime() - new Date(a.mod_time).getTime()
+      );
+    }
   }
 
   return order

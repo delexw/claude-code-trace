@@ -1,10 +1,10 @@
-import { useRef, useEffect, useCallback } from "react";
+import { useRef, useEffect, useCallback, useMemo } from "react";
 import type { DisplayMessage } from "../types";
 import {
   shortModel,
   formatTokens,
   formatDuration,
-  formatTime,
+  formatExactTime,
   firstLine,
   truncate,
 } from "../lib/format";
@@ -56,6 +56,15 @@ export function MessageList({
     [onOpenDetail]
   );
 
+  // Reverse order: newest messages first
+  const reversed = useMemo(() => {
+    const indices: number[] = [];
+    for (let i = messages.length - 1; i >= 0; i--) {
+      indices.push(i);
+    }
+    return indices;
+  }, [messages.length]);
+
   if (messages.length === 0) {
     return (
       <div className="message-list">
@@ -66,14 +75,15 @@ export function MessageList({
 
   return (
     <div className="message-list" ref={listRef}>
-      {messages.map((msg, i) => {
+      {reversed.map((i) => {
+        const msg = messages[i];
         if (msg.role === "compact") {
           return <CompactSeparator key={i} content={msg.content} />;
         }
 
         const isSelected = i === selectedIndex;
         const isExpanded = expandedSet.has(i);
-        const isLast = i === messages.length - 1;
+        const isFirst = i === 0;
 
         return (
           <MessageItem
@@ -83,7 +93,7 @@ export function MessageList({
             index={i}
             isSelected={isSelected}
             isExpanded={isExpanded}
-            isLastOngoing={isLast && ongoing}
+            isLastOngoing={isFirst && ongoing}
             animFrame={animFrame}
             onClick={handleClick}
             onDoubleClick={handleDoubleClick}
@@ -140,7 +150,7 @@ function MessageItem({
 
   const model = msg.model ? shortModel(msg.model) : "";
   const modelColor = msg.model ? getModelColor(msg.model) : undefined;
-  const time = formatTime(msg.timestamp);
+  const time = formatExactTime(msg.timestamp);
 
   const contentPreview = isExpanded
     ? msg.content
