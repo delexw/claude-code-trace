@@ -1,0 +1,15 @@
+{
+  "identifier": "default",
+  "description": "Default permissions for tail-claude GUI",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "fs:default",
+    "fs:allow-read-file",
+    "fs:allow-exists",
+    "fs:allow-read-dir",
+    "fs:allow-stat",
+    "core:event:default",
+    "default"
+  ]
+}

@@ -1,0 +1,64 @@
+[default]
+description = "Default permissions for all tail-claude commands"
+permissions = [
+  "allow-discover-sessions",
+  "allow-load-session",
+  "allow-get-session-meta",
+  "allow-watch-session",
+  "allow-unwatch-session",
+  "allow-get-git-info",
+  "allow-get-debug-log",
+  "allow-watch-picker",
+  "allow-unwatch-picker",
+  "allow-get-project-dirs",
+]
+
+[[permission]]
+identifier = "allow-discover-sessions"
+description = "Allow discovering sessions across project directories"
+commands.allow = ["discover_sessions"]
+
+[[permission]]
+identifier = "allow-load-session"
+description = "Allow loading a session file"
+commands.allow = ["load_session"]
+
+[[permission]]
+identifier = "allow-get-session-meta"
+description = "Allow getting session metadata"
+commands.allow = ["get_session_meta"]
+
+[[permission]]
+identifier = "allow-watch-session"
+description = "Allow watching a session file for changes"
+commands.allow = ["watch_session"]
+
+[[permission]]
+identifier = "allow-unwatch-session"
+description = "Allow stopping session file watching"
+commands.allow = ["unwatch_session"]
+
+[[permission]]
+identifier = "allow-get-git-info"
+description = "Allow getting git information"
+commands.allow = ["get_git_info"]
+
+[[permission]]
+identifier = "allow-get-debug-log"
+description = "Allow reading debug log"
+commands.allow = ["get_debug_log"]
+
+[[permission]]
+identifier = "allow-watch-picker"
+description = "Allow watching picker for changes"
+commands.allow = ["watch_picker"]
+
+[[permission]]
+identifier = "allow-unwatch-picker"
+description = "Allow stopping picker watching"
+commands.allow = ["unwatch_picker"]
+
+[[permission]]
+identifier = "allow-get-project-dirs"
+description = "Allow getting project directories"
+commands.allow = ["get_project_dirs"]
