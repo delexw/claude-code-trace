@@ -160,10 +160,6 @@ pub fn discover_project_sessions(project_dir: &str) -> Result<Vec<SessionInfo>, 
         let path = entry.path().to_string_lossy().to_string();
         let meta = scan_session_metadata(&path);
 
-        if meta.turn_count == 0 {
-            continue;
-        }
-
         let mut is_ongoing = meta.is_ongoing;
         if is_ongoing {
             if let Ok(m) = entry.metadata() {
@@ -380,19 +376,9 @@ pub(crate) fn scan_session_metadata(path: &str) -> SessionMetadata {
             Err(_) => continue,
         };
 
-        let uuid = raw.get("uuid").and_then(|v| v.as_str()).unwrap_or("");
-        if uuid.is_empty() {
-            continue;
-        }
-
         let entry_type = raw.get("type").and_then(|v| v.as_str()).unwrap_or("");
-        let is_sidechain = raw
-            .get("isSidechain")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        let is_meta_flag = raw.get("isMeta").and_then(|v| v.as_bool()).unwrap_or(false);
 
-        // Track timestamps for duration.
+        // Track timestamps for duration (all entries, even UUID-less ones).
         if let Some(ts_str) = raw.get("timestamp").and_then(|v| v.as_str()) {
             let ts = parse_timestamp(ts_str);
             if first_ts.is_none() {
@@ -402,6 +388,7 @@ pub(crate) fn scan_session_metadata(path: &str) -> SessionMetadata {
         }
 
         // --- Session-level metadata (cwd, branch: first seen; mode: last seen) ---
+        // Extract before UUID check so queue-operation entries contribute metadata.
         if meta.cwd.is_empty() {
             if let Some(cwd) = raw.get("cwd").and_then(|v| v.as_str()) {
                 if !cwd.is_empty() {
@@ -421,6 +408,17 @@ pub(crate) fn scan_session_metadata(path: &str) -> SessionMetadata {
                 meta.permission_mode = mode.to_string();
             }
         }
+
+        let uuid = raw.get("uuid").and_then(|v| v.as_str()).unwrap_or("");
+        if uuid.is_empty() {
+            continue;
+        }
+
+        let is_sidechain = raw
+            .get("isSidechain")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let is_meta_flag = raw.get("isMeta").and_then(|v| v.as_bool()).unwrap_or(false);
 
         // --- Turn counting (matches isParsedUserChunkMessage + AI pairing) ---
         if is_user_chunk_for_turn_count(&raw, entry_type, is_meta_flag, is_sidechain) {
