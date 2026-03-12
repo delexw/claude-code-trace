@@ -264,6 +264,17 @@ body {
   color: var(--accent);
 }
 
+.project-tree__item--highlighted {
+  background: var(--bg-hover);
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.project-tree--focused {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
 .project-tree__name {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1849,6 +1860,17 @@ body {
 .detail-item--agent-active {
   background: rgba(99, 179, 237, 0.08);
   border-left: 2px solid #63b3ed;
+}
+
+/* Focused column indicator */
+.message-detail__main--focused {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.agent-panel--focused {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
 }
 
 /* Agent panel — reuses .message classes, tinted background */

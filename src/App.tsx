@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { ViewState, SessionInfo } from "./types";
 import { useSession } from "./hooks/useSession";
@@ -13,8 +13,9 @@ import { DebugViewer } from "./components/DebugViewer";
 import { InfoBar } from "./components/InfoBar";
 import { KeybindBar } from "./components/KeybindBar";
 import { ViewToolbar } from "./components/ViewToolbar";
-import { ProjectTree } from "./components/ProjectTree";
+import { ProjectTree, useProjectCount } from "./components/ProjectTree";
 import { ResizeHandle } from "./components/ResizeHandle";
+import { projectKey } from "./lib/format";
 
 export function App() {
   const [view, setView] = useState<ViewState>("picker");
@@ -24,11 +25,14 @@ export function App() {
   const [animFrame, setAnimFrame] = useState(0);
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState(180);
+  const [sidebarFocused, setSidebarFocused] = useState(false);
+  const [sidebarHighlight, setSidebarHighlight] = useState(0); // index in project list (0 = "All")
 
   const handleSelectProject = useCallback(
     (project: string | null) => {
       setSelectedProject(project);
       setPickerSelectedIndex(0);
+      setSidebarFocused(false);
       if (view !== "picker") setView("picker");
     },
     [view],
@@ -36,6 +40,7 @@ export function App() {
 
   const session = useSession();
   const picker = usePicker(selectedProject);
+  const projectCount = useProjectCount(picker.allSessions);
 
   const { loadSession, loadDebugLog, sessionPath } = session;
   const { discoverSessions } = picker;
@@ -159,54 +164,88 @@ export function App() {
     setShowKeybinds((v) => !v);
   }, []);
 
+  // Build project keys list for sidebar Enter selection
+  const projectKeys = useMemo(() => {
+    const keys = new Set<string>();
+    for (const s of picker.allSessions) {
+      keys.add(projectKey(s.path));
+    }
+    const sorted = [...keys].sort();
+    return [null as string | null, ...sorted]; // index 0 = "All", 1+ = project keys
+  }, [picker.allSessions]);
+
+  const selectProjectByIndex = useCallback(
+    (index: number) => {
+      if (index >= 0 && index < projectKeys.length) {
+        handleSelectProject(projectKeys[index]);
+      }
+    },
+    [projectKeys, handleSelectProject],
+  );
+
   // Keyboard navigation — build keyMap per view
   const keyMap: Record<string, () => void> = {};
-  switch (view) {
-    case "list":
-      keyMap["j"] = () => setSelectedMessage((i) => Math.max(i - 1, 0));
-      keyMap["k"] = () => setSelectedMessage((i) => Math.min(i + 1, session.messages.length - 1));
-      keyMap["G"] = jumpToTop;
-      keyMap["g"] = jumpToBottom;
-      keyMap["Tab"] = () => toggleMessage(selectedMessage);
-      keyMap["Enter"] = () => {
-        if (session.messages.length > 0) openDetail(selectedMessage);
-      };
-      keyMap["e"] = expandAll;
-      keyMap["c"] = collapseAll;
-      keyMap["t"] = openTeams;
-      keyMap["d"] = openDebug;
-      keyMap["q"] = goToSessions;
-      keyMap["Escape"] = goToSessions;
-      keyMap["s"] = goToSessions;
-      keyMap["?"] = toggleKeybinds;
-      break;
-    case "detail":
-      keyMap["q"] = () => setView("list");
-      keyMap["Escape"] = () => setView("list");
-      keyMap["?"] = toggleKeybinds;
-      break;
-    case "picker":
-      keyMap["j"] = () =>
-        setPickerSelectedIndex((i) => Math.min(i + 1, picker.sessions.length - 1));
-      keyMap["k"] = () => setPickerSelectedIndex((i) => Math.max(i - 1, 0));
-      keyMap["Enter"] = () => {
-        if (picker.sessions[pickerSelectedIndex])
-          handleSelectSession(picker.sessions[pickerSelectedIndex]);
-      };
-      keyMap["q"] = backToList;
-      keyMap["Escape"] = backToList;
-      keyMap["?"] = toggleKeybinds;
-      break;
-    case "team":
-      keyMap["q"] = () => setView("list");
-      keyMap["Escape"] = () => setView("list");
-      keyMap["?"] = toggleKeybinds;
-      break;
-    case "debug":
-      keyMap["q"] = () => setView("list");
-      keyMap["Escape"] = () => setView("list");
-      keyMap["?"] = toggleKeybinds;
-      break;
+
+  // Sidebar-focused shortcuts (override main shortcuts when sidebar has focus)
+  if (sidebarFocused) {
+    keyMap["j"] = () => setSidebarHighlight((i) => Math.min(i + 1, projectCount - 1));
+    keyMap["k"] = () => setSidebarHighlight((i) => Math.max(i - 1, 0));
+    keyMap["Enter"] = () => selectProjectByIndex(sidebarHighlight);
+    keyMap["Escape"] = () => setSidebarFocused(false);
+    keyMap["l"] = () => setSidebarFocused(false);
+    keyMap["ArrowRight"] = () => setSidebarFocused(false);
+    keyMap["?"] = toggleKeybinds;
+  } else {
+    switch (view) {
+      case "list":
+        keyMap["j"] = () => setSelectedMessage((i) => Math.max(i - 1, 0));
+        keyMap["k"] = () => setSelectedMessage((i) => Math.min(i + 1, session.messages.length - 1));
+        keyMap["G"] = jumpToTop;
+        keyMap["g"] = jumpToBottom;
+        keyMap["Tab"] = () => toggleMessage(selectedMessage);
+        keyMap["Enter"] = () => {
+          if (session.messages.length > 0) openDetail(selectedMessage);
+        };
+        keyMap["e"] = expandAll;
+        keyMap["c"] = collapseAll;
+        keyMap["t"] = openTeams;
+        keyMap["d"] = openDebug;
+        keyMap["q"] = goToSessions;
+        keyMap["Escape"] = goToSessions;
+        keyMap["s"] = goToSessions;
+        keyMap["?"] = toggleKeybinds;
+        keyMap["h"] = () => setSidebarFocused(true);
+        keyMap["ArrowLeft"] = () => setSidebarFocused(true);
+        break;
+      case "detail":
+        // j/k/Tab/Enter/q/Escape handled by MessageDetail's own useKeyboard
+        keyMap["?"] = toggleKeybinds;
+        break;
+      case "picker":
+        keyMap["j"] = () =>
+          setPickerSelectedIndex((i) => Math.min(i + 1, picker.sessions.length - 1));
+        keyMap["k"] = () => setPickerSelectedIndex((i) => Math.max(i - 1, 0));
+        keyMap["Enter"] = () => {
+          if (picker.sessions[pickerSelectedIndex])
+            handleSelectSession(picker.sessions[pickerSelectedIndex]);
+        };
+        keyMap["q"] = backToList;
+        keyMap["Escape"] = backToList;
+        keyMap["?"] = toggleKeybinds;
+        keyMap["h"] = () => setSidebarFocused(true);
+        keyMap["ArrowLeft"] = () => setSidebarFocused(true);
+        break;
+      case "team":
+        keyMap["q"] = () => setView("list");
+        keyMap["Escape"] = () => setView("list");
+        keyMap["?"] = toggleKeybinds;
+        break;
+      case "debug":
+        keyMap["q"] = () => setView("list");
+        keyMap["Escape"] = () => setView("list");
+        keyMap["?"] = toggleKeybinds;
+        break;
+    }
   }
   useKeyboard(keyMap);
 
@@ -313,13 +352,18 @@ export function App() {
         <ProjectTree
           sessions={picker.allSessions}
           selectedProject={selectedProject}
+          highlightedIndex={sidebarHighlight}
+          isFocused={sidebarFocused}
           onSelectProject={handleSelectProject}
           onRefresh={refreshSessions}
+          onFocus={() => setSidebarFocused(true)}
           refreshing={picker.loading}
           style={{ width: sidebarWidth, minWidth: 100, maxWidth: 400 }}
         />
         <ResizeHandle onResize={setSidebarWidth} />
-        <div className="main-content">{renderView()}</div>
+        <div className="main-content" onClick={() => setSidebarFocused(false)}>
+          {renderView()}
+        </div>
       </div>
 
       {/* Keybind bar */}

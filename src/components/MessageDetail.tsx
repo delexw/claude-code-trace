@@ -13,6 +13,7 @@ import {
 import { getModelColor, getTeamColor, toolCategoryIcons } from "../lib/theme";
 import { useToggleSet } from "../hooks/useToggleSet";
 import { useScrollToSelected } from "../hooks/useScrollToSelected";
+import { useKeyboard } from "../hooks/useKeyboard";
 import { BackButton } from "./BackButton";
 import { PopoutModal } from "./PopoutModal";
 import { ResizeHandle } from "./ResizeHandle";
@@ -22,6 +23,15 @@ import { ResizeHandle } from "./ResizeHandle";
 type PanelEntry =
   | { kind: "agent-list"; item: DisplayItem; key: string }
   | { kind: "agent-detail"; item: DisplayItem; msg: DisplayMessage; key: string };
+
+/** Imperative handle exposed by each navigable column */
+interface ColumnNav {
+  moveUp: () => void;
+  moveDown: () => void;
+  toggle: () => void;
+  enter: () => void;
+  itemCount: () => number;
+}
 
 interface MessageDetailProps {
   message: DisplayMessage;
@@ -34,8 +44,10 @@ export function MessageDetail({ message: msg, onBack }: MessageDetailProps) {
   const scrollRef = useScrollToSelected(selectedItem);
   const [panelStack, setPanelStack] = useState<PanelEntry[]>([]);
   const [columnWidths, setColumnWidths] = useState<(number | null)[]>([null]);
+  const [focusedColumn, setFocusedColumn] = useState(0); // 0 = main, 1+ = panel index + 1
   const bodyRef = useRef<HTMLDivElement>(null);
   const savedScroll = useRef<number | null>(null);
+  const panelRefs = useRef<Map<number, ColumnNav>>(new Map());
 
   useLayoutEffect(() => {
     if (savedScroll.current != null && bodyRef.current) {
@@ -56,12 +68,17 @@ export function MessageDetail({ message: msg, onBack }: MessageDetailProps) {
       savedScroll.current = bodyRef.current.scrollTop;
     }
     setPanelStack((prev) => {
-      if (prev.length === 1 && prev[0].kind === "agent-list" && prev[0].item.agent_id === item.agent_id) {
+      if (
+        prev.length === 1 &&
+        prev[0].kind === "agent-list" &&
+        prev[0].item.agent_id === item.agent_id
+      ) {
         return [];
       }
       return [{ kind: "agent-list", item, key: item.agent_id || `panel-0` }];
     });
     setColumnWidths((prev) => [prev[0]]);
+    setFocusedColumn(1);
   }, []);
 
   const openSubagentAt = useCallback((depth: number, item: DisplayItem) => {
@@ -71,6 +88,7 @@ export function MessageDetail({ message: msg, onBack }: MessageDetailProps) {
       return next;
     });
     setColumnWidths((prev) => prev.slice(0, depth + 2));
+    setFocusedColumn(depth + 2);
   }, []);
 
   const openDetailAt = useCallback((depth: number, detailMsg: DisplayMessage) => {
@@ -78,7 +96,12 @@ export function MessageDetail({ message: msg, onBack }: MessageDetailProps) {
       const entry = prev[depth];
       if (!entry || entry.kind !== "agent-list") return prev;
       const next = prev.slice(0, depth);
-      next.push({ kind: "agent-detail", item: entry.item, msg: detailMsg, key: entry.key + ":detail" });
+      next.push({
+        kind: "agent-detail",
+        item: entry.item,
+        msg: detailMsg,
+        key: entry.key + ":detail",
+      });
       return next;
     });
   }, []);
@@ -88,7 +111,11 @@ export function MessageDetail({ message: msg, onBack }: MessageDetailProps) {
       const entry = prev[depth];
       if (!entry || entry.kind !== "agent-detail") return prev;
       const next = prev.slice(0, depth);
-      next.push({ kind: "agent-list", item: entry.item, key: entry.item.agent_id || `panel-${depth}` });
+      next.push({
+        kind: "agent-list",
+        item: entry.item,
+        key: entry.item.agent_id || `panel-${depth}`,
+      });
       return next;
     });
   }, []);
@@ -96,6 +123,7 @@ export function MessageDetail({ message: msg, onBack }: MessageDetailProps) {
   const closeAt = useCallback((depth: number) => {
     setPanelStack((prev) => prev.slice(0, depth));
     setColumnWidths((prev) => prev.slice(0, depth + 1));
+    setFocusedColumn((prev) => Math.min(prev, depth));
   }, []);
 
   const setColumnWidth = useCallback((colIndex: number, width: number) => {
@@ -109,12 +137,83 @@ export function MessageDetail({ message: msg, onBack }: MessageDetailProps) {
 
   const handleItemClick = (index: number, item: DisplayItem) => {
     setSelectedItem(index);
+    setFocusedColumn(0);
     if (item.subagent_messages.length > 0) {
       openSubagentFromMain(item);
     } else {
       toggleItem(index);
     }
   };
+
+  const registerPanelNav = useCallback((depth: number, nav: ColumnNav | null) => {
+    if (nav) {
+      panelRefs.current.set(depth, nav);
+    } else {
+      panelRefs.current.delete(depth);
+    }
+  }, []);
+
+  // Single keyboard handler for all columns
+  const detailKeyMap: Record<string, () => void> = {};
+
+  // Navigation: j/k/Tab/Enter dispatch to the focused column
+  detailKeyMap["j"] = () => {
+    if (focusedColumn === 0) {
+      setSelectedItem((i) => Math.min(i + 1, msg.items.length - 1));
+    } else {
+      const nav = panelRefs.current.get(focusedColumn - 1);
+      nav?.moveDown();
+    }
+  };
+  detailKeyMap["k"] = () => {
+    if (focusedColumn === 0) {
+      setSelectedItem((i) => Math.max(i - 1, 0));
+    } else {
+      const nav = panelRefs.current.get(focusedColumn - 1);
+      nav?.moveUp();
+    }
+  };
+  detailKeyMap["Tab"] = () => {
+    if (focusedColumn === 0) {
+      const item = msg.items[selectedItem];
+      if (item) handleItemClick(selectedItem, item);
+    } else {
+      const nav = panelRefs.current.get(focusedColumn - 1);
+      nav?.toggle();
+    }
+  };
+  detailKeyMap["Enter"] = () => {
+    if (focusedColumn === 0) {
+      const item = msg.items[selectedItem];
+      if (item && item.subagent_messages.length > 0) {
+        openSubagentFromMain(item);
+      } else if (item) {
+        toggleItem(selectedItem);
+      }
+    } else {
+      const nav = panelRefs.current.get(focusedColumn - 1);
+      nav?.enter();
+    }
+  };
+
+  // h/l or ArrowLeft/ArrowRight to switch focused column
+  detailKeyMap["h"] = () => setFocusedColumn((c) => Math.max(0, c - 1));
+  detailKeyMap["ArrowLeft"] = () => setFocusedColumn((c) => Math.max(0, c - 1));
+  detailKeyMap["l"] = () => setFocusedColumn((c) => Math.min(panelStack.length, c + 1));
+  detailKeyMap["ArrowRight"] = () => setFocusedColumn((c) => Math.min(panelStack.length, c + 1));
+
+  // q = go back to list
+  detailKeyMap["q"] = onBack;
+  // Escape = close rightmost panel, or go back
+  detailKeyMap["Escape"] = () => {
+    if (panelStack.length > 0) {
+      closeAt(panelStack.length - 1);
+    } else {
+      onBack();
+    }
+  };
+
+  useKeyboard(detailKeyMap);
 
   const mainWidthStyle =
     hasPanels && columnWidths[0]
@@ -123,7 +222,11 @@ export function MessageDetail({ message: msg, onBack }: MessageDetailProps) {
 
   return (
     <div className={`message-detail${hasPanels ? " message-detail--split" : ""}`}>
-      <div className="message-detail__main" style={mainWidthStyle}>
+      <div
+        className={`message-detail__main${focusedColumn === 0 ? " message-detail__main--focused" : ""}`}
+        style={mainWidthStyle}
+        onClick={() => setFocusedColumn(0)}
+      >
         <div className="message-detail__header">
           <BackButton onClick={onBack} />
           <span className="message-detail__title">
@@ -187,9 +290,8 @@ export function MessageDetail({ message: msg, onBack }: MessageDetailProps) {
 
       {panelStack.map((entry, depth) => {
         const colWidth = columnWidths[depth + 1];
-        const widthStyle = colWidth
-          ? { flex: `0 0 ${colWidth}px`, maxWidth: colWidth }
-          : undefined;
+        const widthStyle = colWidth ? { flex: `0 0 ${colWidth}px`, maxWidth: colWidth } : undefined;
+        const isFocused = focusedColumn === depth + 1;
 
         return (
           <PanelColumn
@@ -197,12 +299,15 @@ export function MessageDetail({ message: msg, onBack }: MessageDetailProps) {
             entry={entry}
             depth={depth}
             style={widthStyle}
+            isFocused={isFocused}
             panelStack={panelStack}
             onOpenDetail={(detailMsg) => openDetailAt(depth, detailMsg)}
             onBackToList={() => backToListAt(depth)}
             onOpenSubagent={(item) => openSubagentAt(depth, item)}
             onClose={() => closeAt(depth)}
             onResize={(w) => setColumnWidth(depth, w)}
+            onFocus={() => setFocusedColumn(depth + 1)}
+            onRegisterNav={(nav) => registerPanelNav(depth, nav)}
           />
         );
       })}
@@ -216,24 +321,30 @@ interface PanelColumnProps {
   entry: PanelEntry;
   depth: number;
   style?: React.CSSProperties;
+  isFocused: boolean;
   panelStack: PanelEntry[];
   onOpenDetail: (msg: DisplayMessage) => void;
   onBackToList: () => void;
   onOpenSubagent: (item: DisplayItem) => void;
   onClose: () => void;
   onResize: (width: number) => void;
+  onFocus: () => void;
+  onRegisterNav: (nav: ColumnNav | null) => void;
 }
 
 function PanelColumn({
   entry,
   depth,
   style,
+  isFocused,
   panelStack,
   onOpenDetail,
   onBackToList,
   onOpenSubagent,
   onClose,
   onResize,
+  onFocus,
+  onRegisterNav,
 }: PanelColumnProps) {
   return (
     <>
@@ -242,19 +353,25 @@ function PanelColumn({
         <AgentListColumn
           item={entry.item}
           style={style}
+          isFocused={isFocused}
           onOpenDetail={onOpenDetail}
           onClose={onClose}
+          onFocus={onFocus}
+          onRegisterNav={onRegisterNav}
         />
       ) : (
         <AgentDetailColumn
           item={entry.item}
           msg={entry.msg}
           style={style}
+          isFocused={isFocused}
           depth={depth}
           panelStack={panelStack}
           onOpenSubagent={onOpenSubagent}
           onBack={onBackToList}
           onClose={onClose}
+          onFocus={onFocus}
+          onRegisterNav={onRegisterNav}
         />
       )}
     </>
@@ -266,11 +383,22 @@ function PanelColumn({
 interface AgentListColumnProps {
   item: DisplayItem;
   style?: React.CSSProperties;
+  isFocused: boolean;
   onOpenDetail: (msg: DisplayMessage) => void;
   onClose: () => void;
+  onFocus: () => void;
+  onRegisterNav: (nav: ColumnNav | null) => void;
 }
 
-function AgentListColumn({ item, style, onOpenDetail, onClose }: AgentListColumnProps) {
+function AgentListColumn({
+  item,
+  style,
+  isFocused,
+  onOpenDetail,
+  onClose,
+  onFocus,
+  onRegisterNav,
+}: AgentListColumnProps) {
   const messages = item.subagent_messages;
   const [selectedMsg, setSelectedMsg] = useState(messages.length - 1);
   const { set: expandedSet, toggle: toggleMsg } = useToggleSet();
@@ -280,14 +408,39 @@ function AgentListColumn({ item, style, onOpenDetail, onClose }: AgentListColumn
 
   const handleClick = useCallback(
     (index: number) => {
+      onFocus();
       if (selectedMsg === index) {
         toggleMsg(index);
       } else {
         setSelectedMsg(index);
       }
     },
-    [selectedMsg, toggleMsg],
+    [selectedMsg, toggleMsg, onFocus],
   );
+
+  // Expose navigation to parent via callback ref
+  const navRef = useRef<ColumnNav>({
+    moveUp: () => setSelectedMsg((i) => Math.max(i - 1, 0)),
+    moveDown: () => setSelectedMsg((i) => Math.min(i + 1, messages.length - 1)),
+    toggle: () => toggleMsg(selectedMsg),
+    enter: () => {
+      if (messages[selectedMsg]) onOpenDetail(messages[selectedMsg]);
+    },
+    itemCount: () => messages.length,
+  });
+  navRef.current.moveUp = () => setSelectedMsg((i) => Math.max(i - 1, 0));
+  navRef.current.moveDown = () => setSelectedMsg((i) => Math.min(i + 1, messages.length - 1));
+  navRef.current.toggle = () => toggleMsg(selectedMsg);
+  navRef.current.enter = () => {
+    if (messages[selectedMsg]) onOpenDetail(messages[selectedMsg]);
+  };
+  navRef.current.itemCount = () => messages.length;
+
+  // Register/unregister nav on mount/unmount
+  useLayoutEffect(() => {
+    onRegisterNav(navRef.current);
+    return () => onRegisterNav(null);
+  }, [onRegisterNav]);
 
   const reversed = useMemo(() => {
     const indices: number[] = [];
@@ -297,8 +450,14 @@ function AgentListColumn({ item, style, onOpenDetail, onClose }: AgentListColumn
 
   return (
     <div
-      className="agent-panel"
-      style={{ ...(panelColor ? { background: `${panelColor}08` } : {}), ...style } as React.CSSProperties}
+      className={`agent-panel${isFocused ? " agent-panel--focused" : ""}`}
+      style={
+        {
+          ...(panelColor ? { background: `${panelColor}08` } : {}),
+          ...style,
+        } as React.CSSProperties
+      }
+      onClick={onFocus}
     >
       <AgentPanelHeader item={item} panelColor={panelColor} onClose={onClose} />
       <div className="agent-panel__content">
@@ -343,22 +502,28 @@ interface AgentDetailColumnProps {
   item: DisplayItem;
   msg: DisplayMessage;
   style?: React.CSSProperties;
+  isFocused: boolean;
   depth: number;
   panelStack: PanelEntry[];
   onOpenSubagent: (item: DisplayItem) => void;
   onBack: () => void;
   onClose: () => void;
+  onFocus: () => void;
+  onRegisterNav: (nav: ColumnNav | null) => void;
 }
 
 function AgentDetailColumn({
   item,
   msg,
   style,
+  isFocused,
   depth,
   panelStack,
   onOpenSubagent,
   onBack,
   onClose,
+  onFocus,
+  onRegisterNav,
 }: AgentDetailColumnProps) {
   const { set: expandedItems, toggle: toggleItem } = useToggleSet();
   const [selectedItem, setSelectedItem] = useState(0);
@@ -371,10 +536,10 @@ function AgentDetailColumn({
   const hasItems = msg.items.length > 0;
 
   // Check if a deeper panel is open for a given agent_id
-  const activeAgentId =
-    depth + 1 < panelStack.length ? panelStack[depth + 1].item.agent_id : null;
+  const activeAgentId = depth + 1 < panelStack.length ? panelStack[depth + 1].item.agent_id : null;
 
   const handleItemClick = (index: number, clickedItem: DisplayItem) => {
+    onFocus();
     setSelectedItem(index);
     if (clickedItem.subagent_messages.length > 0) {
       onOpenSubagent(clickedItem);
@@ -383,10 +548,45 @@ function AgentDetailColumn({
     }
   };
 
+  // Expose navigation to parent via callback ref
+  const navRef = useRef<ColumnNav>({
+    moveUp: () => {},
+    moveDown: () => {},
+    toggle: () => {},
+    enter: () => {},
+    itemCount: () => msg.items.length,
+  });
+  navRef.current.moveUp = () => setSelectedItem((i) => Math.max(i - 1, 0));
+  navRef.current.moveDown = () => setSelectedItem((i) => Math.min(i + 1, msg.items.length - 1));
+  navRef.current.toggle = () => {
+    const it = msg.items[selectedItem];
+    if (it) handleItemClick(selectedItem, it);
+  };
+  navRef.current.enter = () => {
+    const it = msg.items[selectedItem];
+    if (it && it.subagent_messages.length > 0) {
+      onOpenSubagent(it);
+    } else if (it) {
+      toggleItem(selectedItem);
+    }
+  };
+  navRef.current.itemCount = () => msg.items.length;
+
+  useLayoutEffect(() => {
+    onRegisterNav(navRef.current);
+    return () => onRegisterNav(null);
+  }, [onRegisterNav]);
+
   return (
     <div
-      className="agent-panel"
-      style={{ ...(panelColor ? { background: `${panelColor}08` } : {}), ...style } as React.CSSProperties}
+      className={`agent-panel${isFocused ? " agent-panel--focused" : ""}`}
+      style={
+        {
+          ...(panelColor ? { background: `${panelColor}08` } : {}),
+          ...style,
+        } as React.CSSProperties
+      }
+      onClick={onFocus}
     >
       <AgentPanelHeader item={item} panelColor={panelColor} onClose={onClose} />
       <div className="agent-panel__content">
