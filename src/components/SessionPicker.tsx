@@ -6,7 +6,6 @@ import {
   formatDuration,
   formatExactTime,
   formatCost,
-  estimateCost,
   truncate,
   groupByDate,
   shortModel,
@@ -45,13 +44,7 @@ export function SessionPicker({
     let cost = 0;
     for (const s of sessions) {
       tokens += s.total_tokens;
-      cost += estimateCost(
-        s.input_tokens,
-        s.output_tokens,
-        s.cache_read_tokens,
-        s.cache_creation_tokens,
-        s.model,
-      );
+      cost += s.cost_usd;
     }
     return { totalTokens: tokens, totalCost: cost };
   }, [sessions]);
@@ -103,13 +96,7 @@ export function SessionPicker({
               const isSelected = idx === selectedIndex;
               const model = shortModel(session.model);
               const modelClr = getModelColor(session.model);
-              const sessionCost = estimateCost(
-                session.input_tokens,
-                session.output_tokens,
-                session.cache_read_tokens,
-                session.cache_creation_tokens,
-                session.model,
-              );
+              const sessionCost = session.cost_usd;
 
               return (
                 <div

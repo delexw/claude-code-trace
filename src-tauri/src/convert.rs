@@ -85,6 +85,7 @@ pub struct SessionTotals {
     pub output_tokens: i64,
     pub cache_read_tokens: i64,
     pub cache_creation_tokens: i64,
+    pub cost_usd: f64,
     pub model: String,
 }
 

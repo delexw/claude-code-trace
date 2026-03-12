@@ -50,6 +50,7 @@ pub async fn load_session(path: String) -> Result<LoadResult, String> {
         output_tokens: scanned.output_tokens,
         cache_read_tokens: scanned.cache_read_tokens,
         cache_creation_tokens: scanned.cache_creation_tokens,
+        cost_usd: scanned.cost_usd,
         model: scanned.model,
     };
 

@@ -137,6 +137,9 @@ function DetailItem({
           {name}
         </span>
         <span className="detail-item__summary">{summary}</span>
+        {item.subagent_process?.id && (
+          <span className="detail-item__agent-id">{item.subagent_process.id}</span>
+        )}
         <span className="detail-item__right">
           {item.duration_ms > 0 && (
             <span className="detail-item__duration">{formatDuration(item.duration_ms)}</span>

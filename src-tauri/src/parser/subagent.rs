@@ -10,6 +10,64 @@ use super::chunk::*;
 use super::classify::*;
 use super::entry::parse_entry;
 
+/// Per-requestId token snapshot used for deduplication across JSONL files.
+#[derive(Clone)]
+pub struct TokenSnapshot {
+    pub input: i64,
+    pub output: i64,
+    pub cache_read: i64,
+    pub cache_create: i64,
+    pub model: String,
+}
+
+/// Pricing per million tokens for a model family.
+struct ModelPricing {
+    input: f64,
+    output: f64,
+    cache_read: f64,
+    cache_write: f64,
+}
+
+fn pricing_for_model(model: &str) -> ModelPricing {
+    let m = model.to_lowercase();
+    if m.contains("opus") {
+        ModelPricing { input: 5.0, output: 25.0, cache_read: 0.5, cache_write: 6.25 }
+    } else if m.contains("haiku") {
+        ModelPricing { input: 1.0, output: 5.0, cache_read: 0.1, cache_write: 1.25 }
+    } else {
+        // Default to sonnet
+        ModelPricing { input: 3.0, output: 15.0, cache_read: 0.3, cache_write: 3.75 }
+    }
+}
+
+/// Compute cost in USD from a set of token snapshots, pricing each by its model.
+pub fn estimate_cost_from_snapshots(
+    request_tokens: &std::collections::HashMap<String, TokenSnapshot>,
+    fallback: &TokenSnapshot,
+) -> f64 {
+    let mut cost = 0.0;
+
+    // Fallback tokens (no requestId) — use fallback.model for pricing.
+    if fallback.input + fallback.output + fallback.cache_read + fallback.cache_create > 0 {
+        let p = pricing_for_model(&fallback.model);
+        cost += (fallback.input as f64 * p.input
+            + fallback.output as f64 * p.output
+            + fallback.cache_read as f64 * p.cache_read
+            + fallback.cache_create as f64 * p.cache_write)
+            / 1_000_000.0;
+    }
+
+    for snap in request_tokens.values() {
+        let p = pricing_for_model(&snap.model);
+        cost += (snap.input as f64 * p.input
+            + snap.output as f64 * p.output
+            + snap.cache_read as f64 * p.cache_read
+            + snap.cache_create as f64 * p.cache_write)
+            / 1_000_000.0;
+    }
+    cost
+}
+
 /// SubagentProcess holds a parsed subagent and its computed metadata.
 #[derive(Debug, Clone, Serialize)]
 pub struct SubagentProcess {
@@ -90,10 +148,6 @@ pub fn discover_subagents(session_path: &str) -> Result<Vec<SubagentProcess>, St
             .strip_suffix(".jsonl")
             .unwrap_or("")
             .to_string();
-
-        if agent_id.starts_with("acompact") {
-            continue;
-        }
 
         let file_path = subagents_dir.join(&name).to_string_lossy().to_string();
 
@@ -583,3 +637,113 @@ fn extract_team_specs(chunks: &[Chunk]) -> Vec<(String, String)> {
     specs
 }
 
+/// Resolve the subagents directory for a session file path.
+pub fn subagents_dir(session_path: &str) -> std::path::PathBuf {
+    let dir = Path::new(session_path)
+        .parent()
+        .unwrap_or(Path::new(""));
+    let base = Path::new(session_path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("");
+    dir.join(base).join("subagents")
+}
+
+/// Returns true if any subagent JSONL file was recently modified (within staleness threshold).
+pub fn has_recently_active_subagents(session_path: &str) -> bool {
+    let dir = subagents_dir(session_path);
+    let entries = match fs::read_dir(&dir) {
+        Ok(e) => e,
+        Err(_) => return false,
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !name.starts_with("agent-") || !name.ends_with(".jsonl") {
+            continue;
+        }
+        if let Ok(meta) = entry.metadata() {
+            if let Ok(modified) = meta.modified() {
+                if super::ongoing::apply_staleness(true, modified) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Scan all subagent JSONL files, inserting token snapshots into a shared
+/// `request_tokens` map for global requestId deduplication with the main session.
+/// Entries without a requestId are accumulated directly into `fallback`.
+pub fn scan_subagent_tokens_into(
+    session_path: &str,
+    request_tokens: &mut HashMap<String, TokenSnapshot>,
+    fallback: &mut TokenSnapshot,
+) {
+    let dir = subagents_dir(session_path);
+    let entries = match fs::read_dir(&dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !name.starts_with("agent-") || !name.ends_with(".jsonl") {
+            continue;
+        }
+        // Include compact files — they contain requestIds from compacted
+        // conversation data that may no longer be in the main session file.
+        let file_path = dir.join(&name);
+        let f = match fs::File::open(&file_path) {
+            Ok(f) => f,
+            Err(_) => continue,
+        };
+        let reader = BufReader::new(f);
+        for line_result in reader.lines() {
+            let line = match line_result {
+                Ok(l) => l,
+                Err(_) => break,
+            };
+            let raw: Value = match serde_json::from_str(&line) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            let entry_type = raw.get("type").and_then(|v| v.as_str()).unwrap_or("");
+            if entry_type != "assistant" {
+                continue;
+            }
+            let model = raw
+                .get("message")
+                .and_then(|m| m.get("model"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            if model == "<synthetic>" {
+                continue;
+            }
+            let usage = match raw.get("message").and_then(|m| m.get("usage")) {
+                Some(u) => u,
+                None => continue,
+            };
+            let inp = usage.get("input_tokens").and_then(|v| v.as_i64()).unwrap_or(0);
+            let out = usage.get("output_tokens").and_then(|v| v.as_i64()).unwrap_or(0);
+            let cr = usage.get("cache_read_input_tokens").and_then(|v| v.as_i64()).unwrap_or(0);
+            let cc = usage.get("cache_creation_input_tokens").and_then(|v| v.as_i64()).unwrap_or(0);
+            if inp + out + cr + cc == 0 {
+                continue;
+            }
+            let snap = TokenSnapshot {
+                input: inp, output: out, cache_read: cr, cache_create: cc,
+                model: model.to_string(),
+            };
+            let req_id = raw.get("requestId").and_then(|v| v.as_str()).unwrap_or("");
+            if !req_id.is_empty() {
+                request_tokens.insert(req_id.to_string(), snap);
+            } else {
+                fallback.input += inp;
+                fallback.output += out;
+                fallback.cache_read += cr;
+                fallback.cache_create += cc;
+            }
+        }
+    }
+}

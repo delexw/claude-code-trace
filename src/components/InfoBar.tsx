@@ -5,7 +5,6 @@ import {
   shortMode,
   contextPercent,
   formatTokens,
-  estimateCost,
   formatCost,
 } from "../lib/format";
 import { getContextColor, spinnerFrames } from "../lib/theme";
@@ -15,6 +14,7 @@ interface InfoBarProps {
   gitInfo: GitInfo | null;
   messages: DisplayMessage[];
   sessionTotals: SessionTotals;
+  sessionPath: string;
   ongoing: boolean;
   animFrame?: number;
 }
@@ -24,26 +24,18 @@ export function InfoBar({
   gitInfo,
   messages,
   sessionTotals,
+  sessionPath,
   ongoing,
   animFrame = 0,
 }: InfoBarProps) {
   const projectName = shortPath(meta.cwd, meta.git_branch);
+  const sessionId = sessionPath.split("/").pop()?.replace(".jsonl", "") || "";
   const branch = gitInfo?.branch || meta.git_branch;
   const dirty = gitInfo?.dirty ?? false;
   const mode = meta.permission_mode;
   const ctxPct = useMemo(() => contextPercent(messages), [messages]);
 
-  const totalCost = useMemo(
-    () =>
-      estimateCost(
-        sessionTotals.input_tokens,
-        sessionTotals.output_tokens,
-        sessionTotals.cache_read_tokens,
-        sessionTotals.cache_creation_tokens,
-        sessionTotals.model,
-      ),
-    [sessionTotals],
-  );
+  const totalCost = sessionTotals.cost_usd;
 
   const pillClass =
     mode === "bypassPermissions"
@@ -57,6 +49,10 @@ export function InfoBar({
   return (
     <div className="info-bar">
       {projectName && <span className="info-bar__project">{projectName}</span>}
+
+      {sessionId && (
+        <span className="info-bar__session-id">{sessionId}</span>
+      )}
 
       {branch && (
         <span className={`info-bar__branch${dirty ? " info-bar__branch--dirty" : ""}`}>

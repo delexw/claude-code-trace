@@ -162,6 +162,7 @@ pub fn start_session_watcher(
                         output_tokens: scanned.output_tokens,
                         cache_read_tokens: scanned.cache_read_tokens,
                         cache_creation_tokens: scanned.cache_creation_tokens,
+                        cost_usd: scanned.cost_usd,
                         model: scanned.model,
                     };
 
@@ -211,7 +212,7 @@ pub fn start_picker_watcher(
 
         for dir in &dirs_clone {
             if Path::new(dir).exists() {
-                let _ = watcher.watch(Path::new(dir), RecursiveMode::NonRecursive);
+                let _ = watcher.watch(Path::new(dir), RecursiveMode::Recursive);
             }
         }
 
@@ -220,7 +221,7 @@ pub fn start_picker_watcher(
             |event| {
                 event.paths.iter().any(|p| {
                     let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                    name.ends_with(".jsonl") && !name.starts_with("agent_")
+                    name.ends_with(".jsonl")
                 })
             },
             signal_tx,

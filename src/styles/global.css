@@ -200,6 +200,7 @@ body {
 }
 
 .project-tree__ongoing-dot {
+  display: inline-block;
   width: 6px;
   height: 6px;
   border-radius: 50%;
@@ -223,6 +224,13 @@ body {
 .info-bar__project {
   font-weight: 600;
   color: var(--text-primary);
+}
+
+.info-bar__session-id {
+  color: var(--dim);
+  font-size: 11px;
+  font-family: var(--font-mono, monospace);
+  opacity: 0.6;
 }
 
 .info-bar__branch {
@@ -1070,6 +1078,13 @@ body {
 
 .detail-item__tokens {
   color: var(--text-dim);
+}
+
+.detail-item__agent-id {
+  color: var(--dim);
+  font-size: 11px;
+  font-family: var(--font-mono, monospace);
+  opacity: 0.6;
 }
 
 .detail-item__body {

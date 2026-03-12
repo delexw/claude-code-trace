@@ -24,6 +24,7 @@ pub struct SessionInfo {
     pub output_tokens: i64,
     pub cache_read_tokens: i64,
     pub cache_creation_tokens: i64,
+    pub cost_usd: f64,
     pub duration_ms: i64,
     pub model: String,
     pub cwd: String,
@@ -168,6 +169,9 @@ pub fn discover_project_sessions(project_dir: &str) -> Result<Vec<SessionInfo>, 
                 }
             }
         }
+        if !is_ongoing {
+            is_ongoing = super::subagent::has_recently_active_subagents(&path);
+        }
 
         let session_id = name.trim_end_matches(".jsonl").to_string();
 
@@ -183,6 +187,7 @@ pub fn discover_project_sessions(project_dir: &str) -> Result<Vec<SessionInfo>, 
             output_tokens: meta.output_tokens,
             cache_read_tokens: meta.cache_read_tokens,
             cache_creation_tokens: meta.cache_creation_tokens,
+            cost_usd: meta.cost_usd,
             duration_ms: meta.duration_ms,
             model: meta.model,
             cwd: meta.cwd,
@@ -211,7 +216,10 @@ pub fn discover_all_project_sessions(project_dirs: &[String]) -> Result<Vec<Sess
 /// Public for use by SessionCache.
 pub fn session_info_from_metadata(path: &str, mod_time: std::time::SystemTime, meta: SessionMetadata) -> SessionInfo {
     let mod_time_chrono: DateTime<Utc> = mod_time.into();
-    let is_ongoing = super::ongoing::apply_staleness(meta.is_ongoing, mod_time);
+    let mut is_ongoing = super::ongoing::apply_staleness(meta.is_ongoing, mod_time);
+    if !is_ongoing {
+        is_ongoing = super::subagent::has_recently_active_subagents(path);
+    }
     let name = std::path::Path::new(path)
         .file_name()
         .and_then(|n| n.to_str())
@@ -230,6 +238,7 @@ pub fn session_info_from_metadata(path: &str, mod_time: std::time::SystemTime, m
         output_tokens: meta.output_tokens,
         cache_read_tokens: meta.cache_read_tokens,
         cache_creation_tokens: meta.cache_creation_tokens,
+        cost_usd: meta.cost_usd,
         duration_ms: meta.duration_ms,
         model: meta.model,
         cwd: meta.cwd,
@@ -287,6 +296,7 @@ pub(crate) struct SessionMetadata {
     pub(crate) output_tokens: i64,
     pub(crate) cache_read_tokens: i64,
     pub(crate) cache_creation_tokens: i64,
+    pub(crate) cost_usd: f64,
     pub(crate) duration_ms: i64,
     pub(crate) model: String,
     pub(crate) cwd: String,
@@ -305,6 +315,7 @@ impl Default for SessionMetadata {
             output_tokens: 0,
             cache_read_tokens: 0,
             cache_creation_tokens: 0,
+            cost_usd: 0.0,
             duration_ms: 0,
             model: String::new(),
             cwd: String::new(),
@@ -335,13 +346,7 @@ pub(crate) fn scan_session_metadata(path: &str) -> SessionMetadata {
     let mut awaiting_ai_group = false;
 
     // Token deduplication: track per-requestId usage, sum once at end.
-    #[derive(Clone)]
-    struct TokenSnapshot {
-        input: i64,
-        output: i64,
-        cache_read: i64,
-        cache_create: i64,
-    }
+    use super::subagent::TokenSnapshot;
     let mut request_tokens: HashMap<String, TokenSnapshot> = HashMap::new();
 
     // Ongoing detection state (one-pass, ported from jsonl.ts).
@@ -456,6 +461,7 @@ pub(crate) fn scan_session_metadata(path: &str) -> SessionMetadata {
                             .get("cache_creation_input_tokens")
                             .and_then(|v| v.as_i64())
                             .unwrap_or(0),
+                        model: model_str.to_string(),
                     };
 
                     let request_id = raw
@@ -555,78 +561,17 @@ pub(crate) fn scan_session_metadata(path: &str) -> SessionMetadata {
         meta.permission_mode = "default".to_string();
     }
 
-    // --- Scan subagent JSONL files into the SAME request_tokens map (global dedup) ---
-    {
-        let dir = std::path::Path::new(path).parent().unwrap_or(std::path::Path::new(""));
-        let base = std::path::Path::new(path)
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("");
-        let subagents_dir = dir.join(base).join("subagents");
-        if let Ok(entries) = fs::read_dir(&subagents_dir) {
-            for entry in entries.flatten() {
-                let name = entry.file_name().to_string_lossy().to_string();
-                if !name.starts_with("agent-") || !name.ends_with(".jsonl") {
-                    continue;
-                }
-                if name.starts_with("agent-acompact") {
-                    continue;
-                }
-                let file_path = subagents_dir.join(&name);
-                let sf = match fs::File::open(&file_path) {
-                    Ok(f) => f,
-                    Err(_) => continue,
-                };
-                let sub_reader = BufReader::new(sf);
-                for sub_line in sub_reader.lines() {
-                    let sub_line = match sub_line {
-                        Ok(l) => l,
-                        Err(_) => break,
-                    };
-                    let sub_raw: Value = match serde_json::from_str(&sub_line) {
-                        Ok(v) => v,
-                        Err(_) => continue,
-                    };
-                    let sub_type = sub_raw.get("type").and_then(|v| v.as_str()).unwrap_or("");
-                    if sub_type != "assistant" {
-                        continue;
-                    }
-                    let sub_model = sub_raw
-                        .get("message")
-                        .and_then(|m| m.get("model"))
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("");
-                    if sub_model == "<synthetic>" {
-                        continue;
-                    }
-                    let sub_usage = match sub_raw.get("message").and_then(|m| m.get("usage")) {
-                        Some(u) => u,
-                        None => continue,
-                    };
-                    let snap = TokenSnapshot {
-                        input: sub_usage.get("input_tokens").and_then(|v| v.as_i64()).unwrap_or(0),
-                        output: sub_usage.get("output_tokens").and_then(|v| v.as_i64()).unwrap_or(0),
-                        cache_read: sub_usage.get("cache_read_input_tokens").and_then(|v| v.as_i64()).unwrap_or(0),
-                        cache_create: sub_usage.get("cache_creation_input_tokens").and_then(|v| v.as_i64()).unwrap_or(0),
-                    };
-                    if snap.input + snap.output + snap.cache_read + snap.cache_create == 0 {
-                        continue;
-                    }
-                    let req_id = sub_raw.get("requestId").and_then(|v| v.as_str()).unwrap_or("");
-                    if !req_id.is_empty() {
-                        // Same global map — deduplicates across main + subagent files.
-                        request_tokens.insert(req_id.to_string(), snap);
-                    } else {
-                        meta.total_tokens += snap.input + snap.output + snap.cache_read + snap.cache_create;
-                        meta.input_tokens += snap.input;
-                        meta.output_tokens += snap.output;
-                        meta.cache_read_tokens += snap.cache_read;
-                        meta.cache_creation_tokens += snap.cache_create;
-                    }
-                }
-            }
-        }
-    }
+    // Scan subagent JSONL files into the same request_tokens map (global requestId dedup).
+    let mut fallback = TokenSnapshot {
+        input: 0, output: 0, cache_read: 0, cache_create: 0,
+        model: String::new(),
+    };
+    super::subagent::scan_subagent_tokens_into(path, &mut request_tokens, &mut fallback);
+    meta.total_tokens += fallback.input + fallback.output + fallback.cache_read + fallback.cache_create;
+    meta.input_tokens += fallback.input;
+    meta.output_tokens += fallback.output;
+    meta.cache_read_tokens += fallback.cache_read;
+    meta.cache_creation_tokens += fallback.cache_create;
 
     // Finalize token totals: sum the last-seen usage per requestId.
     for snap in request_tokens.values() {
@@ -636,6 +581,9 @@ pub(crate) fn scan_session_metadata(path: &str) -> SessionMetadata {
         meta.cache_read_tokens += snap.cache_read;
         meta.cache_creation_tokens += snap.cache_create;
     }
+
+    // Compute cost per-model (accurate for mixed opus/haiku/sonnet sessions).
+    meta.cost_usd = super::subagent::estimate_cost_from_snapshots(&request_tokens, &fallback);
 
     // Finalize ongoing detection.
     if last_ending_index.is_none() {
