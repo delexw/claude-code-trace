@@ -1195,6 +1195,159 @@ body {
   animation: pulse 1.5s ease-in-out infinite;
 }
 
+.detail-item__popout-btn {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 0 4px;
+  border-radius: 3px;
+  line-height: 1;
+}
+
+.detail-item__popout-btn:hover {
+  color: var(--accent);
+  background: var(--bg-hover);
+}
+
+/* ---- Popout Modal ---- */
+
+.popout-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.popout-modal {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+  max-width: 95vw;
+  max-height: 95vh;
+}
+
+.popout-modal__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.popout-modal__icon {
+  font-size: 14px;
+}
+
+.popout-modal__name {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.popout-modal__summary {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.popout-modal__agent-id {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.popout-modal__right {
+  margin-left: auto;
+  display: flex;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.popout-modal__close {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  margin-left: 8px;
+}
+
+.popout-modal__close:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.popout-modal__body {
+  flex: 1;
+  overflow: auto;
+  padding: 4px 0;
+  min-height: 0;
+  min-width: 0;
+}
+
+.popout-modal__body .detail-item__body {
+  max-height: none;
+  overflow: visible;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.popout-modal__body .detail-item__text {
+  max-height: none;
+  overflow: visible;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.popout-modal__body .detail-item__json {
+  max-height: none;
+  overflow: visible;
+}
+
+.popout-modal__body .detail-item__json pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.popout-modal__body .detail-item__section {
+  width: 100%;
+  min-width: 0;
+}
+
+.popout-modal__resize-handle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+}
+
+.popout-modal__resize-handle::after {
+  content: "";
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid var(--text-dim);
+  border-bottom: 2px solid var(--text-dim);
+  opacity: 0.5;
+}
+
 /* ---- Team Board ---- */
 
 .team-board {

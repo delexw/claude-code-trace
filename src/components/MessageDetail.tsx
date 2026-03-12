@@ -14,6 +14,7 @@ import { getModelColor, getTeamColor, toolCategoryIcons } from "../lib/theme";
 import { useToggleSet } from "../hooks/useToggleSet";
 import { useScrollToSelected } from "../hooks/useScrollToSelected";
 import { BackButton } from "./BackButton";
+import { PopoutModal } from "./PopoutModal";
 
 interface MessageDetailProps {
   message: DisplayMessage;
@@ -401,6 +402,7 @@ function DetailItem({
   const summary = getItemSummary(item);
   const teamClr = item.team_color ? getTeamColor(item.team_color) : undefined;
   const hasAgentMessages = item.item_type === "Subagent" && item.subagent_messages.length > 0;
+  const [popout, setPopout] = useState(false);
 
   return (
     <div
@@ -422,9 +424,34 @@ function DetailItem({
           {item.duration_ms > 0 && <span className="detail-item__duration">{formatDuration(item.duration_ms)}</span>}
           {item.token_count > 0 && <span className="detail-item__tokens">{formatTokens(item.token_count)} tok</span>}
           {item.subagent_ongoing && <span className="detail-item__ongoing-dot" />}
+          {isExpanded && (
+            <button
+              className="detail-item__popout-btn"
+              onClick={(e) => { e.stopPropagation(); setPopout(true); }}
+              title="Pop out to larger view"
+            >
+              {"\u2197"}
+            </button>
+          )}
         </span>
       </div>
       {isExpanded && <DetailItemBody item={item} />}
+      {popout && (
+        <PopoutModal onClose={() => setPopout(false)} header={
+          <>
+            <span className="popout-modal__icon">{icon}</span>
+            <span className="popout-modal__name">{name}</span>
+            {item.tool_summary && <span className="popout-modal__summary">{item.tool_summary}</span>}
+            {item.agent_id && <span className="popout-modal__agent-id">{item.agent_id}</span>}
+            <span className="popout-modal__right">
+              {item.duration_ms > 0 && <span>{formatDuration(item.duration_ms)}</span>}
+              {item.token_count > 0 && <span>{formatTokens(item.token_count)} tok</span>}
+            </span>
+          </>
+        }>
+          <DetailItemBody item={item} />
+        </PopoutModal>
+      )}
     </div>
   );
 }
