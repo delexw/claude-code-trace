@@ -126,14 +126,69 @@ body {
   overflow: hidden;
 }
 
+/* ---- Resize Handle ---- */
+
+.resize-handle {
+  flex-shrink: 0;
+  background: transparent;
+  position: relative;
+  z-index: 5;
+}
+
+.resize-handle--horizontal {
+  width: 5px;
+  cursor: col-resize;
+  margin: 0 -2px;
+}
+
+.resize-handle--horizontal::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 2px;
+  width: 1px;
+  background: var(--border);
+  transition: background 0.15s;
+}
+
+.resize-handle--horizontal:hover::after,
+.resize-handle--horizontal:active::after {
+  background: var(--accent);
+  width: 2px;
+  left: 1px;
+}
+
+.resize-handle--vertical {
+  height: 5px;
+  cursor: row-resize;
+  margin: -2px 0;
+}
+
+.resize-handle--vertical::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 2px;
+  height: 1px;
+  background: var(--border);
+  transition: background 0.15s;
+}
+
+.resize-handle--vertical:hover::after,
+.resize-handle--vertical:active::after {
+  background: var(--accent);
+  height: 2px;
+  top: 1px;
+}
+
 /* ---- Project Tree Sidebar ---- */
 
 .project-tree {
-  width: 200px;
-  min-width: 200px;
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  border-right: 1px solid var(--border);
   background: var(--bg);
   overflow: hidden;
 }
@@ -954,17 +1009,29 @@ body {
   font-size: 11px;
   color: var(--text-dim);
   margin-left: auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex-shrink: 1;
 }
 
 .message-detail__body {
   flex: 1;
   overflow-y: auto;
   padding: 16px;
+  min-width: 0;
 }
 
 .message-detail__content {
   max-width: 900px;
   margin: 0 auto;
+  min-width: 0;
+}
+
+.agent-panel .message-detail__content,
+.agent-detail .message-detail__content {
+  max-width: none;
 }
 
 .message-detail__text {
@@ -1085,10 +1152,12 @@ body {
   font-weight: 600;
   font-size: 12px;
   color: var(--text-primary);
+  flex-shrink: 0;
 }
 
 .detail-item__summary {
   flex: 1;
+  min-width: 0;
   font-size: 11px;
   color: var(--text-dim);
   white-space: nowrap;
@@ -1118,12 +1187,19 @@ body {
   font-size: 11px;
   font-family: var(--font-mono, monospace);
   opacity: 0.6;
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .detail-item__body {
   padding: 10px;
   border-top: 1px solid var(--border);
   font-size: 12px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .detail-item__section {
@@ -1729,9 +1805,8 @@ body {
 }
 
 .message-detail--split .message-detail__main {
-  flex: 0 0 45%;
-  max-width: 45%;
-  border-right: 1px solid var(--border);
+  flex: 0 0 35%;
+  min-width: 250px;
 }
 
 /* Ensure body scrolls within main pane */
@@ -1752,10 +1827,11 @@ body {
   border-left: 2px solid #63b3ed;
 }
 
+
 /* Agent panel — reuses .message classes, tinted background */
 .agent-panel {
-  flex: 1;
-  min-width: 0;
+  flex: 1 1 55%;
+  min-width: 300px;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -1798,12 +1874,18 @@ body {
   color: #63b3ed;
 }
 
+
 .agent-panel__id {
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-dim);
   opacity: 0.7;
   margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex-shrink: 1;
 }
 
 .agent-panel__desc {
@@ -1848,6 +1930,7 @@ body {
   background: rgba(99, 179, 237, 0.08);
 }
 
+
 /* Agent detail (nested detail inside panel) — split for deeper nesting */
 .agent-detail {
   display: flex;
@@ -1877,7 +1960,6 @@ body {
 }
 
 .agent-detail--split .agent-detail__main {
-  flex: 0 0 50%;
-  max-width: 50%;
-  border-right: 1px solid var(--border);
+  flex: 0 0 35%;
+  min-width: 220px;
 }

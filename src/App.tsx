@@ -14,6 +14,7 @@ import { InfoBar } from "./components/InfoBar";
 import { KeybindBar } from "./components/KeybindBar";
 import { ViewToolbar } from "./components/ViewToolbar";
 import { ProjectTree } from "./components/ProjectTree";
+import { ResizeHandle } from "./components/ResizeHandle";
 
 export function App() {
   const [view, setView] = useState<ViewState>("picker");
@@ -22,6 +23,7 @@ export function App() {
   const [showKeybinds, setShowKeybinds] = useState(true);
   const [animFrame, setAnimFrame] = useState(0);
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
+  const [sidebarWidth, setSidebarWidth] = useState(180);
 
   const handleSelectProject = useCallback(
     (project: string | null) => {
@@ -314,7 +316,9 @@ export function App() {
           onSelectProject={handleSelectProject}
           onRefresh={refreshSessions}
           refreshing={picker.loading}
+          style={{ width: sidebarWidth, minWidth: 100, maxWidth: 400 }}
         />
+        <ResizeHandle onResize={setSidebarWidth} />
         <div className="main-content">{renderView()}</div>
       </div>
 

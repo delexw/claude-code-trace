@@ -151,7 +151,7 @@ function MessageItem({
 
   const contentPreview = isExpanded ? msg.content : truncate(firstLine(msg.content), 200);
 
-  const subagentCount = msg.items.filter((it) => it.item_type === "Subagent").length;
+  const subagentCount = msg.items.filter((it) => it.item_type === "Subagent" || it.subagent_messages.length > 0).length;
   const hasStats =
     msg.tokens_raw > 0 || msg.tool_call_count > 0 || msg.thinking_count > 0 || msg.duration_ms > 0 || subagentCount > 0;
 

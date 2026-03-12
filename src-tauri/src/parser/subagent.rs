@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
@@ -302,13 +302,24 @@ pub fn link_subagents(
     parent_chunks: &[Chunk],
     parent_session_path: &str,
 ) -> HashMap<String, String> {
-    let links = scan_agent_links(parent_session_path);
+    let mut links = scan_agent_links(parent_session_path);
+
+    // Also scan subagent files for skill_progress entries (Skill forked execution).
+    for proc in processes.iter() {
+        let skill_links = scan_skill_progress_links(&proc.file_path);
+        for (agent_id, tool_id) in skill_links {
+            links.agent_to_tool_id.entry(agent_id).or_insert(tool_id);
+        }
+    }
 
     if processes.is_empty() {
         return links.tool_id_to_color;
     }
 
-    // Collect all Task tool DisplayItems from parent chunks.
+    // Collect tool IDs that have known agent links (for ToolCall items like Skill).
+    let linked_tool_ids: HashSet<&str> = links.agent_to_tool_id.values().map(|s| s.as_str()).collect();
+
+    // Collect all Subagent DisplayItems + ToolCall items that have agent links.
     let mut task_items: Vec<&DisplayItem> = Vec::new();
     for c in parent_chunks {
         if c.chunk_type != ChunkType::AI {
@@ -316,6 +327,8 @@ pub fn link_subagents(
         }
         for item in &c.items {
             if item.item_type == DisplayItemType::Subagent {
+                task_items.push(item);
+            } else if item.item_type == DisplayItemType::ToolCall && linked_tool_ids.contains(item.tool_id.as_str()) {
                 task_items.push(item);
             }
         }
@@ -342,6 +355,12 @@ pub fn link_subagents(
                 proc.subagent_type = item.subagent_type.clone();
                 matched_procs.insert(proc.id.clone(), true);
                 matched_tools.insert(tool_id.clone(), true);
+            } else {
+                // Tool ID not in parent chunks (e.g. Skill inside a subagent).
+                // Set parent_task_id anyway so convert_display_items can link
+                // when processing the subagent's nested chunks.
+                proc.parent_task_id = tool_id.clone();
+                matched_procs.insert(proc.id.clone(), true);
             }
         }
     }
@@ -485,6 +504,61 @@ fn scan_agent_links(session_path: &str) -> AgentLinkData {
     }
 
     data
+}
+
+/// Scan a JSONL file for skill_progress entries to find Skill → agent links.
+/// Returns agentId → tool_use_id mapping.
+fn scan_skill_progress_links(file_path: &str) -> HashMap<String, String> {
+    let mut result: HashMap<String, String> = HashMap::new();
+
+    let f = match fs::File::open(file_path) {
+        Ok(f) => f,
+        Err(_) => return result,
+    };
+    let reader = BufReader::new(f);
+
+    // Track the last Skill tool_use_id seen
+    let mut last_skill_tool_id = String::new();
+
+    for line_result in reader.lines() {
+        let line = match line_result {
+            Ok(l) => l,
+            Err(_) => break,
+        };
+
+        // Quick check before full parse
+        if line.contains("\"Skill\"") {
+            // Look for tool_use with name=Skill
+            if let Ok(v) = serde_json::from_str::<Value>(&line) {
+                if let Some(content) = v.pointer("/message/content") {
+                    if let Some(arr) = content.as_array() {
+                        for block in arr {
+                            if block.get("type").and_then(|v| v.as_str()) == Some("tool_use")
+                                && block.get("name").and_then(|v| v.as_str()) == Some("Skill")
+                            {
+                                if let Some(id) = block.get("id").and_then(|v| v.as_str()) {
+                                    last_skill_tool_id = id.to_string();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } else if line.contains("skill_progress") && !last_skill_tool_id.is_empty() {
+            if let Ok(v) = serde_json::from_str::<Value>(&line) {
+                let data_type = v.pointer("/data/type").and_then(|v| v.as_str()).unwrap_or("");
+                if data_type == "skill_progress" {
+                    if let Some(agent_id) = v.pointer("/data/agentId").and_then(|v| v.as_str()) {
+                        if !agent_id.is_empty() && !result.contains_key(agent_id) {
+                            result.insert(agent_id.to_string(), last_skill_tool_id.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    result
 }
 
 fn extract_first_tool_result_id(entry: &super::entry::Entry) -> String {

@@ -8,6 +8,7 @@ interface ProjectTreeProps {
   onSelectProject: (project: string | null) => void;
   onRefresh: () => void;
   refreshing?: boolean;
+  style?: React.CSSProperties;
 }
 
 interface ProjectNode {
@@ -17,7 +18,7 @@ interface ProjectNode {
   hasOngoing: boolean;
 }
 
-export function ProjectTree({ sessions, selectedProject, onSelectProject, onRefresh, refreshing }: ProjectTreeProps) {
+export function ProjectTree({ sessions, selectedProject, onSelectProject, onRefresh, refreshing, style }: ProjectTreeProps) {
   const projects = useMemo(() => {
     const map = new Map<string, { name: string; count: number; ongoing: boolean }>();
 
@@ -51,7 +52,7 @@ export function ProjectTree({ sessions, selectedProject, onSelectProject, onRefr
   }, [sessions]);
 
   return (
-    <div className="project-tree">
+    <div className="project-tree" style={style}>
       <div className="project-tree__header">
         <span>Projects</span>
         <button

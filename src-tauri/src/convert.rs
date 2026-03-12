@@ -196,6 +196,7 @@ fn convert_display_items(
     items: &[DisplayItem],
     subagents: &[SubagentProcess],
     color_by_tool_id: &HashMap<String, String>,
+    pool_idx: &mut usize,
 ) -> Vec<FrontendDisplayItem> {
     if items.is_empty() {
         return Vec::new();
@@ -232,18 +233,17 @@ fn convert_display_items(
                 subagent_messages: Vec::new(),
             };
 
-            // Link subagent process if available.
-            if it.item_type == DisplayItemType::Subagent {
+            // Link subagent process if available (Subagent items and ToolCall items like Skill).
+            if it.item_type == DisplayItemType::Subagent || !it.tool_id.is_empty() {
                 if let Some(proc) = proc_by_task_id.get(it.tool_id.as_str()) {
                     fdi.subagent_ongoing = is_subagent_ongoing(proc);
                     fdi.agent_id = proc.id.clone();
                     if !proc.teammate_color.is_empty() {
                         fdi.team_color = proc.teammate_color.clone();
                     }
-                    // Convert subagent's chunks into nested messages.
-                    let empty_procs: Vec<SubagentProcess> = Vec::new();
-                    let empty_colors: HashMap<String, String> = HashMap::new();
-                    fdi.subagent_messages = chunks_to_messages(&proc.chunks, &empty_procs, &empty_colors);
+                    // Convert subagent's chunks into nested messages,
+                    // passing all processes so nested agents (e.g. Skill forked execution) can link.
+                    fdi.subagent_messages = chunks_to_messages(&proc.chunks, subagents, color_by_tool_id);
                 }
                 // Fallback: apply team color from toolUseResult data.
                 if fdi.team_color.is_empty() {
@@ -257,21 +257,11 @@ fn convert_display_items(
         })
         .collect();
 
-    // Assign pool colors to subagents without a team color.
-    let claimed: HashSet<String> = out.iter().map(|di| di.team_color.clone()).filter(|c| !c.is_empty()).collect();
-    let pool_colors: Vec<&str> = TEAM_COLOR_POOL
-        .iter()
-        .filter(|name| !claimed.contains(**name))
-        .copied()
-        .collect();
-
-    if !pool_colors.is_empty() {
-        let mut pool_idx = 0;
-        for di in &mut out {
-            if di.item_type == "Subagent" && di.team_color.is_empty() {
-                di.team_color = pool_colors[pool_idx % pool_colors.len()].to_string();
-                pool_idx += 1;
-            }
+    // Assign pool colors to agent items without a team color.
+    for di in &mut out {
+        if di.team_color.is_empty() && (!di.subagent_messages.is_empty() || di.item_type == "Subagent") {
+            di.team_color = TEAM_COLOR_POOL[*pool_idx % TEAM_COLOR_POOL.len()].to_string();
+            *pool_idx += 1;
         }
     }
 
@@ -285,6 +275,7 @@ pub fn chunks_to_messages(
     color_by_tool_id: &HashMap<String, String>,
 ) -> Vec<DisplayMessage> {
     let mut msgs = Vec::new();
+    let mut pool_idx: usize = 0;
 
     for c in chunks {
         match c.chunk_type {
@@ -342,7 +333,7 @@ pub fn chunks_to_messages(
                     cache_creation_tokens: c.usage.cache_creation_tokens,
                     context_tokens: c.usage.input_tokens + c.usage.cache_read_tokens + c.usage.cache_creation_tokens,
                     duration_ms: c.duration_ms,
-                    items: convert_display_items(&c.items, subagents, color_by_tool_id),
+                    items: convert_display_items(&c.items, subagents, color_by_tool_id, &mut pool_idx),
                     last_output: frontend_lo,
                     is_error: false,
                     teammate_spawns: team_spawns,

@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useRef } from "react";
+import { useState, useMemo, useCallback, useRef, useLayoutEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import type { DisplayMessage, DisplayItem } from "../types";
 import {
@@ -15,6 +15,7 @@ import { useToggleSet } from "../hooks/useToggleSet";
 import { useScrollToSelected } from "../hooks/useScrollToSelected";
 import { BackButton } from "./BackButton";
 import { PopoutModal } from "./PopoutModal";
+import { ResizeHandle } from "./ResizeHandle";
 
 interface MessageDetailProps {
   message: DisplayMessage;
@@ -26,6 +27,17 @@ export function MessageDetail({ message: msg, onBack }: MessageDetailProps) {
   const [selectedItem, setSelectedItem] = useState(0);
   const scrollRef = useScrollToSelected(selectedItem);
   const [agentPanel, setAgentPanel] = useState<DisplayItem | null>(null);
+  const [mainWidth, setMainWidth] = useState<number | null>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const savedScroll = useRef<number | null>(null);
+
+  // Restore scroll position after layout shift from panel open/close
+  useLayoutEffect(() => {
+    if (savedScroll.current != null && bodyRef.current) {
+      bodyRef.current.scrollTop = savedScroll.current;
+      savedScroll.current = null;
+    }
+  }, [agentPanel]);
 
   const model = msg.model ? shortModel(msg.model) : "";
   const modelColor = msg.model ? getModelColor(msg.model) : undefined;
@@ -35,7 +47,11 @@ export function MessageDetail({ message: msg, onBack }: MessageDetailProps) {
 
   const handleItemClick = (index: number, item: DisplayItem) => {
     setSelectedItem(index);
-    if (item.item_type === "Subagent" && item.subagent_messages.length > 0) {
+    if (item.subagent_messages.length > 0) {
+      // Save scroll position before layout shift
+      if (bodyRef.current) {
+        savedScroll.current = bodyRef.current.scrollTop;
+      }
       setAgentPanel(agentPanel?.agent_id === item.agent_id ? null : item);
     } else {
       toggleItem(index);
@@ -44,7 +60,7 @@ export function MessageDetail({ message: msg, onBack }: MessageDetailProps) {
 
   return (
     <div className={`message-detail${agentPanel ? " message-detail--split" : ""}`}>
-      <div className="message-detail__main">
+      <div className="message-detail__main" style={agentPanel && mainWidth ? { flex: `0 0 ${mainWidth}px`, maxWidth: mainWidth } : undefined}>
         <div className="message-detail__header">
           <BackButton onClick={onBack} />
           <span className="message-detail__title">
@@ -71,7 +87,7 @@ export function MessageDetail({ message: msg, onBack }: MessageDetailProps) {
           </span>
         </div>
 
-        <div className="message-detail__body">
+        <div className="message-detail__body" ref={bodyRef}>
           <div className="message-detail__content">
             {msg.content && (
               <div className="message-detail__text">
@@ -90,7 +106,7 @@ export function MessageDetail({ message: msg, onBack }: MessageDetailProps) {
                     index={idx}
                     isSelected={idx === selectedItem}
                     isExpanded={item.item_type !== "Subagent" && expandedItems.has(idx)}
-                    isAgentActive={agentPanel?.agent_id === item.agent_id && item.item_type === "Subagent" && !!item.agent_id}
+                    isAgentActive={agentPanel?.agent_id === item.agent_id && !!item.agent_id}
                     onToggle={handleItemClick}
                     onSelect={setSelectedItem}
                   />
@@ -102,7 +118,10 @@ export function MessageDetail({ message: msg, onBack }: MessageDetailProps) {
       </div>
 
       {agentPanel && (
-        <AgentPanel item={agentPanel} onClose={() => setAgentPanel(null)} />
+        <>
+          <ResizeHandle onResize={setMainWidth} />
+          <AgentPanel item={agentPanel} onClose={() => setAgentPanel(null)} />
+        </>
       )}
     </div>
   );
@@ -132,6 +151,7 @@ function AgentPanel({ item, onClose }: AgentPanelProps) {
 
   const listRef = useRef<HTMLDivElement>(null);
   const selectedRef = useScrollToSelected(selectedMsg);
+  const panelColor = item.team_color ? getTeamColor(item.team_color) : undefined;
 
   const handleClick = useCallback(
     (index: number) => {
@@ -151,12 +171,12 @@ function AgentPanel({ item, onClose }: AgentPanelProps) {
   }, [messages.length]);
 
   return (
-    <div className="agent-panel">
-      <div className="agent-panel__header">
+    <div className="agent-panel" style={panelColor ? { background: `${panelColor}08` } as React.CSSProperties : undefined}>
+      <div className="agent-panel__header" style={panelColor ? { background: `${panelColor}10` } : undefined}>
         <button className="agent-panel__close" onClick={onClose}>{"\u2715"}</button>
         <span className="agent-panel__icon">{"\u{1F916}"}</span>
-        <span className="agent-panel__type">{item.subagent_type || "Subagent"}</span>
-        {item.subagent_desc && <span className="agent-panel__desc">{item.subagent_desc}</span>}
+        <span className="agent-panel__type" style={panelColor ? { color: panelColor } : undefined}>{item.subagent_type || item.tool_name || "Subagent"}</span>
+        {(item.subagent_desc || item.tool_summary) && <span className="agent-panel__desc">{item.subagent_desc || item.tool_summary}</span>}
         {item.agent_id && <span className="agent-panel__id">{item.agent_id}</span>}
         <span className="agent-panel__stats">
           {item.duration_ms > 0 && <span>{formatDuration(item.duration_ms)}</span>}
@@ -231,7 +251,7 @@ function AgentMessageItem({ ref, msg, index, isSelected, isExpanded, onClick, on
   const time = formatExactTime(msg.timestamp);
   const contentPreview = isExpanded ? msg.content : truncate(firstLine(msg.content), 200);
 
-  const subagentCount = msg.items.filter((it) => it.item_type === "Subagent").length;
+  const subagentCount = msg.items.filter((it) => it.item_type === "Subagent" || it.subagent_messages.length > 0).length;
   const hasStats = msg.tokens_raw > 0 || msg.tool_call_count > 0 || msg.thinking_count > 0 || msg.duration_ms > 0 || subagentCount > 0;
 
   return (
@@ -314,6 +334,16 @@ function AgentDetailView({ msg, onBack }: { msg: DisplayMessage; onBack: () => v
   const [selectedItem, setSelectedItem] = useState(0);
   const scrollRef = useScrollToSelected(selectedItem);
   const [nestedAgent, setNestedAgent] = useState<DisplayItem | null>(null);
+  const [nestedMainWidth, setNestedMainWidth] = useState<number | null>(null);
+  const nestedBodyRef = useRef<HTMLDivElement>(null);
+  const nestedSavedScroll = useRef<number | null>(null);
+
+  useLayoutEffect(() => {
+    if (nestedSavedScroll.current != null && nestedBodyRef.current) {
+      nestedBodyRef.current.scrollTop = nestedSavedScroll.current;
+      nestedSavedScroll.current = null;
+    }
+  }, [nestedAgent]);
 
   const model = msg.model ? shortModel(msg.model) : "";
   const modelColor = msg.model ? getModelColor(msg.model) : undefined;
@@ -322,7 +352,10 @@ function AgentDetailView({ msg, onBack }: { msg: DisplayMessage; onBack: () => v
 
   const handleItemClick = (index: number, item: DisplayItem) => {
     setSelectedItem(index);
-    if (item.item_type === "Subagent" && item.subagent_messages.length > 0) {
+    if (item.subagent_messages.length > 0) {
+      if (nestedBodyRef.current) {
+        nestedSavedScroll.current = nestedBodyRef.current.scrollTop;
+      }
       setNestedAgent(nestedAgent?.agent_id === item.agent_id ? null : item);
     } else {
       toggleItem(index);
@@ -331,7 +364,7 @@ function AgentDetailView({ msg, onBack }: { msg: DisplayMessage; onBack: () => v
 
   return (
     <div className={`agent-detail${nestedAgent ? " agent-detail--split" : ""}`}>
-      <div className="agent-detail__main">
+      <div className="agent-detail__main" style={nestedAgent && nestedMainWidth ? { flex: `0 0 ${nestedMainWidth}px`, maxWidth: nestedMainWidth } : undefined}>
         <div className="message-detail__header">
           <BackButton onClick={onBack} />
           <span className="message-detail__title">
@@ -345,7 +378,7 @@ function AgentDetailView({ msg, onBack }: { msg: DisplayMessage; onBack: () => v
           </span>
         </div>
 
-        <div className="message-detail__body">
+        <div className="message-detail__body" ref={nestedBodyRef}>
           <div className="message-detail__content">
             {msg.content && (
               <div className="message-detail__text">
@@ -363,7 +396,7 @@ function AgentDetailView({ msg, onBack }: { msg: DisplayMessage; onBack: () => v
                     index={idx}
                     isSelected={idx === selectedItem}
                     isExpanded={item.item_type !== "Subagent" && expandedItems.has(idx)}
-                    isAgentActive={nestedAgent?.agent_id === item.agent_id && item.item_type === "Subagent" && !!item.agent_id}
+                    isAgentActive={nestedAgent?.agent_id === item.agent_id && !!item.agent_id}
                     onToggle={handleItemClick}
                     onSelect={setSelectedItem}
                   />
@@ -375,7 +408,10 @@ function AgentDetailView({ msg, onBack }: { msg: DisplayMessage; onBack: () => v
       </div>
 
       {nestedAgent && (
-        <AgentPanel item={nestedAgent} onClose={() => setNestedAgent(null)} />
+        <>
+          <ResizeHandle onResize={setNestedMainWidth} />
+          <AgentPanel item={nestedAgent} onClose={() => setNestedAgent(null)} />
+        </>
       )}
     </div>
   );
@@ -401,19 +437,20 @@ function DetailItem({
   const name = getItemName(item);
   const summary = getItemSummary(item);
   const teamClr = item.team_color ? getTeamColor(item.team_color) : undefined;
-  const hasAgentMessages = item.item_type === "Subagent" && item.subagent_messages.length > 0;
+  const hasAgentMessages = item.subagent_messages.length > 0;
   const [popout, setPopout] = useState(false);
 
   return (
     <div
       ref={ref}
       className={`detail-item${isSelected ? " detail-item--selected" : ""}${item.tool_error ? " detail-item--error" : ""}${isAgentActive ? " detail-item--agent-active" : ""}`}
+      style={isAgentActive && teamClr ? { background: `${teamClr}12`, borderLeftColor: teamClr } : undefined}
     >
       <div
         className="detail-item__header"
         onClick={() => { onSelect(index); onToggle(index, item); }}
       >
-        <span className={`detail-item__chevron${isExpanded ? " detail-item__chevron--expanded" : ""}${hasAgentMessages ? " detail-item__chevron--panel" : ""}`}>
+        <span className={`detail-item__chevron${isExpanded ? " detail-item__chevron--expanded" : ""}${hasAgentMessages ? " detail-item__chevron--panel" : ""}`} style={hasAgentMessages && teamClr ? { color: teamClr } : undefined}>
           {hasAgentMessages ? "\u25A8" : "\u25B6"}
         </span>
         <span className="detail-item__icon">{icon}</span>
