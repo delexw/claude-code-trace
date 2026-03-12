@@ -140,9 +140,8 @@ export function MessageDetail({ message: msg, onBack }: MessageDetailProps) {
     setFocusedColumn(0);
     if (item.subagent_messages.length > 0) {
       openSubagentFromMain(item);
-    } else {
-      toggleItem(index);
     }
+    toggleItem(index);
   };
 
   const registerPanelNav = useCallback((depth: number, nav: ColumnNav | null) => {
@@ -276,7 +275,7 @@ export function MessageDetail({ message: msg, onBack }: MessageDetailProps) {
                     item={item}
                     index={idx}
                     isSelected={idx === selectedItem}
-                    isExpanded={item.item_type !== "Subagent" && expandedItems.has(idx)}
+                    isExpanded={expandedItems.has(idx)}
                     isAgentActive={
                       panelStack.length > 0 &&
                       panelStack[0].item.agent_id === item.agent_id &&
@@ -629,7 +628,7 @@ function AgentDetailColumn({
                     item={di}
                     index={idx}
                     isSelected={idx === selectedItem}
-                    isExpanded={di.item_type !== "Subagent" && expandedItems.has(idx)}
+                    isExpanded={expandedItems.has(idx)}
                     isAgentActive={activeAgentId === di.agent_id && !!di.agent_id}
                     onToggle={handleItemClick}
                     onSelect={setSelectedItem}
@@ -980,6 +979,12 @@ function DetailItemBody({ item }: { item: DisplayItem }) {
               <div className="detail-item__section-title">Description</div>
               <div className="detail-item__text">{item.subagent_desc}</div>
             </div>
+          )}
+          {item.subagent_prompt && (
+            <details className="detail-item__section detail-item__prompt-fold">
+              <summary className="detail-item__section-title">Prompt</summary>
+              <div className="detail-item__text">{item.subagent_prompt}</div>
+            </details>
           )}
           {item.text && (
             <div className="detail-item__section">

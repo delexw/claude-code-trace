@@ -39,6 +39,7 @@ pub struct FrontendDisplayItem {
     pub hook_name: String,
     pub hook_command: String,
     pub is_orphan: bool,
+    pub subagent_prompt: String,
 }
 
 /// Frontend last output.
@@ -244,6 +245,7 @@ fn convert_display_items(
                 hook_name: it.hook_name.clone(),
                 hook_command: it.hook_command.clone(),
                 is_orphan: it.is_orphan,
+                subagent_prompt: String::new(),
             };
 
             // Link subagent process if available (Subagent items and ToolCall items like Skill).
@@ -251,6 +253,7 @@ fn convert_display_items(
                 if let Some(proc) = proc_by_task_id.get(it.tool_id.as_str()) {
                     fdi.subagent_ongoing = is_subagent_ongoing(proc);
                     fdi.agent_id = proc.id.clone();
+                    fdi.subagent_prompt = proc.prompt.clone();
                     if !proc.teammate_color.is_empty() {
                         fdi.team_color = proc.teammate_color.clone();
                     }
@@ -532,5 +535,63 @@ mod tests {
     #[test]
     fn team_color_pool_has_8_entries() {
         assert_eq!(TEAM_COLOR_POOL.len(), 8);
+    }
+
+    // ---- subagent_prompt propagation test ----
+
+    #[test]
+    fn subagent_prompt_is_propagated_from_process() {
+        use crate::parser::chunk::{Chunk, ChunkType, DisplayItem, DisplayItemType};
+        use crate::parser::subagent::SubagentProcess;
+
+        let tool_id = "toolu_test123".to_string();
+        let items = vec![DisplayItem {
+            item_type: DisplayItemType::Subagent,
+            tool_id: tool_id.clone(),
+            tool_name: "Agent".to_string(),
+            subagent_type: "general-purpose".to_string(),
+            subagent_desc: "test agent".to_string(),
+            ..Default::default()
+        }];
+
+        let proc = SubagentProcess {
+            id: "agent-abc".to_string(),
+            parent_task_id: tool_id,
+            prompt: "Base directory for this skill: /path/to/skill\n\n# My Skill".to_string(),
+            ..Default::default()
+        };
+        let subagents = vec![proc];
+        let color_map = std::collections::HashMap::new();
+        let mut pool_idx = 0;
+
+        let result = convert_display_items(&items, &subagents, &color_map, &mut pool_idx);
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(
+            result[0].subagent_prompt,
+            "Base directory for this skill: /path/to/skill\n\n# My Skill"
+        );
+        assert_eq!(result[0].agent_id, "agent-abc");
+    }
+
+    #[test]
+    fn subagent_prompt_is_empty_when_no_process_linked() {
+        use crate::parser::chunk::{DisplayItem, DisplayItemType};
+
+        let items = vec![DisplayItem {
+            item_type: DisplayItemType::Subagent,
+            tool_id: "toolu_orphan".to_string(),
+            tool_name: "Agent".to_string(),
+            ..Default::default()
+        }];
+
+        let subagents = vec![];
+        let color_map = std::collections::HashMap::new();
+        let mut pool_idx = 0;
+
+        let result = convert_display_items(&items, &subagents, &color_map, &mut pool_idx);
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].subagent_prompt, "");
     }
 }

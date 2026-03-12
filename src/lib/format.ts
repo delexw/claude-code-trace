@@ -223,3 +223,12 @@ export function projectKey(path: string): string {
   const match = path.match(/\/\.claude\/projects\/([^/]+)/);
   return match ? match[1] : "unknown";
 }
+
+/**
+ * Decode a Claude projects directory key (e.g. "-Users-yang-liu-Envato-others-my-project")
+ * back to a path and return the last segment via shortPath.
+ */
+export function projectDisplayName(key: string): string {
+  const path = key.replace(/^-/, "/").replaceAll("-", "/");
+  return shortPath(path) || key;
+}

@@ -15,6 +15,7 @@ import {
   firstLine,
   formatJson,
   projectKey,
+  projectDisplayName,
 } from "./format";
 
 // ---------------------------------------------------------------------------
@@ -514,5 +515,26 @@ describe("projectKey", () => {
 
   it("handles project key with special characters", () => {
     expect(projectKey("/Users/x/.claude/projects/proj_123-abc/session.jsonl")).toBe("proj_123-abc");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// projectDisplayName
+// ---------------------------------------------------------------------------
+describe("projectDisplayName", () => {
+  it("decodes typical project key to last segment", () => {
+    expect(projectDisplayName("-Users-yang-liu-Envato-others-my-project")).toBe("project");
+  });
+
+  it("decodes scheduler key", () => {
+    expect(projectDisplayName("-Users-yang-liu--claude-scheduler")).toBe("scheduler");
+  });
+
+  it("decodes .claude key", () => {
+    expect(projectDisplayName("-Users-yang-liu-.claude")).toBe(".claude");
+  });
+
+  it("returns key as fallback for empty decode", () => {
+    expect(projectDisplayName("")).toBe("");
   });
 });

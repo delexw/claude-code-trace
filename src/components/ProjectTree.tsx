@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import type { SessionInfo } from "../types";
-import { shortPath, projectKey } from "../lib/format";
+import { shortPath, projectKey, projectDisplayName } from "../lib/format";
 import { useScrollToSelected } from "../hooks/useScrollToSelected";
 
 interface ProjectTreeProps {
@@ -33,7 +33,7 @@ function buildProjectNodes(sessions: SessionInfo[]): ProjectNode[] {
       if (s.is_ongoing) existing.ongoing = true;
     } else {
       map.set(key, {
-        name: shortPath(s.cwd) || key,
+        name: shortPath(s.cwd) || projectDisplayName(key),
         count: 1,
         ongoing: s.is_ongoing,
       });

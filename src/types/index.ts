@@ -44,6 +44,7 @@ export interface DisplayItem {
   token_count: number;
   subagent_type: string;
   subagent_desc: string;
+  subagent_prompt: string;
   team_member_name: string;
   teammate_id: string;
   team_color: string;

@@ -167,6 +167,7 @@ pub struct SubagentProcess {
     pub parent_task_id: String,
     pub team_summary: String,
     pub teammate_color: String,
+    pub prompt: String,
 }
 
 impl Default for SubagentProcess {
@@ -185,6 +186,7 @@ impl Default for SubagentProcess {
             parent_task_id: String::new(),
             team_summary: String::new(),
             teammate_color: String::new(),
+            prompt: String::new(),
         }
     }
 }
@@ -269,6 +271,16 @@ pub fn discover_subagents(session_path: &str) -> Result<Vec<SubagentProcess>, St
     Ok(procs)
 }
 
+/// Extract the first user chunk's text from a list of chunks.
+fn first_user_text(chunks: &[Chunk]) -> String {
+    for c in chunks {
+        if c.chunk_type == ChunkType::User && !c.user_text.is_empty() {
+            return c.user_text.clone();
+        }
+    }
+    String::new()
+}
+
 /// Build a SubagentProcess from parsed chunks and file metadata.
 fn build_subagent_process(
     id: String,
@@ -286,6 +298,7 @@ fn build_subagent_process(
         .ok()
         .map(DateTime::<Utc>::from)
         .unwrap_or_else(Utc::now);
+    let prompt = first_user_text(&chunks);
 
     SubagentProcess {
         id,
@@ -299,6 +312,7 @@ fn build_subagent_process(
         subagent_type,
         team_summary,
         teammate_color,
+        prompt,
         ..Default::default()
     }
 }
@@ -616,52 +630,18 @@ pub fn inject_orphan_subagents(chunks: &mut Vec<Chunk>, processes: &mut [Subagen
         // Set parent_task_id so convert_display_items can link via proc_by_task_id.
         processes[oi].parent_task_id = synthetic_tool_id.clone();
 
-        // Derive description from first user chunk if not already set.
-        let desc = if !processes[oi].description.is_empty() {
-            processes[oi].description.clone()
-        } else {
-            orphan_description(&processes[oi].chunks)
-        };
-
         chunks[idx].items.push(DisplayItem {
             item_type: DisplayItemType::Subagent,
             tool_name: "Agent".to_string(),
             tool_id: synthetic_tool_id,
             subagent_type: processes[oi].subagent_type.clone(),
-            subagent_desc: desc,
+            subagent_desc: processes[oi].description.clone(),
             is_orphan: true,
             duration_ms: processes[oi].duration_ms,
             token_count: processes[oi].usage.total_tokens() as usize / 4,
             ..Default::default()
         });
     }
-}
-
-/// Extract a description for an orphan subagent from its first user chunk.
-fn orphan_description(chunks: &[Chunk]) -> String {
-    for c in chunks {
-        if c.chunk_type == ChunkType::User && !c.user_text.is_empty() {
-            let text = c.user_text.trim();
-            // Extract skill name from "Base directory for this skill: .../skill-name"
-            if let Some(pos) = text.find("Base directory for this skill:") {
-                let path = text[pos + 30..].trim();
-                if let Some(name) = path.rsplit('/').next() {
-                    if !name.is_empty() {
-                        return name.to_string();
-                    }
-                }
-            }
-            // Fallback: first line, truncated
-            let first_line = text.lines().next().unwrap_or(text);
-            let truncated = if first_line.len() > 80 {
-                format!("{}\u{2026}", &first_line[..79])
-            } else {
-                first_line.to_string()
-            };
-            return truncated;
-        }
-    }
-    String::new()
 }
 
 struct AgentLinkData {
@@ -1058,5 +1038,65 @@ pub fn scan_subagent_tokens_into(
                 fallback.cache_create += cc;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_user_chunk(text: &str) -> Chunk {
+        Chunk {
+            chunk_type: ChunkType::User,
+            user_text: text.to_string(),
+            ..Default::default()
+        }
+    }
+
+    fn make_ai_chunk() -> Chunk {
+        Chunk {
+            chunk_type: ChunkType::AI,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn first_user_text_returns_first_user_chunk() {
+        let chunks = vec![
+            make_ai_chunk(),
+            make_user_chunk("hello world"),
+            make_user_chunk("second user"),
+        ];
+        assert_eq!(first_user_text(&chunks), "hello world");
+    }
+
+    #[test]
+    fn first_user_text_skips_empty_user_chunks() {
+        let chunks = vec![make_user_chunk(""), make_user_chunk("non-empty")];
+        assert_eq!(first_user_text(&chunks), "non-empty");
+    }
+
+    #[test]
+    fn first_user_text_returns_empty_when_no_user_chunks() {
+        let chunks = vec![make_ai_chunk()];
+        assert_eq!(first_user_text(&chunks), "");
+    }
+
+    #[test]
+    fn first_user_text_returns_empty_for_empty_vec() {
+        assert_eq!(first_user_text(&[]), "");
+    }
+
+    #[test]
+    fn first_user_text_skips_non_user_chunks() {
+        let chunks = vec![
+            Chunk {
+                chunk_type: ChunkType::System,
+                output: "system text".to_string(),
+                ..Default::default()
+            },
+            make_user_chunk("user prompt"),
+        ];
+        assert_eq!(first_user_text(&chunks), "user prompt");
     }
 }

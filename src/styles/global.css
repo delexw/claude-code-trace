@@ -1319,6 +1319,15 @@ body {
   opacity: 0.85;
 }
 
+.detail-item__prompt-fold > summary {
+  cursor: pointer;
+  list-style: disclosure-closed;
+}
+
+.detail-item__prompt-fold[open] > summary {
+  list-style: disclosure-open;
+}
+
 .detail-item__popout-btn {
   background: none;
   border: none;

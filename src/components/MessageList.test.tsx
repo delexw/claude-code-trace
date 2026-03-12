@@ -168,6 +168,7 @@ describe("MessageList", () => {
             token_count: 0,
             subagent_type: "task",
             subagent_desc: "agent",
+            subagent_prompt: "",
             team_member_name: "",
             teammate_id: "",
             team_color: "",
