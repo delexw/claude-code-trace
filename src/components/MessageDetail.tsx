@@ -11,6 +11,7 @@ import {
   truncate,
 } from "../lib/format";
 import { getModelColor, getTeamColor, toolCategoryIcons } from "../lib/theme";
+import { StatsBar, statsFromMessage, useSubagentStats } from "./StatsBar";
 import { useToggleSet } from "../hooks/useToggleSet";
 import { useScrollToSelected } from "../hooks/useScrollToSelected";
 import { useKeyboard } from "../hooks/useKeyboard";
@@ -715,16 +716,7 @@ function AgentMessageItem({
   const modelColor = msg.model ? getModelColor(msg.model) : undefined;
   const time = formatExactTime(msg.timestamp);
   const contentPreview = isExpanded ? msg.content : truncate(firstLine(msg.content), 200);
-
-  const subagentCount = msg.items.filter(
-    (it) => it.item_type === "Subagent" || it.subagent_messages.length > 0,
-  ).length;
-  const hasStats =
-    msg.tokens_raw > 0 ||
-    msg.tool_call_count > 0 ||
-    msg.thinking_count > 0 ||
-    msg.duration_ms > 0 ||
-    subagentCount > 0;
+  const stats = statsFromMessage(msg);
 
   return (
     <div
@@ -771,48 +763,7 @@ function AgentMessageItem({
         {contentPreview}
       </div>
 
-      {hasStats && (
-        <div className="message__stats">
-          {msg.tokens_raw > 0 && (
-            <span
-              className={`message__stat${msg.tokens_raw > 150000 ? " message__stat--tokens-high" : ""}`}
-            >
-              <span className="message__stat-icon">{"\u{1FA99}"}</span>
-              {formatTokens(msg.tokens_raw)} tok
-            </span>
-          )}
-          {msg.tool_call_count > 0 && (
-            <span className="message__stat">
-              <span className="message__stat-icon">{"\u{1F527}"}</span>
-              {msg.tool_call_count} tool{msg.tool_call_count > 1 ? "s" : ""}
-            </span>
-          )}
-          {msg.thinking_count > 0 && (
-            <span className="message__stat">
-              <span className="message__stat-icon">{"\u{1F4A1}"}</span>
-              {msg.thinking_count} think
-            </span>
-          )}
-          {msg.output_count > 0 && (
-            <span className="message__stat">
-              <span className="message__stat-icon">{"\u{1F4AC}"}</span>
-              {msg.output_count} out
-            </span>
-          )}
-          {subagentCount > 0 && (
-            <span className="message__stat message__stat--agents">
-              <span className="message__stat-icon">{"\u{1F9E9}"}</span>
-              {subagentCount} agent{subagentCount > 1 ? "s" : ""}
-            </span>
-          )}
-          {msg.duration_ms > 0 && (
-            <span className="message__stat">
-              <span className="message__stat-icon">{"\u23F1"}</span>
-              {formatDuration(msg.duration_ms)}
-            </span>
-          )}
-        </div>
-      )}
+      <StatsBar stats={stats} />
     </div>
   );
 }
@@ -847,6 +798,7 @@ function DetailItem({
   const summary = getItemSummary(item);
   const teamClr = item.team_color ? getTeamColor(item.team_color) : undefined;
   const hasAgentMessages = item.subagent_messages.length > 0;
+  const subagentStats = useSubagentStats(item);
   const [popout, setPopout] = useState(false);
 
   return (
@@ -935,6 +887,7 @@ function DetailItem({
           {firstLine(item.subagent_prompt)}
         </div>
       )}
+      {subagentStats && <StatsBar stats={subagentStats} />}
       {isExpanded && <DetailItemBody item={item} />}
       {popout && (
         <PopoutModal

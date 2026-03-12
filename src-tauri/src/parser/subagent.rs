@@ -760,46 +760,35 @@ fn scan_skill_progress_links(file_path: &str) -> HashMap<String, String> {
     };
     let reader = BufReader::new(f);
 
-    // Track the last Skill tool_use_id seen
-    let mut last_skill_tool_id = String::new();
-
     for line_result in reader.lines() {
         let line = match line_result {
             Ok(l) => l,
             Err(_) => break,
         };
 
-        // Quick check before full parse
-        if line.contains("\"Skill\"") {
-            // Look for tool_use with name=Skill
-            if let Ok(v) = serde_json::from_str::<Value>(&line) {
-                if let Some(content) = v.pointer("/message/content") {
-                    if let Some(arr) = content.as_array() {
-                        for block in arr {
-                            if block.get("type").and_then(|v| v.as_str()) == Some("tool_use")
-                                && block.get("name").and_then(|v| v.as_str()) == Some("Skill")
-                            {
-                                if let Some(id) = block.get("id").and_then(|v| v.as_str()) {
-                                    last_skill_tool_id = id.to_string();
-                                }
-                            }
-                        }
-                    }
-                }
+        if !line.contains("skill_progress") {
+            continue;
+        }
+
+        if let Ok(v) = serde_json::from_str::<Value>(&line) {
+            let data_type = v
+                .pointer("/data/type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            if data_type != "skill_progress" {
+                continue;
             }
-        } else if line.contains("skill_progress") && !last_skill_tool_id.is_empty() {
-            if let Ok(v) = serde_json::from_str::<Value>(&line) {
-                let data_type = v
-                    .pointer("/data/type")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                if data_type == "skill_progress" {
-                    if let Some(agent_id) = v.pointer("/data/agentId").and_then(|v| v.as_str()) {
-                        if !agent_id.is_empty() && !result.contains_key(agent_id) {
-                            result.insert(agent_id.to_string(), last_skill_tool_id.clone());
-                        }
-                    }
-                }
+            let agent_id = v
+                .pointer("/data/agentId")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let parent_tool_id = v
+                .get("parentToolUseID")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            if !agent_id.is_empty() && !parent_tool_id.is_empty() && !result.contains_key(agent_id)
+            {
+                result.insert(agent_id.to_string(), parent_tool_id.to_string());
             }
         }
     }

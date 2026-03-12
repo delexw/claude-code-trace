@@ -1150,6 +1150,10 @@ body {
   border-color: var(--error);
 }
 
+.detail-item > .message__stats {
+  padding: 2px 10px 6px;
+}
+
 .detail-item__header {
   display: flex;
   align-items: center;

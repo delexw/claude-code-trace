@@ -1,15 +1,9 @@
 import { useRef, useCallback, useMemo } from "react";
 import { useScrollToSelected } from "../hooks/useScrollToSelected";
 import type { DisplayMessage } from "../types";
-import {
-  shortModel,
-  formatTokens,
-  formatDuration,
-  formatExactTime,
-  firstLine,
-  truncate,
-} from "../lib/format";
+import { shortModel, formatExactTime, firstLine, truncate } from "../lib/format";
 import { getModelColor, spinnerFrames } from "../lib/theme";
+import { StatsBar, statsFromMessage } from "./StatsBar";
 
 interface MessageListProps {
   messages: DisplayMessage[];
@@ -151,15 +145,7 @@ function MessageItem({
 
   const contentPreview = isExpanded ? msg.content : truncate(firstLine(msg.content), 200);
 
-  const subagentCount = msg.items.filter(
-    (it) => it.item_type === "Subagent" || it.subagent_messages.length > 0,
-  ).length;
-  const hasStats =
-    msg.tokens_raw > 0 ||
-    msg.tool_call_count > 0 ||
-    msg.thinking_count > 0 ||
-    msg.duration_ms > 0 ||
-    subagentCount > 0;
+  const stats = statsFromMessage(msg);
 
   return (
     <div
@@ -214,56 +200,7 @@ function MessageItem({
         {contentPreview}
       </div>
 
-      {hasStats && (
-        <div className="message__stats">
-          {msg.tokens_raw > 0 && (
-            <span
-              className={`message__stat${msg.tokens_raw > 150000 ? " message__stat--tokens-high" : ""}`}
-            >
-              <span className="message__stat-icon">{"\u{1FA99}"}</span>
-              {formatTokens(msg.tokens_raw)} tok
-            </span>
-          )}
-          {msg.tool_call_count > 0 && (
-            <span className="message__stat">
-              <span className="message__stat-icon">{"\u{1F527}"}</span>
-              {msg.tool_call_count} tool
-              {msg.tool_call_count > 1 ? "s" : ""}
-            </span>
-          )}
-          {msg.thinking_count > 0 && (
-            <span className="message__stat">
-              <span className="message__stat-icon">{"\u{1F4A1}"}</span>
-              {msg.thinking_count} think
-            </span>
-          )}
-          {msg.output_count > 0 && (
-            <span className="message__stat">
-              <span className="message__stat-icon">{"\u{1F4AC}"}</span>
-              {msg.output_count} out
-            </span>
-          )}
-          {msg.duration_ms > 0 && (
-            <span className="message__stat">
-              <span className="message__stat-icon">{"\u23F1"}</span>
-              {formatDuration(msg.duration_ms)}
-            </span>
-          )}
-          {subagentCount > 0 && (
-            <span className="message__stat message__stat--agents">
-              <span className="message__stat-icon">{"\u{1F9E9}"}</span>
-              {subagentCount} agent{subagentCount > 1 ? "s" : ""}
-            </span>
-          )}
-          {msg.teammate_spawns > 0 && (
-            <span className="message__stat">
-              <span className="message__stat-icon">{"\u{1F916}"}</span>
-              {msg.teammate_spawns} spawn
-              {msg.teammate_spawns > 1 ? "s" : ""}
-            </span>
-          )}
-        </div>
-      )}
+      <StatsBar stats={stats} />
     </div>
   );
 }
