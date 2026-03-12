@@ -927,7 +927,9 @@ function DetailItemBody({ item }: { item: DisplayItem }) {
     case "Thinking":
       return (
         <div className="detail-item__body">
-          <div className="detail-item__text detail-item__text--thinking">{item.text}</div>
+          <div className="detail-item__text detail-item__text--thinking">
+            {item.text || "Thinking content is not recorded in session logs."}
+          </div>
         </div>
       );
     case "Output":
@@ -1044,7 +1046,7 @@ function getItemSummary(item: DisplayItem): string {
     case "TeammateMessage":
       return item.text ? item.text.slice(0, 100) : "";
     case "Thinking":
-      return item.text ? item.text.slice(0, 80) + (item.text.length > 80 ? "\u2026" : "") : "";
+      return item.text ? item.text.slice(0, 80) + (item.text.length > 80 ? "\u2026" : "") : "Content not recorded";
     case "Output":
       return item.text ? item.text.slice(0, 80) + (item.text.length > 80 ? "\u2026" : "") : "";
     default:
