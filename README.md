@@ -20,7 +20,13 @@ Reads session logs from `~/.claude/` and renders them as a scrollable conversati
 
 ## Install
 
-Build from source:
+### Download
+
+Grab the latest `.dmg` from [Releases](https://github.com/delexw/tail-claude-gui/releases). Open it and drag the app to `/Applications`.
+
+> The app is unsigned. On first launch, right-click > Open > Open to bypass Gatekeeper.
+
+### Build from source
 
 ```bash
 git clone git@github.com:delexw/tail-claude-gui.git
@@ -96,6 +102,17 @@ npx oxfmt                # JS/TS format
 cargo clippy --manifest-path src-tauri/Cargo.toml  # Rust lint
 cargo fmt --manifest-path src-tauri/Cargo.toml     # Rust format
 ```
+
+## Release
+
+Push a version tag to trigger a GitHub Actions build:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+This creates a draft release with the `.dmg` attached. Review and publish it from the [Releases](https://github.com/delexw/tail-claude-gui/releases) page.
 
 ## Attribution
 
