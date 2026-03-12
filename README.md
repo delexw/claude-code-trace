@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="icon.png" alt="tail-claude-gui" width="128" />
+</p>
+
 # tail-claude-gui
 
 A desktop GUI for reading Claude Code session JSONL files. Built with [Tauri v2](https://v2.tauri.app/) (Rust backend + React frontend).
