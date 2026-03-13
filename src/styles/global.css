@@ -633,6 +633,10 @@ body {
   color: #fff;
 }
 
+.view-toolbar__spacer {
+  flex: 1;
+}
+
 .view-toolbar__separator {
   width: 1px;
   height: 16px;
@@ -2221,10 +2225,6 @@ body {
 /* ============================================================
    Settings Modal
    ============================================================ */
-
-.view-toolbar__spacer {
-  flex: 1;
-}
 
 .settings-modal__title {
   font-weight: 600;

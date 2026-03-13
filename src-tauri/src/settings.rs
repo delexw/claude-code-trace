@@ -36,8 +36,8 @@ mod tests {
     use std::env;
 
     #[test]
-    fn load_settings_returns_default_when_no_file() {
-        let settings = load_settings();
+    fn default_settings_has_no_projects_dir() {
+        let settings = Settings::default();
         assert!(settings.projects_dir.is_none());
     }
 

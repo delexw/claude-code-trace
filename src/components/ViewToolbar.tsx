@@ -18,6 +18,17 @@ interface ViewToolbarProps {
   onOpenSettings: () => void;
 }
 
+function SettingsButton({ onClick }: { onClick: () => void }) {
+  return (
+    <>
+      <span className="view-toolbar__spacer" />
+      <button className="view-toolbar__btn" onClick={onClick} title="Settings">
+        <IoMdSettings />
+      </button>
+    </>
+  );
+}
+
 export function ViewToolbar({
   view,
   hasTeams,
@@ -61,10 +72,7 @@ export function ViewToolbar({
         <button className="view-toolbar__btn" onClick={onOpenDebug}>
           Debug
         </button>
-        <span className="view-toolbar__spacer" />
-        <button className="view-toolbar__btn" onClick={onOpenSettings} title="Settings">
-          <IoMdSettings />
-        </button>
+        <SettingsButton onClick={onOpenSettings} />
       </div>
     );
   }
@@ -77,10 +85,7 @@ export function ViewToolbar({
             <BackIcon /> Back to Messages
           </button>
         )}
-        <span className="view-toolbar__spacer" />
-        <button className="view-toolbar__btn" onClick={onOpenSettings} title="Settings">
-          <IoMdSettings />
-        </button>
+        <SettingsButton onClick={onOpenSettings} />
       </div>
     );
   }

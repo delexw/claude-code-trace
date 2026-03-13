@@ -62,13 +62,24 @@ export function App() {
     return () => clearInterval(id);
   }, [session.ongoing]);
 
+  // Shared: fetch project dirs and discover sessions
+  const loadProjectDirs = useCallback(async () => {
+    try {
+      const dirs = await invoke<string[]>("get_project_dirs");
+      if (dirs.length > 0) {
+        discoverSessions(dirs);
+      }
+    } catch (err) {
+      console.error("Failed to get project dirs:", err);
+    }
+  }, [discoverSessions]);
+
   // Auto-discover sessions on mount; show settings if no path configured
   const discoveredRef = useRef(false);
   useEffect(() => {
     if (discoveredRef.current) return;
     discoveredRef.current = true;
     const discover = async () => {
-      // Check if user has configured a projects path
       let hasConfig = false;
       try {
         const settings = await invoke<{ projects_dir: string | null }>("get_settings");
@@ -80,30 +91,10 @@ export function App() {
         setShowSettings(true);
         return;
       }
-      // Only load sessions if a path has been saved
-      try {
-        const dirs = await invoke<string[]>("get_project_dirs");
-        if (dirs.length > 0) {
-          discoverSessions(dirs);
-        }
-      } catch (err) {
-        console.error("Failed to get project dirs:", err);
-      }
+      loadProjectDirs();
     };
     discover();
-  }, [discoverSessions]);
-
-  // Manual refresh
-  const refreshSessions = useCallback(async () => {
-    try {
-      const dirs = await invoke<string[]>("get_project_dirs");
-      if (dirs.length > 0) {
-        discoverSessions(dirs);
-      }
-    } catch (err) {
-      console.error("Failed to refresh sessions:", err);
-    }
-  }, [discoverSessions]);
+  }, [loadProjectDirs]);
 
   // Handle session selection from picker
   const handleSelectSession = useCallback(
@@ -375,7 +366,7 @@ export function App() {
           highlightedIndex={sidebarHighlight}
           isFocused={sidebarFocused}
           onSelectProject={handleSelectProject}
-          onRefresh={refreshSessions}
+          onRefresh={loadProjectDirs}
           onFocus={() => setSidebarFocused(true)}
           refreshing={picker.loading}
           style={{ width: sidebarWidth, minWidth: 100, maxWidth: 400 }}
@@ -396,7 +387,7 @@ export function App() {
       />
 
       {showSettings && (
-        <SettingsModal onClose={() => setShowSettings(false)} onSaved={refreshSessions} />
+        <SettingsModal onClose={() => setShowSettings(false)} onSaved={loadProjectDirs} />
       )}
     </div>
   );

@@ -12,19 +12,28 @@ pub struct SettingsResponse {
     pub default_dir: String,
 }
 
-fn default_projects_dir() -> String {
-    crate::parser::session::claude_projects_dir(None)
-        .map(|p| p.to_string_lossy().to_string())
+fn platform_default_dir() -> String {
+    dirs::home_dir()
+        .map(|h| {
+            h.join(".claude")
+                .join("projects")
+                .to_string_lossy()
+                .to_string()
+        })
         .unwrap_or_default()
+}
+
+fn build_response(settings: &crate::settings::Settings) -> SettingsResponse {
+    SettingsResponse {
+        projects_dir: settings.projects_dir.clone(),
+        default_dir: platform_default_dir(),
+    }
 }
 
 #[tauri::command]
 pub async fn get_settings(state: State<'_, AppState>) -> Result<SettingsResponse, String> {
     let guard = state.settings.lock().map_err(|e| e.to_string())?;
-    Ok(SettingsResponse {
-        projects_dir: guard.projects_dir.clone(),
-        default_dir: default_projects_dir(),
-    })
+    Ok(build_response(&guard))
 }
 
 #[tauri::command]
@@ -45,8 +54,5 @@ pub async fn set_projects_dir(
     let mut guard = state.settings.lock().map_err(|e| e.to_string())?;
     guard.projects_dir = path;
     crate::settings::save_settings(&guard)?;
-    Ok(SettingsResponse {
-        projects_dir: guard.projects_dir.clone(),
-        default_dir: default_projects_dir(),
-    })
+    Ok(build_response(&guard))
 }
