@@ -1245,6 +1245,12 @@ body {
   max-width: none;
 }
 
+.message-detail__ongoing {
+  display: flex;
+  justify-content: center;
+  padding: 16px 0;
+}
+
 .message-detail__text {
   font-size: 13px;
   line-height: 1.6;

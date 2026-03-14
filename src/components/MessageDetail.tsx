@@ -10,6 +10,7 @@ import { useScrollToSelected } from "../hooks/useScrollToSelected";
 import { useKeyboard } from "../hooks/useKeyboard";
 import { BackButton } from "./BackButton";
 import { ResizeHandle } from "./ResizeHandle";
+import { OngoingDots } from "./OngoingDots";
 import { IoMdCloseCircle } from "react-icons/io";
 import { ClaudeIcon } from "./Icons";
 
@@ -30,10 +31,11 @@ interface ColumnNav {
 
 interface MessageDetailProps {
   message: DisplayMessage;
+  ongoing?: boolean;
   onBack: () => void;
 }
 
-export function MessageDetail({ message: msg, onBack }: MessageDetailProps) {
+export function MessageDetail({ message: msg, ongoing, onBack }: MessageDetailProps) {
   const { set: expandedItems, toggle: toggleItem } = useToggleSet();
   const [selectedItem, setSelectedItem] = useState(0);
   const scrollRef = useScrollToSelected(selectedItem);
@@ -282,6 +284,11 @@ export function MessageDetail({ message: msg, onBack }: MessageDetailProps) {
                     onSelect={setSelectedItem}
                   />
                 ))}
+              </div>
+            )}
+            {ongoing && (
+              <div className="message-detail__ongoing">
+                <OngoingDots />
               </div>
             )}
           </div>

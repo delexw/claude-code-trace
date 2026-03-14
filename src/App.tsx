@@ -319,6 +319,7 @@ export function App() {
           return (
             <MessageDetail
               message={session.messages[selectedMessage]}
+              ongoing={session.ongoing}
               onBack={() => setView("list")}
             />
           );
