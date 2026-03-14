@@ -1,0 +1,103 @@
+After click refresh project button... The process status on session and project tree node doesn't run right.. Please fix
+
+---
+
+Please do the right fix NOT easy fix
+
+---
+
+upgrade a version, /git-commit and push a new tag
+
+---
+
+I think when append new JSONL to every pannel, teh auto scroll doesn't work at all
+
+---
+
+Are you sure it it right?
+
+---
+
+upgrade a version, /git-commit and push a new tag
+
+---
+
+The watcher is buggy... For project tree and outer session,, as long as process inside the cacading .... should render... same as other pages..
+
+---
+
+Do you know what I mean cascading?
+
+---
+
+The cascding progress status render is as long as leaf node message or sub agent is process.... all parent pannel should show the process dots . Understand?
+
+---
+
+upgrade a version, /git-commit and push a new tag
+
+---
+
+Not that... without the fix.. also 90
+
+---
+
+still 95%
+
+---
+
+still
+
+---
+
+Session watcher: tightened event filter — recursive watch previously matched ANY .jsonl in the project tree. Now only matches the current session file, its subagents, and team files.
+How do I see other sessions are ongoing?
+
+---
+
+The default the context window is 1000000 now not 200000
+
+---
+
+What is the hihgligh about the CPU fix?
+
+---
+
+What is the main session?
+
+---
+
+continue
+
+---
+
+The cascading process status doesn't pop up to root
+
+---
+
+No issue
+
+---
+
+upgrade a version, /git-commit and push a new tag 0.3.0
+
+---
+
+When "Command running in background with ID: bed6es4d1.",,,, The root process staus is gone, deeper sub agetn etc is not
+
+---
+
+upgrade a version, /git-commit and push a new tag
+
+---
+
+{
+  "command": "sleep 30 && tail -30 /tmp/sso-server-uptodate.log 2>/dev/null || echo \"No log yet\"",
+  "description": "Check bootstrap progress after 30s",
+  "timeout": 35000
+}
+When I see it... the root stats is gone but not in deeper
+
+---
+
+do not working still can not have root level and session level status
