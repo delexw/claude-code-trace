@@ -1,0 +1,37 @@
+After click refresh project button... The process status on session and project tree node doesn't run right.. Please fix
+
+---
+
+Please do the right fix NOT easy fix
+
+---
+
+upgrade a version, /git-commit and push a new tag
+
+---
+
+I think when append new JSONL to every pannel, teh auto scroll doesn't work at all
+
+---
+
+Are you sure it it right?
+
+---
+
+upgrade a version, /git-commit and push a new tag
+
+---
+
+The watcher is buggy... For project tree and outer session,, as long as process inside the cacading .... should render... same as other pages..
+
+---
+
+Do you know what I mean cascading?
+
+---
+
+The cascding progress status render is as long as leaf node message or sub agent is process.... all parent pannel should show the process dots . Understand?
+
+---
+
+upgrade a version, /git-commit and push a new tag
