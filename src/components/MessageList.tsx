@@ -1,5 +1,6 @@
-import { useRef, useCallback, useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { useScrollToSelected } from "../hooks/useScrollToSelected";
+import { useAutoScroll } from "../hooks/useAutoScroll";
 import type { DisplayMessage } from "../types";
 import { MessageItem } from "./MessageItem";
 
@@ -22,7 +23,7 @@ export function MessageList({
   onToggle,
   onOpenDetail,
 }: MessageListProps) {
-  const listRef = useRef<HTMLDivElement>(null);
+  const listRef = useAutoScroll<HTMLDivElement>(messages.length);
   const selectedRef = useScrollToSelected(selectedIndex);
 
   const handleClick = useCallback(

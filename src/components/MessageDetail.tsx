@@ -7,6 +7,7 @@ import { MessageItem } from "./MessageItem";
 import { DetailItem } from "./DetailItem";
 import { useToggleSet } from "../hooks/useToggleSet";
 import { useScrollToSelected } from "../hooks/useScrollToSelected";
+import { useAutoScroll } from "../hooks/useAutoScroll";
 import { useKeyboard } from "../hooks/useKeyboard";
 import { BackButton } from "./BackButton";
 import { ResizeHandle } from "./ResizeHandle";
@@ -43,6 +44,7 @@ export function MessageDetail({ message: msg, ongoing, onBack }: MessageDetailPr
   const [columnWidths, setColumnWidths] = useState<(number | null)[]>([null]);
   const [focusedColumn, setFocusedColumn] = useState(0); // 0 = main, 1+ = panel index + 1
   const bodyRef = useRef<HTMLDivElement>(null);
+  useAutoScroll(msg.items.length, bodyRef);
   const savedScroll = useRef<number | null>(null);
   const panelRefs = useRef<Map<number, ColumnNav>>(new Map());
 
@@ -409,7 +411,7 @@ function AgentListColumn({
   const messages = item.subagent_messages;
   const [selectedMsg, setSelectedMsg] = useState(messages.length - 1);
   const { set: expandedSet, toggle: toggleMsg } = useToggleSet();
-  const listRef = useRef<HTMLDivElement>(null);
+  const listRef = useAutoScroll<HTMLDivElement>(messages.length);
   const selectedRef = useScrollToSelected(selectedMsg);
   const panelColor = item.team_color ? getTeamColor(item.team_color) : undefined;
 
@@ -537,6 +539,7 @@ function AgentDetailColumn({
   const { set: expandedItems, toggle: toggleItem } = useToggleSet();
   const [selectedItem, setSelectedItem] = useState(0);
   const scrollRef = useScrollToSelected(selectedItem);
+  const detailBodyRef = useAutoScroll<HTMLDivElement>(msg.items.length);
   const panelColor = item.team_color ? getTeamColor(item.team_color) : undefined;
 
   const model = msg.model ? shortModel(msg.model) : "";
@@ -617,7 +620,7 @@ function AgentDetailColumn({
             )}
           </span>
         </div>
-        <div className="message-detail__body">
+        <div className="message-detail__body" ref={detailBodyRef}>
           <div className="message-detail__content">
             {msg.content && (
               <div className="message-detail__text">
