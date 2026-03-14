@@ -198,19 +198,48 @@ impl<'a> OngoingChecker<'a> {
 
     /// Full ongoing check: chunks → subagents → file staleness.
     pub fn is_ongoing(&self) -> bool {
-        let mut ongoing = self.chunks_ongoing();
-        if !ongoing {
-            ongoing = self.any_subagent_ongoing();
+        // If the main session chunks are still in progress, gate on the main file freshness.
+        if self.chunks_ongoing() {
+            return self.is_file_fresh();
         }
-        if ongoing {
-            ongoing = self.is_file_fresh();
-        }
-        ongoing
+        // If any subagent is still running, the session is ongoing.
+        // Subagent staleness is already checked per-file inside is_subagent_ongoing,
+        // so we don't re-check the main session file here.
+        self.any_subagent_ongoing()
     }
 
     /// Check if a subagent process is ongoing (chunk-based + file staleness).
     pub fn is_subagent_ongoing(proc: &super::subagent::SubagentProcess) -> bool {
         Self::is_chunks_ongoing(&proc.chunks) && apply_staleness(true, proc.file_mod_time)
+    }
+
+    /// Cascading check: returns true if `proc` or any of its descendant subagents are ongoing.
+    pub fn is_subagent_ongoing_deep(
+        proc: &super::subagent::SubagentProcess,
+        all_procs: &[super::subagent::SubagentProcess],
+    ) -> bool {
+        if Self::is_subagent_ongoing(proc) {
+            return true;
+        }
+        // Collect tool_ids from this proc's chunks to find child processes.
+        let child_tool_ids: HashSet<&str> = proc
+            .chunks
+            .iter()
+            .flat_map(|c| c.items.iter())
+            .filter(|it| {
+                it.item_type == DisplayItemType::Subagent
+                    || ((it.tool_name == "Task" || it.tool_name == "Agent")
+                        && it.item_type == DisplayItemType::ToolCall)
+            })
+            .map(|it| it.tool_id.as_str())
+            .collect();
+        if child_tool_ids.is_empty() {
+            return false;
+        }
+        all_procs
+            .iter()
+            .filter(|p| child_tool_ids.contains(p.parent_task_id.as_str()))
+            .any(|p| Self::is_subagent_ongoing_deep(p, all_procs))
     }
 
     /// Reports whether the chunks indicate the session is still in progress.
@@ -713,6 +742,141 @@ mod tests {
             ..Default::default()
         };
         assert!(!OngoingChecker::is_subagent_ongoing(&proc));
+    }
+
+    // --- OngoingChecker::is_subagent_ongoing_deep tests ---
+
+    #[test]
+    fn deep_ongoing_parent_done_child_ongoing() {
+        // Parent proc is finished (subagent has result + text output after),
+        // but a child process is still ongoing.
+        let mut parent_chunk = make_chunk(ChunkType::AI);
+        parent_chunk.stop_reason = "end_turn".to_string();
+        parent_chunk.items.push(DisplayItem {
+            item_type: DisplayItemType::Subagent,
+            tool_name: "Agent".to_string(),
+            tool_id: "child-task-1".to_string(),
+            tool_result: "done".to_string(),
+            ..Default::default()
+        });
+        parent_chunk.items.push(DisplayItem {
+            item_type: DisplayItemType::Output,
+            text: "All done".to_string(),
+            ..Default::default()
+        });
+        let parent = super::super::subagent::SubagentProcess {
+            id: "parent-id".to_string(),
+            chunks: vec![parent_chunk],
+            file_mod_time: Utc::now(),
+            ..Default::default()
+        };
+
+        let child = super::super::subagent::SubagentProcess {
+            id: "child-id".to_string(),
+            parent_task_id: "child-task-1".to_string(),
+            chunks: vec![make_chunk(ChunkType::User)], // trailing user = ongoing
+            file_mod_time: Utc::now(),
+            ..Default::default()
+        };
+
+        let all = vec![parent.clone(), child];
+        assert!(!OngoingChecker::is_subagent_ongoing(&parent));
+        assert!(OngoingChecker::is_subagent_ongoing_deep(&parent, &all));
+    }
+
+    #[test]
+    fn deep_ongoing_grandchild_ongoing() {
+        // Parent → child (done) → grandchild (ongoing).
+        let mut parent_chunk = make_chunk(ChunkType::AI);
+        parent_chunk.stop_reason = "end_turn".to_string();
+        parent_chunk.items.push(DisplayItem {
+            item_type: DisplayItemType::Subagent,
+            tool_name: "Agent".to_string(),
+            tool_id: "task-c1".to_string(),
+            tool_result: "done".to_string(),
+            ..Default::default()
+        });
+        parent_chunk.items.push(DisplayItem {
+            item_type: DisplayItemType::Output,
+            text: "Done".to_string(),
+            ..Default::default()
+        });
+        let parent = super::super::subagent::SubagentProcess {
+            id: "p".to_string(),
+            chunks: vec![parent_chunk],
+            file_mod_time: Utc::now(),
+            ..Default::default()
+        };
+
+        let mut child_chunk = make_chunk(ChunkType::AI);
+        child_chunk.stop_reason = "end_turn".to_string();
+        child_chunk.items.push(DisplayItem {
+            item_type: DisplayItemType::Subagent,
+            tool_name: "Agent".to_string(),
+            tool_id: "task-gc1".to_string(),
+            tool_result: "done".to_string(),
+            ..Default::default()
+        });
+        child_chunk.items.push(DisplayItem {
+            item_type: DisplayItemType::Output,
+            text: "Done".to_string(),
+            ..Default::default()
+        });
+        let child = super::super::subagent::SubagentProcess {
+            id: "c".to_string(),
+            parent_task_id: "task-c1".to_string(),
+            chunks: vec![child_chunk],
+            file_mod_time: Utc::now(),
+            ..Default::default()
+        };
+
+        let grandchild = super::super::subagent::SubagentProcess {
+            id: "gc".to_string(),
+            parent_task_id: "task-gc1".to_string(),
+            chunks: vec![make_chunk(ChunkType::User)],
+            file_mod_time: Utc::now(),
+            ..Default::default()
+        };
+
+        let all = vec![parent.clone(), child, grandchild];
+        assert!(OngoingChecker::is_subagent_ongoing_deep(&parent, &all));
+    }
+
+    #[test]
+    fn deep_ongoing_all_done() {
+        let mut parent_chunk = make_chunk(ChunkType::AI);
+        parent_chunk.stop_reason = "end_turn".to_string();
+        parent_chunk.items.push(DisplayItem {
+            item_type: DisplayItemType::Subagent,
+            tool_name: "Agent".to_string(),
+            tool_id: "task-c1".to_string(),
+            tool_result: "done".to_string(),
+            ..Default::default()
+        });
+        parent_chunk.items.push(DisplayItem {
+            item_type: DisplayItemType::Output,
+            text: "Done".to_string(),
+            ..Default::default()
+        });
+        let parent = super::super::subagent::SubagentProcess {
+            id: "p".to_string(),
+            chunks: vec![parent_chunk],
+            file_mod_time: Utc::now(),
+            ..Default::default()
+        };
+
+        let mut child_chunk = make_chunk(ChunkType::AI);
+        child_chunk.stop_reason = "end_turn".to_string();
+        let child = super::super::subagent::SubagentProcess {
+            id: "c".to_string(),
+            parent_task_id: "task-c1".to_string(),
+            chunks: vec![child_chunk],
+            file_mod_time: Utc::now(),
+            ..Default::default()
+        };
+
+        let all = vec![parent.clone(), child];
+        assert!(!OngoingChecker::is_subagent_ongoing_deep(&parent, &all));
     }
 
     // --- OngoingChecker::is_chunks_ongoing edge cases ---

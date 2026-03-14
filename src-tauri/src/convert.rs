@@ -251,7 +251,8 @@ fn convert_display_items(
             // Link subagent process if available (Subagent items and ToolCall items like Skill).
             if it.item_type == DisplayItemType::Subagent || !it.tool_id.is_empty() {
                 if let Some(proc) = proc_by_task_id.get(it.tool_id.as_str()) {
-                    fdi.subagent_ongoing = OngoingChecker::is_subagent_ongoing(proc);
+                    fdi.subagent_ongoing =
+                        OngoingChecker::is_subagent_ongoing_deep(proc, subagents);
                     fdi.agent_id = proc.id.clone();
                     fdi.subagent_prompt = proc.prompt.clone();
                     if !proc.teammate_color.is_empty() {
