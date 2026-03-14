@@ -193,13 +193,13 @@ describe("MessageList", () => {
     ];
     const { container } = render(<MessageList {...defaultProps({ messages, ongoing: true })} />);
     // The ongoing dots should be on the last message (the one actively being processed)
-    const dots = container.querySelectorAll(".message__ongoing-dots");
+    const dots = container.querySelectorAll(".ongoing-dots");
     expect(dots.length).toBe(1);
   });
 
   it("does not show ongoing dots when ongoing=false", () => {
     const messages = [makeMessage({ content: "No spinner" })];
     const { container } = render(<MessageList {...defaultProps({ messages, ongoing: false })} />);
-    expect(container.querySelector(".message__ongoing-dots")).not.toBeInTheDocument();
+    expect(container.querySelector(".ongoing-dots")).not.toBeInTheDocument();
   });
 });

@@ -3,22 +3,6 @@ import { invoke } from "@tauri-apps/api/core";
 import type { SessionInfo } from "../types";
 import { useTauriEvent } from "./useTauriEvent";
 
-/** Sessions inactive for longer than this are no longer "ongoing". */
-const ONGOING_STALENESS_MS = 120_000;
-
-/** Clear is_ongoing for sessions whose mod_time is stale. */
-function clearStaleSessions(sessions: SessionInfo[]): SessionInfo[] {
-  const now = Date.now();
-  return sessions.map((s) => {
-    if (!s.is_ongoing) return s;
-    const modMs = new Date(s.mod_time).getTime();
-    if (isNaN(modMs) || now - modMs > ONGOING_STALENESS_MS) {
-      return { ...s, is_ongoing: false };
-    }
-    return s;
-  });
-}
-
 interface PickerState {
   sessions: SessionInfo[];
   loading: boolean;
@@ -38,7 +22,7 @@ export function usePicker(selectedProject: string | null = null) {
       const sessions = await invoke<SessionInfo[]>("discover_sessions", {
         projectDirs,
       });
-      setState((prev) => ({ ...prev, sessions: clearStaleSessions(sessions), loading: false }));
+      setState((prev) => ({ ...prev, sessions, loading: false }));
 
       // Start watching for new sessions
       try {
@@ -56,28 +40,24 @@ export function usePicker(selectedProject: string | null = null) {
     setState((prev) => ({ ...prev, searchQuery: query }));
   }, []);
 
-  // Listen for picker-refresh events
+  /** Sync ongoing status from the session watcher into the picker list. */
+  const syncOngoing = useCallback((sessionPath: string, ongoing: boolean) => {
+    setState((prev) => {
+      const idx = prev.sessions.findIndex((s) => s.path === sessionPath);
+      if (idx === -1 || prev.sessions[idx].is_ongoing === ongoing) return prev;
+      const sessions = [...prev.sessions];
+      sessions[idx] = { ...sessions[idx], is_ongoing: ongoing };
+      return { ...prev, sessions };
+    });
+  }, []);
+
+  // Listen for picker-refresh events (backend already applies staleness)
   useTauriEvent<{ sessions: SessionInfo[] }>("picker-refresh", (payload) => {
     setState((prev) => ({
       ...prev,
-      sessions: clearStaleSessions(payload.sessions),
+      sessions: payload.sessions,
     }));
   });
-
-  // Periodic staleness check — clear "ACTIVE" even if no file events fire
-  useEffect(() => {
-    const id = setInterval(() => {
-      setState((prev) => {
-        const updated = clearStaleSessions(prev.sessions);
-        // Only update if something actually changed
-        if (updated === prev.sessions || updated.every((s, i) => s === prev.sessions[i])) {
-          return prev;
-        }
-        return { ...prev, sessions: updated };
-      });
-    }, 10_000);
-    return () => clearInterval(id);
-  }, []);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -110,5 +90,6 @@ export function usePicker(selectedProject: string | null = null) {
     searchQuery: state.searchQuery,
     setSearchQuery,
     discoverSessions,
+    syncOngoing,
   };
 }

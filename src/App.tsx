@@ -62,6 +62,13 @@ export function App() {
     return () => clearInterval(id);
   }, [session.ongoing]);
 
+  // Sync session ongoing state to picker tree
+  useEffect(() => {
+    if (session.sessionPath) {
+      picker.syncOngoing(session.sessionPath, session.ongoing);
+    }
+  }, [session.ongoing, session.sessionPath, picker]);
+
   // Shared: fetch project dirs and discover sessions
   const loadProjectDirs = useCallback(async () => {
     try {

@@ -3,6 +3,7 @@ import { shortModel, formatExactTime, firstLine, truncate } from "../lib/format"
 import { getModelColor } from "../lib/theme";
 import { StatsBar, statsFromMessage } from "./StatsBar";
 import { ClaudeIcon, UserIcon, SystemIcon, WarningIcon, ForwardIcon } from "./Icons";
+import { OngoingDots } from "./OngoingDots";
 
 interface MessageItemProps {
   message: DisplayMessage;
@@ -70,19 +71,11 @@ export function MessageItem({
             {model}
           </span>
         )}
-        {isOngoing && (
-          <span className="message__ongoing-dots">
-            <span className="project-tree__ongoing-dot" />
-            <span className="project-tree__ongoing-dot" />
-            <span className="project-tree__ongoing-dot" />
-            <span className="project-tree__ongoing-dot" />
-            <span className="project-tree__ongoing-dot" />
-          </span>
-        )}
         {msg.subagent_label && (
           <span className="detail-item__subagent-badge">{msg.subagent_label}</span>
         )}
         {time && <span className="message__timestamp">{time}</span>}
+        {isOngoing && <OngoingDots />}
         {(msg.items.length > 0 || msg.tool_call_count > 0 || msg.thinking_count > 0) && (
           <button
             className="message__detail-btn"

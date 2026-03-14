@@ -7,7 +7,7 @@ use tokio::sync::mpsc;
 use crate::convert::*;
 use crate::parser::chunk::build_chunks;
 use crate::parser::classify::ClassifiedMsg;
-use crate::parser::ongoing::{is_ongoing, is_subagent_ongoing};
+use crate::parser::ongoing::OngoingChecker;
 use crate::parser::session::{read_session_incremental, IncrementalTokenScanner};
 use crate::parser::subagent::{discover_and_link_all, inject_orphan_subagents};
 use crate::parser::team::reconstruct_teams;
@@ -121,6 +121,7 @@ pub fn start_session_watcher(
         let mut offset = initial_offset;
         let mut token_scanner = IncrementalTokenScanner::new();
         let mut prev_msg_count: usize = 0;
+        let mut prev_ongoing = false;
 
         // Seed the token scanner with the initial file content.
         token_scanner.scan_new_bytes(&path_for_rebuild);
@@ -147,23 +148,21 @@ pub fn start_session_watcher(
                     let (mut all_procs, color_map) = discover_and_link_all(&path_for_rebuild, &chunks);
                     inject_orphan_subagents(&mut chunks, &mut all_procs);
 
-                    let mut ongoing = is_ongoing(&chunks);
-                    if !ongoing {
-                        ongoing = all_procs.iter().any(is_subagent_ongoing);
-                    }
+                    let ongoing = OngoingChecker::new(&chunks, &all_procs, &path_for_rebuild).is_ongoing();
 
                     let teams = reconstruct_teams(&chunks, &all_procs);
                     let messages = chunks_to_messages(&chunks, &all_procs, &color_map);
 
                     // Skip emit if nothing meaningful changed.
                     let msg_count = messages.len();
-                    if msg_count == prev_msg_count && !ongoing {
+                    if msg_count == prev_msg_count && !ongoing && !prev_ongoing {
                         // Token totals may still have changed — update scanner
                         // but skip the expensive emit + serialize.
                         token_scanner.scan_new_bytes(&path_for_rebuild);
                         continue;
                     }
                     prev_msg_count = msg_count;
+                    prev_ongoing = ongoing;
 
                     // Extract last permission_mode from UserMsg entries.
                     let mut permission_mode = String::from("default");

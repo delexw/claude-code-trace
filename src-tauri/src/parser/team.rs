@@ -3,7 +3,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 
 use super::chunk::*;
-use super::ongoing::is_ongoing;
+use super::ongoing::OngoingChecker;
 use super::subagent::SubagentProcess;
 
 /// TeamTask represents a single task in a team's task board.
@@ -100,7 +100,7 @@ pub fn reconstruct_teams(chunks: &[Chunk], workers: &[SubagentProcess]) -> Vec<T
         if team_name.is_empty() {
             continue;
         }
-        if is_ongoing(&worker.chunks) {
+        if OngoingChecker::is_chunks_ongoing(&worker.chunks) {
             for team in &mut teams {
                 if team.name == team_name {
                     team.member_ongoing.insert(agent_name.clone(), true);

@@ -2,7 +2,7 @@ use tauri::{AppHandle, State};
 
 use crate::convert::*;
 use crate::parser::chunk::build_chunks;
-use crate::parser::ongoing::{apply_staleness, is_ongoing, is_subagent_ongoing};
+use crate::parser::ongoing::OngoingChecker;
 use crate::parser::session::{extract_session_meta, read_session_incremental, SessionMeta};
 use crate::parser::subagent::{discover_and_link_all, inject_orphan_subagents};
 use crate::parser::team::reconstruct_teams;
@@ -25,17 +25,7 @@ pub async fn load_session(path: String) -> Result<LoadResult, String> {
     // Inject orphan subagents (no parent tool_use in main session yet).
     inject_orphan_subagents(&mut chunks, &mut all_procs);
 
-    let mut ongoing = is_ongoing(&chunks);
-    if !ongoing {
-        ongoing = all_procs.iter().any(is_subagent_ongoing);
-    }
-    if ongoing {
-        if let Ok(info) = std::fs::metadata(&path) {
-            if let Ok(modified) = info.modified() {
-                ongoing = apply_staleness(true, modified);
-            }
-        }
-    }
+    let ongoing = OngoingChecker::new(&chunks, &all_procs, &path).is_ongoing();
 
     let teams = reconstruct_teams(&chunks, &all_procs);
     let messages = chunks_to_messages(&chunks, &all_procs, &color_map);

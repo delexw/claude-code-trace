@@ -91,7 +91,7 @@ describe("ProjectTree", () => {
       />,
     );
     const projItem = screen.getByText("proj-a").closest(".project-tree__item")!;
-    expect(projItem.querySelector(".project-tree__ongoing-dot")).toBeInTheDocument();
+    expect(projItem.querySelector(".ongoing-dots")).toBeInTheDocument();
   });
 
   it("does not show ongoing dot when no ongoing sessions", () => {
@@ -111,7 +111,7 @@ describe("ProjectTree", () => {
       />,
     );
     const projItem = screen.getByText("proj-a").closest(".project-tree__item")!;
-    expect(projItem.querySelector(".project-tree__ongoing-dot")).not.toBeInTheDocument();
+    expect(projItem.querySelector(".ongoing-dots")).not.toBeInTheDocument();
   });
 
   it("highlights selected project", () => {

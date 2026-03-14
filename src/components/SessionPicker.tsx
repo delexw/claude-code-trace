@@ -1,6 +1,7 @@
 import { useRef, useMemo } from "react";
 import { useScrollToSelected } from "../hooks/useScrollToSelected";
 import type { SessionInfo } from "../types";
+import { OngoingDots } from "./OngoingDots";
 import {
   formatTokens,
   formatDuration,
@@ -121,7 +122,7 @@ export function SessionPicker({
                     </span>
                     {session.is_ongoing && (
                       <span className="picker__session-ongoing">
-                        <span className="picker__session-ongoing-dot" />
+                        <OngoingDots count={1} />
                         ACTIVE
                       </span>
                     )}

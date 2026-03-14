@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::parser::chunk::*;
 use crate::parser::last_output::{find_last_output, LastOutput, LastOutputType};
-use crate::parser::ongoing::is_subagent_ongoing;
+use crate::parser::ongoing::OngoingChecker;
 use crate::parser::subagent::SubagentProcess;
 use crate::parser::taxonomy::ToolCategory;
 use crate::parser::team::TeamSnapshot;
@@ -251,7 +251,7 @@ fn convert_display_items(
             // Link subagent process if available (Subagent items and ToolCall items like Skill).
             if it.item_type == DisplayItemType::Subagent || !it.tool_id.is_empty() {
                 if let Some(proc) = proc_by_task_id.get(it.tool_id.as_str()) {
-                    fdi.subagent_ongoing = is_subagent_ongoing(proc);
+                    fdi.subagent_ongoing = OngoingChecker::is_subagent_ongoing(proc);
                     fdi.agent_id = proc.id.clone();
                     fdi.subagent_prompt = proc.prompt.clone();
                     if !proc.teammate_color.is_empty() {

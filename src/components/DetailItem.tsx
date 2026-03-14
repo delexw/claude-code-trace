@@ -5,6 +5,7 @@ import { formatTokens, formatDuration, formatJson, firstLine, truncate } from ".
 import { getTeamColor } from "../lib/theme";
 import { StatsBar, useSubagentStats } from "./StatsBar";
 import { PopoutModal } from "./PopoutModal";
+import { OngoingDots } from "./OngoingDots";
 import {
   toolCategoryIcons,
   ClaudeIcon,
@@ -94,15 +95,7 @@ export function DetailItem({
           {item.token_count > 0 && (
             <span className="detail-item__tokens">{formatTokens(item.token_count)} tok</span>
           )}
-          {item.subagent_ongoing && (
-            <span className="message__ongoing-dots">
-              <span className="project-tree__ongoing-dot" />
-              <span className="project-tree__ongoing-dot" />
-              <span className="project-tree__ongoing-dot" />
-              <span className="project-tree__ongoing-dot" />
-              <span className="project-tree__ongoing-dot" />
-            </span>
-          )}
+          {item.subagent_ongoing && <OngoingDots />}
           {(hasAgentMessages || item.subagent_prompt) && (
             <button
               className="message__detail-btn"
