@@ -40,6 +40,17 @@ export function usePicker(selectedProject: string | null = null) {
     setState((prev) => ({ ...prev, searchQuery: query }));
   }, []);
 
+  /** Sync a session's ongoing status from the session watcher (more accurate). */
+  const updateSessionOngoing = useCallback((path: string, ongoing: boolean) => {
+    setState((prev) => {
+      const idx = prev.sessions.findIndex((s) => s.path === path);
+      if (idx === -1 || prev.sessions[idx].is_ongoing === ongoing) return prev;
+      const sessions = [...prev.sessions];
+      sessions[idx] = { ...sessions[idx], is_ongoing: ongoing };
+      return { ...prev, sessions };
+    });
+  }, []);
+
   // Listen for picker-refresh events (backend already applies staleness)
   useTauriEvent<{ sessions: SessionInfo[] }>("picker-refresh", (payload) => {
     setState((prev) => ({
@@ -79,5 +90,6 @@ export function usePicker(selectedProject: string | null = null) {
     searchQuery: state.searchQuery,
     setSearchQuery,
     discoverSessions,
+    updateSessionOngoing,
   };
 }

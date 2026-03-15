@@ -43,7 +43,7 @@ export function App() {
   const projectKeys = useProjectKeys(picker.allSessions);
 
   const { loadSession, loadDebugLog, sessionPath } = session;
-  const { discoverSessions } = picker;
+  const { discoverSessions, updateSessionOngoing } = picker;
 
   const {
     set: expandedMessages,
@@ -85,6 +85,14 @@ export function App() {
     };
     discover();
   }, [loadProjectDirs]);
+
+  // Sync session watcher's ongoing status to picker (avoids race condition
+  // where picker watcher emits before session watcher updates).
+  useEffect(() => {
+    if (session.sessionPath) {
+      updateSessionOngoing(session.sessionPath, session.ongoing);
+    }
+  }, [session.sessionPath, session.ongoing, updateSessionOngoing]);
 
   // Handle session selection from picker
   const handleSelectSession = useCallback(
