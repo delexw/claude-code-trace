@@ -1,5 +1,5 @@
-import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { describe, it, expect } from "vitest";
+import { render, screen } from "@testing-library/react";
 import { TeamBoard } from "./TeamBoard";
 import type { TeamSnapshot } from "../types";
 
@@ -18,13 +18,13 @@ function makeTeam(overrides: Partial<TeamSnapshot> = {}): TeamSnapshot {
 
 describe("TeamBoard", () => {
   it("shows 'No active teams' when teams array is empty", () => {
-    render(<TeamBoard teams={[]} onBack={vi.fn()} />);
+    render(<TeamBoard teams={[]} />);
     expect(screen.getByText("No active teams")).toBeInTheDocument();
   });
 
   it("shows 'No active teams' when all teams are deleted", () => {
     const teams = [makeTeam({ deleted: true }), makeTeam({ deleted: true, name: "Beta" })];
-    render(<TeamBoard teams={teams} onBack={vi.fn()} />);
+    render(<TeamBoard teams={teams} />);
     expect(screen.getByText("No active teams")).toBeInTheDocument();
   });
 
@@ -33,14 +33,14 @@ describe("TeamBoard", () => {
       makeTeam({ name: "Active Team", deleted: false }),
       makeTeam({ name: "Deleted Team", deleted: true }),
     ];
-    render(<TeamBoard teams={teams} onBack={vi.fn()} />);
+    render(<TeamBoard teams={teams} />);
     expect(screen.getByText("Active Team")).toBeInTheDocument();
     expect(screen.queryByText("Deleted Team")).not.toBeInTheDocument();
   });
 
   it("renders team name and description", () => {
     const teams = [makeTeam({ name: "My Team", description: "Does cool stuff" })];
-    render(<TeamBoard teams={teams} onBack={vi.fn()} />);
+    render(<TeamBoard teams={teams} />);
     expect(screen.getByText("My Team")).toBeInTheDocument();
     expect(screen.getByText("Does cool stuff")).toBeInTheDocument();
   });
@@ -52,7 +52,7 @@ describe("TeamBoard", () => {
         member_colors: { alice: "blue", bob: "red" },
       }),
     ];
-    render(<TeamBoard teams={teams} onBack={vi.fn()} />);
+    render(<TeamBoard teams={teams} />);
     expect(screen.getByText("alice")).toBeInTheDocument();
     expect(screen.getByText("bob")).toBeInTheDocument();
     expect(screen.getByText("Members (2)")).toBeInTheDocument();
@@ -66,7 +66,7 @@ describe("TeamBoard", () => {
         member_ongoing: { alice: true },
       }),
     ];
-    render(<TeamBoard teams={teams} onBack={vi.fn()} />);
+    render(<TeamBoard teams={teams} />);
     const memberEl = screen.getByText("alice").closest(".team-member")!;
     expect(memberEl.querySelector(".team-member__ongoing")).toBeInTheDocument();
   });
@@ -79,7 +79,7 @@ describe("TeamBoard", () => {
         member_ongoing: { alice: false },
       }),
     ];
-    render(<TeamBoard teams={teams} onBack={vi.fn()} />);
+    render(<TeamBoard teams={teams} />);
     const memberEl = screen.getByText("alice").closest(".team-member")!;
     expect(memberEl.querySelector(".team-member__ongoing")).not.toBeInTheDocument();
   });
@@ -94,7 +94,7 @@ describe("TeamBoard", () => {
         ],
       }),
     ];
-    render(<TeamBoard teams={teams} onBack={vi.fn()} />);
+    render(<TeamBoard teams={teams} />);
     expect(screen.getByText("Fix bug")).toBeInTheDocument();
     expect(screen.getByText("Add feature")).toBeInTheDocument();
     expect(screen.getByText("Write docs")).toBeInTheDocument();
@@ -102,12 +102,5 @@ describe("TeamBoard", () => {
     expect(screen.getByText("in_progress")).toBeInTheDocument();
     expect(screen.getByText("pending")).toBeInTheDocument();
     expect(screen.getByText("Tasks (3)")).toBeInTheDocument();
-  });
-
-  it("back button calls onBack", () => {
-    const onBack = vi.fn();
-    render(<TeamBoard teams={[]} onBack={onBack} />);
-    fireEvent.click(screen.getByText(/Back/));
-    expect(onBack).toHaveBeenCalledTimes(1);
   });
 });

@@ -34,23 +34,17 @@ describe("KeybindBar", () => {
     expect(screen.getByText("items")).toBeInTheDocument();
     expect(screen.getByText("toggle")).toBeInTheDocument();
     expect(screen.getByText("open")).toBeInTheDocument();
-    expect(screen.getByText("page")).toBeInTheDocument();
+    expect(screen.getByText("panels")).toBeInTheDocument();
     expect(screen.getByText("back")).toBeInTheDocument();
   });
 
   it("renders correct keybinds for debug view", () => {
     render(<KeybindBar view="debug" hasTeams={false} />);
-    expect(screen.getByText("nav")).toBeInTheDocument();
-    expect(screen.getByText("level filter")).toBeInTheDocument();
-    expect(screen.getByText("search")).toBeInTheDocument();
-    expect(screen.getByText("expand")).toBeInTheDocument();
     expect(screen.getByText("back")).toBeInTheDocument();
   });
 
   it("renders correct keybinds for team view", () => {
     render(<KeybindBar view="team" hasTeams={false} />);
-    expect(screen.getByText("scroll")).toBeInTheDocument();
-    expect(screen.getByText("jump")).toBeInTheDocument();
     expect(screen.getByText("back")).toBeInTheDocument();
   });
 

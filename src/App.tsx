@@ -325,10 +325,10 @@ export function App() {
         return null;
 
       case "team":
-        return <TeamBoard teams={session.teams} onBack={() => setView("list")} />;
+        return <TeamBoard teams={session.teams} />;
 
       case "debug":
-        return <DebugViewer entries={session.debugEntries} onBack={() => setView("list")} />;
+        return <DebugViewer entries={session.debugEntries} />;
     }
   };
 

@@ -1,23 +1,18 @@
 import type { TeamSnapshot } from "../types";
 import { getTeamColor } from "../lib/theme";
-import { BackButton } from "./BackButton";
 import { taskStatusIcons, ClaudeIcon, ForwardIcon } from "./Icons";
 
 interface TeamBoardProps {
   teams: TeamSnapshot[];
-  onBack: () => void;
 }
 
-export function TeamBoard({ teams, onBack }: TeamBoardProps) {
+export function TeamBoard({ teams }: TeamBoardProps) {
   // Filter out deleted teams
   const activeTeams = teams.filter((t) => !t.deleted);
 
   if (activeTeams.length === 0) {
     return (
       <div className="team-board">
-        <div className="team-board__header">
-          <BackButton onClick={onBack} />
-        </div>
         <div className="empty-state">
           <div className="empty-state__icon">
             <ClaudeIcon />
@@ -30,10 +25,9 @@ export function TeamBoard({ teams, onBack }: TeamBoardProps) {
 
   return (
     <div className="team-board">
-      {activeTeams.map((team, teamIdx) => (
+      {activeTeams.map((team) => (
         <div key={team.name || `team-${team.description}`}>
           <div className="team-board__header">
-            {teamIdx === 0 && <BackButton onClick={onBack} />}
             <div className="team-board__title">{team.name || "Team"}</div>
             {team.description && <div className="team-board__desc">{team.description}</div>}
           </div>

@@ -101,6 +101,13 @@ export function ViewToolbar({
     );
   }
 
-  // detail, team, debug views have their own back buttons
-  return null;
+  // detail, team, debug — back button + right buttons
+  return (
+    <div className="view-toolbar">
+      <button className="view-toolbar__btn" onClick={onBackToList}>
+        <BackIcon /> Back to Messages
+      </button>
+      <RightButtons onOpenSettings={onOpenSettings} />
+    </div>
+  );
 }

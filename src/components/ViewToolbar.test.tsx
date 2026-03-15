@@ -108,12 +108,20 @@ describe("ViewToolbar", () => {
     });
   });
 
-  describe("other views return null", () => {
+  describe("detail/team/debug views show back + settings", () => {
     for (const view of ["detail", "team", "debug"] as const) {
-      it(`${view} view returns null`, () => {
-        const { container } = render(<ViewToolbar {...defaultProps({ view })} />);
-        expect(container.innerHTML).toBe("");
+      it(`${view} view shows Back to Messages and Settings`, () => {
+        render(<ViewToolbar {...defaultProps({ view })} />);
+        expect(screen.getByText(/Back to Messages/)).toBeInTheDocument();
+        expect(screen.getByTitle("Settings")).toBeInTheDocument();
       });
     }
+
+    it("calls onBackToList when back clicked in detail view", () => {
+      const props = defaultProps({ view: "detail" });
+      render(<ViewToolbar {...props} />);
+      fireEvent.click(screen.getByText(/Back to Messages/));
+      expect(props.onBackToList).toHaveBeenCalled();
+    });
   });
 });

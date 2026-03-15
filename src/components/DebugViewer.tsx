@@ -2,16 +2,14 @@ import { useState, useRef, useEffect, useMemo } from "react";
 import type { DebugEntry } from "../types";
 import { useToggleSet } from "../hooks/useToggleSet";
 import { useScrollToSelected } from "../hooks/useScrollToSelected";
-import { BackButton } from "./BackButton";
 
 type DebugLevel = "all" | "warn" | "error";
 
 interface DebugViewerProps {
   entries: DebugEntry[];
-  onBack: () => void;
 }
 
-export function DebugViewer({ entries, onBack }: DebugViewerProps) {
+export function DebugViewer({ entries }: DebugViewerProps) {
   const [levelFilter, setLevelFilter] = useState<DebugLevel>("all");
   const [searchText, setSearchText] = useState("");
   const { set: expandedSet, toggle: toggleExpand, clear: clearExpanded } = useToggleSet();
@@ -55,7 +53,6 @@ export function DebugViewer({ entries, onBack }: DebugViewerProps) {
   return (
     <div className="debug-viewer">
       <div className="debug-viewer__header">
-        <BackButton onClick={onBack} />
         <span className="debug-viewer__title">Debug Log</span>
 
         <div className="debug-viewer__filter-group">

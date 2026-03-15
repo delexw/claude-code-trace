@@ -34,9 +34,7 @@ const detailKeys: KeyHint[] = [
   { key: "j/k", label: "items" },
   { key: "Tab", label: "toggle" },
   { key: "Enter", label: "open" },
-  { key: "\u2191/\u2193", label: "scroll" },
-  { key: "J/K", label: "page" },
-  { key: "G/g", label: "jump" },
+  { key: "h/l", label: "panels" },
   { key: "q/Esc", label: "back" },
 ];
 
@@ -47,19 +45,9 @@ const pickerKeys: KeyHint[] = [
   { key: "q/Esc", label: "back" },
 ];
 
-const debugKeys: KeyHint[] = [
-  { key: "j/k", label: "nav" },
-  { key: "f", label: "level filter" },
-  { key: "/", label: "search" },
-  { key: "Tab", label: "expand" },
-  { key: "q/Esc", label: "back" },
-];
+const debugKeys: KeyHint[] = [{ key: "q/Esc", label: "back" }];
 
-const teamKeys: KeyHint[] = [
-  { key: "j/k", label: "scroll" },
-  { key: "G/g", label: "jump" },
-  { key: "q/Esc", label: "back" },
-];
+const teamKeys: KeyHint[] = [{ key: "q/Esc", label: "back" }];
 
 function getKeys(view: ViewState, hasTeams: boolean): KeyHint[] {
   switch (view) {
