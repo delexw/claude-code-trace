@@ -1,0 +1,1 @@
+update "tail-claude-gui" to "claude-code-trace"
