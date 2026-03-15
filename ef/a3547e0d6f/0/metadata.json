@@ -1,0 +1,41 @@
+{
+  "cli_version": "0.5.0",
+  "checkpoint_id": "efa3547e0d6f",
+  "session_id": "5263810f-b5fa-41d5-8016-2298693a88d4",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-15T23:22:19.911904Z",
+  "branch": "main",
+  "checkpoints_count": 9,
+  "files_touched": [
+    "README.md",
+    "src-tauri/gen/schemas/acl-manifests.json",
+    "src-tauri/gen/schemas/desktop-schema.json",
+    "src-tauri/gen/schemas/macOS-schema.json",
+    "src-tauri/permissions/default.toml",
+    "src-tauri/src/lib.rs",
+    "src-tauri/tauri.conf.json",
+    "src/components/ViewToolbar.tsx"
+  ],
+  "agent": "Claude Code",
+  "model": "claude-opus-4-6[1m]",
+  "turn_id": "3a186b30cff2",
+  "token_usage": {
+    "input_tokens": 309,
+    "cache_creation_tokens": 1253574,
+    "cache_read_tokens": 36060056,
+    "output_tokens": 82365,
+    "api_call_count": 239
+  },
+  "session_metrics": {
+    "turn_count": 29
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-03-15T23:22:17.438825Z",
+    "agent_lines": 86,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 86,
+    "agent_percentage": 100
+  }
+}

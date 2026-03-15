@@ -1,0 +1,32 @@
+{
+  "cli_version": "0.5.0",
+  "checkpoint_id": "efa3547e0d6f",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 9,
+  "files_touched": [
+    "README.md",
+    "src-tauri/gen/schemas/acl-manifests.json",
+    "src-tauri/gen/schemas/desktop-schema.json",
+    "src-tauri/gen/schemas/macOS-schema.json",
+    "src-tauri/permissions/default.toml",
+    "src-tauri/src/lib.rs",
+    "src-tauri/tauri.conf.json",
+    "src/components/ViewToolbar.tsx"
+  ],
+  "sessions": [
+    {
+      "metadata": "/ef/a3547e0d6f/0/metadata.json",
+      "transcript": "/ef/a3547e0d6f/0/full.jsonl",
+      "content_hash": "/ef/a3547e0d6f/0/content_hash.txt",
+      "prompt": "/ef/a3547e0d6f/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 309,
+    "cache_creation_tokens": 1253574,
+    "cache_read_tokens": 36060056,
+    "output_tokens": 82365,
+    "api_call_count": 239
+  }
+}
