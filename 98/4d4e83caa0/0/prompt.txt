@@ -205,3 +205,7 @@ I mean they are for all page
 ---
 
 These buttons doesn't work on deep page.. If I active a page/window... These button should work on the active one
+
+---
+
+yes
