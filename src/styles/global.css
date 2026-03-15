@@ -1003,6 +1003,16 @@ body {
   color: var(--text-dim);
 }
 
+.session-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 48px 24px;
+  color: var(--text-dim);
+  height: 100%;
+}
+
 /* ---- Message List ---- */
 
 .message-list {

@@ -284,6 +284,14 @@ export function App() {
         );
 
       case "list":
+        if (session.loading) {
+          return (
+            <div className="session-loading">
+              <span className="braille-spinner" />
+              Loading session...
+            </div>
+          );
+        }
         return (
           <MessageList
             messages={session.messages}
