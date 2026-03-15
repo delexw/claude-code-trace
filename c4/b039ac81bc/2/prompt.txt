@@ -1,0 +1,18 @@
+How to clean up  mise which medium      
+mise ERROR medium is a mise bin however it is not currently active. Use `mise use` to activate it in this directory. from mise
+
+---
+
+can you clean?
+
+---
+
+so use npm:mediumcli?
+
+---
+
+Attempt 3: Cascading status with subagents either right?
+
+---
+
+I mean it isn't related to Claude Code JSONL related
