@@ -102,3 +102,7 @@ Read the output file to retrieve the result: /private/tmp/claude-502/-Users-yang
 ---
 
 /autoresearch review the web version if following SOLID
+
+---
+
+/git-commit
