@@ -18,7 +18,6 @@ import {
   IconBranch,
   IconChat,
   IconClock,
-  IconToken,
   IconSession,
   IconHRule,
 } from "../lib/icons.js";
@@ -156,12 +155,12 @@ export function SessionPicker({ sessions, loading, error, selectedIndex }: Sessi
                       {truncate(s.first_message || s.session_id, msgMaxLen)}
                     </Text>
                   </Box>
-                  {/* Line 2: metadata with Nerd Font icons — matches Go TUI */}
+                  {/* Line 2: metadata — model, branch, turns, tokens, cost, session, time */}
                   <Box>
                     <Text color={isSelected ? colors.accent : colors.border}>
                       {isSelected ? `${IconSelected2} ` : "  "}
                     </Text>
-                    {model && <Text color={modelColor(s.model)}>{model.padEnd(10)}</Text>}
+                    {model && <Text color={modelColor(s.model)}>{model}</Text>}
                     {s.git_branch ? (
                       <Text color={colors.gitBranch}>
                         {" "}
@@ -170,12 +169,12 @@ export function SessionPicker({ sessions, loading, error, selectedIndex }: Sessi
                     ) : null}
                     <Text dimColor>
                       {" "}
-                      {IconChat} {String(s.turn_count).padStart(3)}
+                      {IconChat} {s.turn_count}
                     </Text>
                     {s.total_tokens > 0 && (
                       <Text color={s.total_tokens > 150000 ? colors.tokenHigh : colors.textDim}>
                         {" "}
-                        {IconToken} {formatTokens(s.total_tokens)}
+                        {formatTokens(s.total_tokens)} tok
                       </Text>
                     )}
                     {s.cost_usd > 0 && (

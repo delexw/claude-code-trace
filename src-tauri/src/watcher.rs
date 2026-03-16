@@ -151,6 +151,19 @@ pub fn start_session_watcher(
                     break;
                 }
                 Some(()) = signal_rx.recv() => {
+                    // Detect file truncation (e.g. after /clear): if the file
+                    // is shorter than our current offset, the content was
+                    // replaced — reset and re-read from scratch.
+                    let file_size = std::fs::metadata(&path_for_rebuild)
+                        .map(|m| m.len())
+                        .unwrap_or(0);
+                    if file_size < offset {
+                        offset = 0;
+                        all_classified.clear();
+                        prev_msg_count = 0;
+                        token_scanner = IncrementalTokenScanner::new();
+                    }
+
                     // Read any new data from the main session file.
                     match read_session_incremental(&path_for_rebuild, offset) {
                         Ok((new_msgs, new_offset, _)) => {

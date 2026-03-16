@@ -352,7 +352,7 @@ export function MessageDetail({
                 <div className="detail-items__section-label">Items ({msg.items.length})</div>
                 {msg.items.map((item, idx) => (
                   <DetailItem
-                    key={`${item.item_type}-${item.tool_name}-${item.tool_summary}-${item.duration_ms}`}
+                    key={idx}
                     ref={idx === selectedItem ? scrollRef : undefined}
                     item={item}
                     index={idx}
@@ -732,7 +732,7 @@ function AgentDetailColumn({
                 <div className="detail-items__section-label">Items ({msg.items.length})</div>
                 {msg.items.map((di, idx) => (
                   <DetailItem
-                    key={`${di.item_type}-${di.tool_name}-${di.tool_summary}-${di.duration_ms}`}
+                    key={idx}
                     ref={idx === selectedItem ? scrollRef : undefined}
                     item={di}
                     index={idx}

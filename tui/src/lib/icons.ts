@@ -39,7 +39,7 @@ export const IconEllipsis = "\u2026"; // horizontal ellipsis … (U+2026)
 export const IconBranch = "*"; // asterisk — conventional git branch marker
 export const IconChat = "#"; // hash — turn/message count
 export const IconClock = "~"; // tilde — relative time
-export const IconToken = "$"; // dollar — token/cost
+export const IconToken = "\u2022"; // bullet • — token count (avoids $ ambiguity with cost)
 export const IconSession = "@"; // at-sign — session identity
 export const IconDot = "\u00B7"; // middle dot · (U+00B7)
 

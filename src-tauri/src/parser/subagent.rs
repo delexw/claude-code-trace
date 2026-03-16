@@ -671,16 +671,50 @@ pub fn inject_orphan_subagents(chunks: &mut Vec<Chunk>, processes: &mut [Subagen
         // Set parent_task_id so convert_display_items can link via proc_by_task_id.
         processes[oi].parent_task_id = synthetic_tool_id.clone();
 
+        // Derive a description for the orphan from its prompt when the linking
+        // phases didn't supply one (e.g. after /clear truncated the main JSONL).
+        let desc = if processes[oi].description.is_empty() {
+            orphan_description_from_prompt(&processes[oi].prompt)
+        } else {
+            processes[oi].description.clone()
+        };
+
         chunks[idx].items.push(DisplayItem {
             item_type: DisplayItemType::Subagent,
             tool_name: "Agent".to_string(),
             tool_id: synthetic_tool_id,
             subagent_type: processes[oi].subagent_type.clone(),
-            subagent_desc: processes[oi].description.clone(),
+            subagent_desc: desc,
             is_orphan: true,
             duration_ms: processes[oi].duration_ms,
             ..Default::default()
         });
+    }
+}
+
+/// Derive a human-readable description for an orphan subagent from its prompt.
+/// Skill-based subagents typically start with "Base directory for this skill: /…/skill-name\n".
+/// Falls back to the first 80 characters of the prompt.
+fn orphan_description_from_prompt(prompt: &str) -> String {
+    if prompt.is_empty() {
+        return String::new();
+    }
+    // Skill subagents: "Base directory for this skill: /path/to/skill-name"
+    if let Some(rest) = prompt.strip_prefix("Base directory for this skill: ") {
+        let first_line = rest.lines().next().unwrap_or("");
+        // Extract the last path component as the skill name.
+        if let Some(name) = first_line.rsplit('/').next() {
+            if !name.is_empty() {
+                return name.to_string();
+            }
+        }
+    }
+    // Fallback: first line, capped at 80 chars.
+    let first_line = prompt.lines().next().unwrap_or(prompt);
+    if first_line.len() > 80 {
+        format!("{}…", &first_line[..80])
+    } else {
+        first_line.to_string()
     }
 }
 
@@ -1333,5 +1367,70 @@ mod tests {
             make_user_chunk("user prompt"),
         ];
         assert_eq!(first_user_text(&chunks), "user prompt");
+    }
+
+    #[test]
+    fn orphan_description_extracts_skill_name() {
+        let prompt = "Base directory for this skill: /Users/yang/.claude/skills/qa-web-test\n\n# QA Web Testing";
+        assert_eq!(orphan_description_from_prompt(prompt), "qa-web-test");
+    }
+
+    #[test]
+    fn orphan_description_extracts_nested_skill_name() {
+        let prompt = "Base directory for this skill: /Users/yang/.claude/skills/forge\n\n# Forge";
+        assert_eq!(orphan_description_from_prompt(prompt), "forge");
+    }
+
+    #[test]
+    fn orphan_description_falls_back_to_first_line() {
+        let prompt = "Investigate PagerDuty incidents for the past 24 hours";
+        assert_eq!(orphan_description_from_prompt(prompt), prompt);
+    }
+
+    #[test]
+    fn orphan_description_truncates_long_prompt() {
+        let prompt = "A".repeat(120);
+        let desc = orphan_description_from_prompt(&prompt);
+        assert!(desc.ends_with('…'));
+        assert_eq!(desc.chars().count(), 81); // 80 chars + '…'
+    }
+
+    #[test]
+    fn orphan_description_empty_prompt() {
+        assert_eq!(orphan_description_from_prompt(""), "");
+    }
+
+    #[test]
+    fn orphan_gets_description_from_prompt_when_unlinked() {
+        use chrono::TimeZone;
+
+        let mut chunks = vec![Chunk {
+            chunk_type: ChunkType::AI,
+            timestamp: Utc.with_ymd_and_hms(2026, 3, 12, 21, 20, 0).unwrap(),
+            ..Default::default()
+        }];
+
+        let mut procs = vec![SubagentProcess {
+            id: "skill-agent".to_string(),
+            parent_task_id: String::new(),
+            subagent_type: "general-purpose".to_string(),
+            description: String::new(), // no description from linking
+            prompt: "Base directory for this skill: /Users/yang/.claude/skills/qa-web-test\n\nQA content".to_string(),
+            start_time: Utc.with_ymd_and_hms(2026, 3, 12, 21, 21, 0).unwrap(),
+            chunks: vec![Chunk {
+                chunk_type: ChunkType::AI,
+                ..Default::default()
+            }],
+            ..Default::default()
+        }];
+
+        inject_orphan_subagents(&mut chunks, &mut procs);
+
+        let orphan = &chunks[0].items[0];
+        assert!(orphan.is_orphan);
+        assert_eq!(
+            orphan.subagent_desc, "qa-web-test",
+            "orphan should extract skill name from prompt"
+        );
     }
 }
