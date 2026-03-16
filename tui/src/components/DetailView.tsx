@@ -210,9 +210,7 @@ function DetailItemBody({ item, cols }: { item: DisplayItem; cols: number }) {
               </Text>
             </Box>
           )}
-          {item.tool_input && item.tool_result && (
-            <Text color={colors.textMuted}>{hrule}</Text>
-          )}
+          {item.tool_input && item.tool_result && <Text color={colors.textMuted}>{hrule}</Text>}
           {item.tool_result && (
             <Box flexDirection="column">
               <Text bold color={item.tool_error ? colors.error : colors.textSecondary}>

@@ -65,14 +65,10 @@ export function MessageList({ messages, selectedIndex, expandedSet, ongoing }: M
         }
 
         if (msg.role === "system") {
+          const sysText = `${IconHRule}${IconHRule} ${roleIcon("system")} System ${IconDot} ${truncate(msg.content, contentWidth - 20)} ${IconHRule}${IconHRule}`;
           return (
             <Box key={`sys-${idx}`} justifyContent="center" paddingX={2}>
-              <Text color={colors.textMuted}>
-                {IconHRule}
-                {IconHRule} {roleIcon("system")} System {IconDot}{" "}
-                {truncate(msg.content, contentWidth - 20)} {IconHRule}
-                {IconHRule}
-              </Text>
+              <Text color={colors.textMuted}>{sysText}</Text>
             </Box>
           );
         }
@@ -126,8 +122,10 @@ export function MessageList({ messages, selectedIndex, expandedSet, ongoing }: M
               </Text>
             </Box>
 
-            {/* Stats row */}
-            <StatsBar stats={stats} />
+            {/* Stats row — aligned with body content */}
+            <Box paddingLeft={2}>
+              <StatsBar stats={stats} />
+            </Box>
 
             {/* Expanded items tree */}
             {isExpanded && msg.items.length > 0 && (
