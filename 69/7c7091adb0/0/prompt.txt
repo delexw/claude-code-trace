@@ -1,0 +1,13 @@
+The layout is hard to view please redesign
+
+---
+
+Can format the message detials with better display?
+
+---
+
+Can you make a kind of container for TUI such as the image for detailed message?
+
+---
+
+layout mess
