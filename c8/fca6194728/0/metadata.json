@@ -1,0 +1,33 @@
+{
+  "cli_version": "0.5.0",
+  "checkpoint_id": "c8fca6194728",
+  "session_id": "8fa770ab-91db-49e6-829e-66d5ed3e48dc",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-16T03:30:37.120014Z",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "tui/src/components/ProjectTree.tsx"
+  ],
+  "agent": "Claude Code",
+  "turn_id": "bbcdf422966b",
+  "token_usage": {
+    "input_tokens": 1660,
+    "cache_creation_tokens": 340772,
+    "cache_read_tokens": 76400821,
+    "output_tokens": 116593,
+    "api_call_count": 345
+  },
+  "session_metrics": {
+    "turn_count": 10
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-03-16T03:30:36.24135Z",
+    "agent_lines": 0,
+    "human_added": 0,
+    "human_modified": 10,
+    "human_removed": 177,
+    "total_committed": 0,
+    "agent_percentage": 0
+  }
+}
