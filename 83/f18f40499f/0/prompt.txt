@@ -167,3 +167,7 @@ Why text are not left aligned?
 ---
 
 In subagent. I can only see user message no agent message list
+
+---
+
+gesus.... The text are not aligned left fuck off you revert it
