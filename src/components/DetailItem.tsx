@@ -173,7 +173,7 @@ function DetailItemBody({ item }: { item: DisplayItem }) {
     case "Output":
       return (
         <div className="detail-item__body">
-          <div className="detail-item__text">
+          <div className="detail-item__text detail-item__text--markdown">
             <ReactMarkdown>{item.text}</ReactMarkdown>
           </div>
         </div>

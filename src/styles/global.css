@@ -1511,6 +1511,10 @@ body {
   overflow-y: auto;
 }
 
+.detail-item__text--markdown {
+  white-space: normal;
+}
+
 .detail-item__text--error {
   color: var(--error);
 }

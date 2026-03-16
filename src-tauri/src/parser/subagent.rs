@@ -681,9 +681,13 @@ pub fn inject_orphan_subagents(chunks: &mut Vec<Chunk>, processes: &mut [Subagen
     // Always create a dedicated synthetic AI chunk for orphans, timestamped
     // to the earliest orphan's start_time so it sorts naturally.
     let label = if items.len() == 1 {
-        "Unlinked subagent (from before /clear)".to_string()
+        "This is an unlinked subagent because its parent tool call is no longer in the session log."
+            .to_string()
     } else {
-        format!("{} unlinked subagents (from before /clear)", items.len())
+        format!(
+            "These are {} unlinked subagents because their parent tool calls are no longer in the session log.",
+            items.len()
+        )
     };
     chunks.push(Chunk {
         chunk_type: ChunkType::AI,
