@@ -1,0 +1,1 @@
+https://github.com/delexw/claude-code-trace/actions/runs/23132170659/job/67187706310 fix the issues
