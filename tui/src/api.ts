@@ -21,16 +21,16 @@ export interface SettingsResponse {
   default_dir: string;
 }
 
-const API = "http://127.0.0.1:11423";
+export const API_BASE = "http://127.0.0.1:11423";
 
 async function get<T>(path: string): Promise<T> {
-  const res = await fetch(`${API}${path}`);
+  const res = await fetch(`${API_BASE}${path}`);
   if (!res.ok) throw new Error(`API ${path}: ${res.statusText}`);
   return res.json() as Promise<T>;
 }
 
 async function post<T>(path: string, body?: unknown): Promise<T> {
-  const res = await fetch(`${API}${path}`, {
+  const res = await fetch(`${API_BASE}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: body ? JSON.stringify(body) : undefined,

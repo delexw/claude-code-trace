@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { EventSource } from "eventsource";
 
-const API = "http://127.0.0.1:11423";
+import { API_BASE } from "./api.js";
 
 /** Shared SSE connection — lazily created, ref-counted (matches web's listen.ts pattern). */
 let sharedSource: EventSource | null = null;
@@ -9,7 +9,7 @@ let refCount = 0;
 
 function acquireSource(): EventSource {
   if (!sharedSource || sharedSource.readyState === EventSource.CLOSED) {
-    sharedSource = new EventSource(`${API}/api/events`);
+    sharedSource = new EventSource(`${API_BASE}/api/events`);
   }
   refCount++;
   return sharedSource;
