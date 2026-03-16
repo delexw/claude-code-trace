@@ -356,8 +356,11 @@ describe("groupByDate", () => {
   });
 
   it("sorts items within group by mod_time descending", () => {
+    // Use midday timestamps to avoid crossing date boundaries near midnight in any timezone.
     const now = new Date();
-    const earlier = new Date(now.getTime() - 3600000); // 1 hour ago
+    now.setHours(14, 0, 0, 0);
+    const earlier = new Date(now);
+    earlier.setHours(12, 0, 0, 0);
     const items = [
       { mod_time: earlier.toISOString(), id: "earlier" },
       { mod_time: now.toISOString(), id: "now" },
