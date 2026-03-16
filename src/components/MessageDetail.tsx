@@ -43,6 +43,8 @@ interface ColumnNav {
   toggle: () => void;
   enter: () => void;
   itemCount: () => number;
+  expandAll: () => void;
+  collapseAll: () => void;
 }
 
 interface MessageDetailProps {
@@ -75,10 +77,25 @@ export function MessageDetail({
   const panelRefs = useRef<Map<number, ColumnNav>>(new Map());
 
   const detailExpandAll = useCallback(() => {
-    expandAllItems(msg.items.map((_, i) => i));
-  }, [msg.items, expandAllItems]);
+    if (focusedColumn === 0) {
+      expandAllItems(msg.items.map((_, i) => i));
+    } else {
+      panelRefs.current.get(focusedColumn - 1)?.expandAll();
+    }
+  }, [msg.items, expandAllItems, focusedColumn]);
 
-  useRegisterViewActions(viewActionsRef, { expandAll: detailExpandAll, collapseAll: clearItems });
+  const detailCollapseAll = useCallback(() => {
+    if (focusedColumn === 0) {
+      clearItems();
+    } else {
+      panelRefs.current.get(focusedColumn - 1)?.collapseAll();
+    }
+  }, [clearItems, focusedColumn]);
+
+  useRegisterViewActions(viewActionsRef, {
+    expandAll: detailExpandAll,
+    collapseAll: detailCollapseAll,
+  });
 
   // Keep panel stack items fresh when the session watcher sends updated data.
   // Without this, subagent_ongoing and subagent_messages would be stale.
@@ -475,7 +492,12 @@ function AgentListColumn({
 }: AgentListColumnProps) {
   const messages = item.subagent_messages;
   const [selectedMsg, setSelectedMsg] = useState(messages.length - 1);
-  const { set: expandedSet, toggle: toggleMsg } = useToggleSet();
+  const {
+    set: expandedSet,
+    toggle: toggleMsg,
+    addAll: expandAllMsgs,
+    clear: clearMsgs,
+  } = useToggleSet();
   const listRef = useAutoScroll<HTMLDivElement>(messages.length);
   const selectedRef = useScrollToSelected(selectedMsg);
   const panelColor = item.team_color ? getTeamColor(item.team_color) : undefined;
@@ -501,6 +523,8 @@ function AgentListColumn({
       if (messages[selectedMsg]) onOpenDetail(messages[selectedMsg]);
     },
     itemCount: () => messages.length,
+    expandAll: () => expandAllMsgs(messages.map((_, i) => i)),
+    collapseAll: () => clearMsgs(),
   });
   navRef.current.moveUp = () => setSelectedMsg((i) => Math.max(i - 1, 0));
   navRef.current.moveDown = () => setSelectedMsg((i) => Math.min(i + 1, messages.length - 1));
@@ -509,6 +533,8 @@ function AgentListColumn({
     if (messages[selectedMsg]) onOpenDetail(messages[selectedMsg]);
   };
   navRef.current.itemCount = () => messages.length;
+  navRef.current.expandAll = () => expandAllMsgs(messages.map((_, i) => i));
+  navRef.current.collapseAll = () => clearMsgs();
 
   // Register/unregister nav on mount/unmount
   useLayoutEffect(() => {
@@ -601,7 +627,12 @@ function AgentDetailColumn({
   onFocus,
   onRegisterNav,
 }: AgentDetailColumnProps) {
-  const { set: expandedItems, toggle: toggleItem } = useToggleSet();
+  const {
+    set: expandedItems,
+    toggle: toggleItem,
+    addAll: expandAllDetailItems,
+    clear: clearDetailItems,
+  } = useToggleSet();
   const [selectedItem, setSelectedItem] = useState(0);
   const scrollRef = useScrollToSelected(selectedItem);
   const detailBodyRef = useAutoScroll<HTMLDivElement>(msg.items.length);
@@ -632,6 +663,8 @@ function AgentDetailColumn({
     toggle: () => {},
     enter: () => {},
     itemCount: () => msg.items.length,
+    expandAll: () => expandAllDetailItems(msg.items.map((_, i) => i)),
+    collapseAll: () => clearDetailItems(),
   });
   navRef.current.moveUp = () => setSelectedItem((i) => Math.max(i - 1, 0));
   navRef.current.moveDown = () => setSelectedItem((i) => Math.min(i + 1, msg.items.length - 1));
@@ -648,6 +681,8 @@ function AgentDetailColumn({
     }
   };
   navRef.current.itemCount = () => msg.items.length;
+  navRef.current.expandAll = () => expandAllDetailItems(msg.items.map((_, i) => i));
+  navRef.current.collapseAll = () => clearDetailItems();
 
   useLayoutEffect(() => {
     onRegisterNav(navRef.current);
