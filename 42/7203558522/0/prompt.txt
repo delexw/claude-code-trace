@@ -1,0 +1,21 @@
+Why cctrace-tui?
+
+---
+
+Why not using same for destop and web?
+
+---
+
+why not call the desktop/web binary cctrace too, for consistency
+
+---
+
+Add a bin field to root package.json as cctrace so both CLIs share the cctrace prefix
+
+---
+
+yes, cctrace --web/tui/app
+
+---
+
+Update reade about usage
