@@ -1,0 +1,9 @@
+The progress dots are keep showing on the dummay agetn but the sub agent is stopped
+
+---
+
+Not fix... The progress status show on the opharn one but the message is continuing on other agetn message
+
+---
+
+please foce kill process 15883 for now
