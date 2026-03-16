@@ -1,0 +1,28 @@
+{
+  "cli_version": "0.5.0",
+  "checkpoint_id": "4097c2099734",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "tui/src/components/InfoBar.tsx",
+    "tui/src/lib/format.test.ts",
+    "tui/src/lib/format.ts",
+    "tui/src/lib/items.ts"
+  ],
+  "sessions": [
+    {
+      "metadata": "/40/97c2099734/0/metadata.json",
+      "transcript": "/40/97c2099734/0/full.jsonl",
+      "content_hash": "/40/97c2099734/0/content_hash.txt",
+      "prompt": "/40/97c2099734/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 1829,
+    "cache_creation_tokens": 1098426,
+    "cache_read_tokens": 129313576,
+    "output_tokens": 153881,
+    "api_call_count": 494
+  }
+}
