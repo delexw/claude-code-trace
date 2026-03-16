@@ -8,9 +8,13 @@ export type {
   LoadResult,
   SessionMeta,
   SessionTotals,
+  TeamSnapshot,
+  TeamTask,
+  DebugEntry,
+  GitInfo,
 } from "../../shared/types.js";
 
-import type { SessionInfo, LoadResult } from "../../shared/types.js";
+import type { SessionInfo, LoadResult, DebugEntry, GitInfo } from "../../shared/types.js";
 
 export interface SettingsResponse {
   projects_dir: string | null;
@@ -44,4 +48,7 @@ export const api = {
   loadSession: (path: string) => post<LoadResult>("/api/session/load", { path }),
   watchSession: (path: string) => post<void>("/api/session/watch", { path }),
   unwatchSession: () => post<void>("/api/session/unwatch"),
+  getDebugLog: (sessionPath: string) =>
+    get<DebugEntry[]>(`/api/debug-log?path=${encodeURIComponent(sessionPath)}`),
+  getGitInfo: (cwd: string) => get<GitInfo>(`/api/git-info?cwd=${encodeURIComponent(cwd)}`),
 };
