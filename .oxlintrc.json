@@ -28,6 +28,11 @@
           {
             "name": "@tauri-apps/plugin-opener",
             "message": "Use isTauri guard in src/main.tsx instead."
+          },
+          {
+            "name": "react",
+            "importNames": ["default"],
+            "message": "Not needed with react-jsx transform. Use named imports: import { useState } from 'react'."
           }
         ]
       }
@@ -56,7 +61,18 @@
     {
       "files": ["tui/**/*.ts", "tui/**/*.tsx"],
       "rules": {
-        "no-restricted-imports": "off"
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              {
+                "name": "react",
+                "importNames": ["default"],
+                "message": "Not needed with react-jsx transform. Use named imports."
+              }
+            ]
+          }
+        ]
       }
     }
   ]
