@@ -1,0 +1,39 @@
+Can TUI has same layout not list?
+
+---
+
+Cannot connect to backend. Is the app running?
+ TypeError: fetch failed
+
+---
+
+-> % npm run dev:tui
+
+> claude-code-trace@0.4.0 dev:tui
+> tauri dev -- -- --headless & sleep 5 && cd tui && npm run build && node dist/tui/src/cli.js
+
+     Running BeforeDevCommand (`npm run dev`)
+
+> claude-code-trace@0.4.0 dev
+> vite
+
+
+  VITE v7.3.1  ready in 107 ms
+
+  ➜  Local:   http://localhost:1420/
+     Running DevCommand (`cargo  run --no-default-features --color always -- --headless`)
+        Info Watching /Users/yang.liu/Envato/others/tail-claude-gui/src-tauri for changes...
+   Compiling claude-code-trace v0.4.0 (/Users/yang.liu/Envato/others/tail-claude-gui/src-tauri)
+    Building [=======================> ] 425/426: claude-code-trace(bin)                                                                                                                                                                              
+> claude-code-trace-tui@0.4.0 build
+> tsc
+
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 3.45s
+     Running `target/debug/claude-code-trace --headless`
+
+ Cannot connect to backend. Is the app running?
+ TypeError: fetch failed
+
+---
+
+I can not open each message details such as Bash message... Also no proejct tree side pannel
