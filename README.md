@@ -129,13 +129,25 @@ MCP (Model Context Protocol) tool calls are automatically detected and displayed
 
 ## TUI (Terminal UI)
 
-A terminal-based viewer that connects to the same HTTP API. No Tauri or browser needed — just Node.js.
+A terminal-based viewer that connects to the same HTTP API. No browser needed — just Node.js + a terminal.
 
 ```bash
-cd tui
-npm install
-npm run build
-node dist/cli.js    # requires the backend to be running
+# First time setup
+cd tui && npm install && npm run build && cd ..
+
+# Then run (two terminals):
+npm run dev:web          # Terminal 1: starts backend (opens browser too)
+npm run dev:tui          # Terminal 2: runs TUI in terminal
+```
+
+If you installed the desktop app:
+
+```bash
+# Terminal 1: start backend
+claude-code-trace --web
+
+# Terminal 2: run TUI
+cd tui && node dist/cli.js
 ```
 
 Features: session picker, message list with expand/collapse, live tailing via SSE, vim-style keybinds (j/k/G/g/Tab/e/c/q).
