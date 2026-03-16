@@ -2,6 +2,7 @@ import { Box, Text } from "ink";
 import type { DebugEntry } from "../api.js";
 import { truncate } from "../lib/format.js";
 import { colors } from "../lib/theme.js";
+import { stableWindow } from "../lib/window.js";
 
 interface DebugViewerProps {
   entries: DebugEntry[];
@@ -25,11 +26,9 @@ function levelColor(level: string): string {
 
 export function DebugViewer({ entries, selectedIndex }: DebugViewerProps) {
   const cols = process.stdout.columns || 80;
-  const windowSize = (process.stdout.rows || 24) - 4;
-
-  let start = Math.max(0, selectedIndex - Math.floor(windowSize / 2));
-  const end = Math.min(entries.length, start + windowSize);
-  if (end - start < windowSize) start = Math.max(0, end - windowSize);
+  const rows = process.stdout.rows || 24;
+  const windowSize = Math.max(4, rows - 6);
+  const { start, end } = stableWindow("debug", selectedIndex, entries.length, windowSize);
   const visible = entries.slice(start, end);
 
   if (entries.length === 0) {
@@ -52,7 +51,7 @@ export function DebugViewer({ entries, selectedIndex }: DebugViewerProps) {
         const ts = entry.timestamp ? entry.timestamp.split("T")[1]?.split(".")[0] || "" : "";
 
         return (
-          <Box key={idx}>
+          <Box key={entry.line_num}>
             <Text inverse={isSelected} bold={isSelected}>
               {isSelected ? "▸" : " "}
             </Text>

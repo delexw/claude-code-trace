@@ -1,9 +1,10 @@
 import { Box, Text } from "ink";
 import type { DisplayMessage } from "../api.js";
 import { truncate, roleColor, roleIcon, shortModel, modelColor, firstLine } from "../lib/format.js";
-import { colors, getRoleBorderColor, getItemColor } from "../lib/theme.js";
+import { colors, getRoleBorderColor, getItemColor, getTeamColor } from "../lib/theme.js";
 import { StatsBar, statsFromMessage } from "./StatsBar.js";
 import { BrailleSpinner } from "./OngoingDots.js";
+import { stableWindow } from "../lib/window.js";
 
 interface MessageListProps {
   messages: DisplayMessage[];
@@ -14,16 +15,12 @@ interface MessageListProps {
 
 export function MessageList({ messages, selectedIndex, expandedSet, ongoing }: MessageListProps) {
   const cols = process.stdout.columns || 80;
-  // Each collapsed message is ~3 lines (header + content + stats).
-  // Window in item count so Ink output fits the terminal.
+  const contentWidth = Math.max(cols - 30, 40);
+  // Each message renders 3 lines (header + content + stats)
   const rows = process.stdout.rows || 24;
   const windowSize = Math.max(4, Math.floor((rows - 4) / 3));
-
-  let start = Math.max(0, selectedIndex - Math.floor(windowSize / 2));
-  const end = Math.min(messages.length, start + windowSize);
-  if (end - start < windowSize) start = Math.max(0, end - windowSize);
+  const { start, end } = stableWindow("messages", selectedIndex, messages.length, windowSize);
   const visible = messages.slice(start, end);
-  const contentWidth = Math.max(cols - 30, 40);
 
   if (messages.length === 0) {
     return (
@@ -45,7 +42,7 @@ export function MessageList({ messages, selectedIndex, expandedSet, ongoing }: M
 
         if (msg.role === "compact") {
           return (
-            <Box key={idx} paddingX={1} justifyContent="center">
+            <Box key={`compact-${idx}`} paddingX={1} justifyContent="center">
               <Text dimColor>────── {msg.content} ──────</Text>
             </Box>
           );
@@ -57,11 +54,9 @@ export function MessageList({ messages, selectedIndex, expandedSet, ongoing }: M
         const borderClr = isSelected ? colors.accent : getRoleBorderColor(msg.role, msg.is_error);
 
         return (
-          <Box key={idx} flexDirection="row" marginBottom={0}>
-            {/* Left accent border */}
+          <Box key={`msg-${idx}-${msg.role}`} flexDirection="row" marginBottom={0}>
             <Text color={borderClr}>│</Text>
             <Box flexDirection="column" flexGrow={1} paddingLeft={1}>
-              {/* Header: selection indicator + role icon + name + model + badges */}
               <Box gap={1}>
                 <Text
                   bold
@@ -90,25 +85,24 @@ export function MessageList({ messages, selectedIndex, expandedSet, ongoing }: M
                 ) : null}
               </Box>
 
-              {/* Content */}
               <Box>
                 <Text dimColor={!isSelected} wrap={isExpanded ? "wrap" : "truncate"}>
                   {contentPreview}
                 </Text>
               </Box>
 
-              {/* Stats bar */}
               <StatsBar stats={stats} />
 
-              {/* Expanded items */}
               {isExpanded && msg.items.length > 0 && (
                 <Box flexDirection="column" paddingLeft={2} marginTop={0}>
                   {msg.items.map((item) => (
                     <Box
-                      key={`${item.item_type}-${item.tool_name || ""}-${item.text.slice(0, 20)}`}
+                      key={`${idx}-${item.item_type}-${item.tool_name || item.agent_id || ""}-${item.duration_ms}`}
                       flexDirection="row"
                     >
-                      <Text color={colors.border}>│</Text>
+                      <Text color={item.team_color ? getTeamColor(item.team_color) : colors.border}>
+                        {item.subagent_messages.length > 0 ? "┃" : "│"}
+                      </Text>
                       <Box paddingLeft={1}>
                         {item.item_type === "ToolCall" ? (
                           <Text color={getItemColor("ToolCall", !!item.tool_error)}>
@@ -126,15 +120,26 @@ export function MessageList({ messages, selectedIndex, expandedSet, ongoing }: M
                             ▪ {truncate(item.text, contentWidth - 10)}
                           </Text>
                         ) : item.item_type === "Subagent" ? (
-                          <Text color={colors.itemAgent}>
+                          <Text
+                            color={
+                              item.team_color ? getTeamColor(item.team_color) : colors.itemAgent
+                            }
+                          >
                             ✦ {item.subagent_type || "Agent"}
                             {item.subagent_desc
                               ? ` — ${truncate(item.subagent_desc, contentWidth - 20)}`
                               : ""}
                             {item.subagent_ongoing ? " ●" : ""}
+                            {item.subagent_messages.length > 0
+                              ? ` [${item.subagent_messages.length} msg]`
+                              : ""}
                           </Text>
                         ) : item.item_type === "TeammateMessage" ? (
-                          <Text color={colors.itemTeammate}>
+                          <Text
+                            color={
+                              item.team_color ? getTeamColor(item.team_color) : colors.itemTeammate
+                            }
+                          >
                             ◈ {item.team_member_name || "Teammate"}:{" "}
                             {truncate(item.text, contentWidth - 20)}
                           </Text>

@@ -5,7 +5,6 @@ import type { SessionInfo } from "../api.js";
 import {
   formatTokens,
   formatCost,
-  formatDuration,
   timeAgo,
   truncate,
   shortModel,
@@ -13,6 +12,7 @@ import {
 } from "../lib/format.js";
 import { OngoingDot } from "./OngoingDots.js";
 import { colors } from "../lib/theme.js";
+import { stableWindow } from "../lib/window.js";
 
 interface SessionPickerProps {
   sessions: SessionInfo[];
@@ -83,13 +83,10 @@ export function SessionPicker({ sessions, loading, error, selectedIndex }: Sessi
     );
   }
 
-  // Each session card is ~3 lines (title + meta). Window in item count, not row count.
+  // 2 lines per session card + date headers
   const rows = process.stdout.rows || 24;
-  const windowSize = Math.max(4, Math.floor((rows - 4) / 3));
-  const half = Math.floor(windowSize / 2);
-  let start = Math.max(0, selectedIndex - half);
-  const end = Math.min(sessions.length, start + windowSize);
-  if (end - start < windowSize) start = Math.max(0, end - windowSize);
+  const windowSize = Math.max(3, Math.floor((rows - 4) / 2));
+  const { start, end } = stableWindow("picker", selectedIndex, sessions.length, windowSize);
 
   let flatIdx = 0;
   const cols = process.stdout.columns || 80;
@@ -125,7 +122,7 @@ export function SessionPicker({ sessions, loading, error, selectedIndex }: Sessi
         return (
           <Box key={group.category} flexDirection="column">
             {firstInGroup >= start && firstInGroup < end && (
-              <Box paddingX={1} marginTop={0}>
+              <Box paddingX={1} marginTop={1}>
                 <Text dimColor bold>
                   {group.category}
                 </Text>
@@ -140,33 +137,28 @@ export function SessionPicker({ sessions, loading, error, selectedIndex }: Sessi
                 : s.is_ongoing
                   ? colors.ongoing
                   : colors.border;
+              const msgMaxLen = cols - 6;
 
               return (
-                <Box key={s.path} flexDirection="row">
-                  <Text color={borderClr}>{isSelected ? "▸" : "│"}</Text>
-                  <Box flexDirection="column" flexGrow={1} paddingLeft={1}>
-                    <Box gap={1}>
-                      <Text
-                        bold={isSelected}
-                        inverse={isSelected}
-                        color={isSelected ? colors.accent : undefined}
-                      >
-                        {truncate(s.first_message || s.session_id, cols - 28)}
-                      </Text>
-                      {s.is_ongoing && <OngoingDot />}
-                    </Box>
-                    <Box gap={1}>
-                      {model && <Text color={modelColor(s.model)}>{model}</Text>}
-                      <Text dimColor>{s.turn_count} turns</Text>
-                      {s.total_tokens > 0 && (
-                        <Text dimColor>{formatTokens(s.total_tokens)} tok</Text>
-                      )}
-                      {s.cost_usd > 0 && (
-                        <Text color={colors.tokenHigh}>{formatCost(s.cost_usd)}</Text>
-                      )}
-                      {s.duration_ms > 0 && <Text dimColor>{formatDuration(s.duration_ms)}</Text>}
-                      <Text dimColor>{timeAgo(s.mod_time)}</Text>
-                    </Box>
+                <Box key={s.path} flexDirection="column">
+                  {/* Line 1: message */}
+                  <Box>
+                    <Text color={borderClr}>{isSelected ? " ▸ " : " │ "}</Text>
+                    <Text bold={isSelected} color={isSelected ? colors.accent : colors.textPrimary}>
+                      {truncate(s.first_message || s.session_id, msgMaxLen)}
+                    </Text>
+                    {s.is_ongoing && <OngoingDot />}
+                  </Box>
+                  {/* Line 2: metadata */}
+                  <Box>
+                    <Text color={borderClr}>{isSelected ? " ▸ " : " │ "}</Text>
+                    {model && <Text color={modelColor(s.model)}>{model}</Text>}
+                    <Text dimColor> {s.turn_count}t</Text>
+                    {s.total_tokens > 0 && <Text dimColor> {formatTokens(s.total_tokens)}</Text>}
+                    {s.cost_usd > 0 && (
+                      <Text color={colors.tokenHigh}> {formatCost(s.cost_usd)}</Text>
+                    )}
+                    <Text dimColor> {timeAgo(s.mod_time)}</Text>
                   </Box>
                 </Box>
               );

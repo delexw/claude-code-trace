@@ -1,10 +1,27 @@
+import type { ReactNode } from "react";
 import { Box, Text } from "ink";
 import type { DisplayMessage, DisplayItem } from "../api.js";
 import { formatDuration, truncate, roleColor, roleIcon, formatJson } from "../lib/format.js";
-import { colors, getItemColor } from "../lib/theme.js";
+import { colors, getItemColor, getTeamColor } from "../lib/theme.js";
 import { getItemIcon, getItemName, getItemSummary } from "../lib/items.js";
 import { StatsBar, statsFromMessage } from "./StatsBar.js";
 import { BrailleSpinner, OngoingDot } from "./OngoingDots.js";
+import { stableWindow } from "../lib/window.js";
+
+/** Limit text to maxLines while preserving newlines. Appends "…" if truncated. */
+function limitLines(text: string, maxLines: number): string {
+  const lines = text.split("\n");
+  if (lines.length <= maxLines) return text;
+  return lines.slice(0, maxLines).join("\n") + "\n…(" + (lines.length - maxLines) + " more lines)";
+}
+
+/** Clamp each line to maxWidth so bordered boxes don't overflow the terminal. */
+function clampLines(text: string, maxWidth: number): string {
+  return text
+    .split("\n")
+    .map((line) => (line.length > maxWidth ? line.slice(0, maxWidth - 1) + "…" : line))
+    .join("\n");
+}
 
 interface DetailViewProps {
   message: DisplayMessage;
@@ -16,6 +33,10 @@ interface DetailViewProps {
 
 function itemBorderColor(item: DisplayItem, isSelected: boolean): string {
   if (isSelected) return colors.accent;
+  // Subagent items with messages get their team color
+  if (item.subagent_messages.length > 0 && item.team_color) {
+    return getTeamColor(item.team_color);
+  }
   return getItemColor(item.item_type, !!item.tool_error);
 }
 
@@ -28,23 +49,18 @@ export function DetailView({
 }: DetailViewProps) {
   const cols = process.stdout.columns || 80;
   const stats = statsFromMessage(message);
-
-  // Each item is ~2 lines (header + optional summary). Account for message header (~4 lines).
-  const rows = process.stdout.rows || 24;
-  const windowSize = Math.max(3, Math.floor((rows - 6) / 2));
-
   const items = message.items;
-  let start = Math.max(0, selectedItem - Math.floor(windowSize / 2));
-  const end = Math.min(items.length, start + windowSize);
-  if (end - start < windowSize) start = Math.max(0, end - windowSize);
+
+  const windowSize = (process.stdout.rows || 24) - 8;
+  const { start, end } = stableWindow("detail", selectedItem, items.length, windowSize);
   const visible = items.slice(start, end);
 
-  // Fixed-width name column so summaries align
-  const maxNameLen = Math.max(4, ...visible.map((it) => getItemName(it).length));
+  // Fixed-width name column — computed from ALL items so it doesn't shift
+  const maxNameLen = Math.max(4, ...items.map((it) => getItemName(it).length));
 
   return (
     <Box flexDirection="column">
-      {/* Message header card */}
+      {/* Message header */}
       <Box
         flexDirection="column"
         borderStyle="single"
@@ -73,37 +89,54 @@ export function DetailView({
         ) : null}
       </Box>
 
-      {/* Full content when no items (e.g. user messages) */}
+      {/* Full content when no items */}
       {items.length === 0 ? (
         <Box paddingX={1} flexDirection="column">
           <Text wrap="wrap">{message.content}</Text>
         </Box>
       ) : (
-        <Box flexDirection="column">
+        <Box flexDirection="column" paddingTop={1}>
           {visible.map((item, i) => {
             const idx = start + i;
             const isSelected = idx === selectedItem;
             const isExpanded = expandedItems.has(idx);
             const clr = itemBorderColor(item, isSelected);
+            const hasAgent = item.subagent_messages.length > 0;
+            const teamClr = item.team_color ? getTeamColor(item.team_color) : undefined;
 
             return (
-              <Box key={idx} flexDirection="row">
-                {/* Left accent border */}
-                <Text color={clr}>│</Text>
+              <Box
+                key={`${item.item_type}-${idx}-${item.tool_name || item.agent_id || ""}`}
+                flexDirection="row"
+                marginBottom={0}
+              >
+                {/* Left accent — double bar for subagents with messages */}
+                <Text color={hasAgent && teamClr ? teamClr : clr}>{hasAgent ? "┃" : "│"}</Text>
                 <Box flexDirection="column" flexGrow={1} paddingLeft={1}>
                   {/* Item header */}
                   <Box gap={1}>
-                    <Text bold={isSelected} inverse={isSelected} color={clr}>
+                    <Text
+                      bold={isSelected}
+                      inverse={isSelected}
+                      color={hasAgent && teamClr ? teamClr : clr}
+                    >
                       {isExpanded ? "▼" : "▶"} {getItemIcon(item)}{" "}
                       {getItemName(item).padEnd(maxNameLen)}
                     </Text>
                     {getItemSummary(item) ? (
-                      <Text dimColor>— {truncate(getItemSummary(item), cols - 35)}</Text>
+                      <Text dimColor>
+                        — {truncate(getItemSummary(item), cols - maxNameLen - 12)}
+                      </Text>
                     ) : null}
                     {item.duration_ms > 0 ? (
                       <Text dimColor>{formatDuration(item.duration_ms)}</Text>
                     ) : null}
                     {item.subagent_ongoing ? <OngoingDot /> : null}
+                    {hasAgent ? (
+                      <Text color={teamClr || colors.itemAgent} dimColor>
+                        [{item.subagent_messages.length} msg]
+                      </Text>
+                    ) : null}
                     {item.agent_id ? <Text dimColor>[{item.agent_id.slice(0, 8)}]</Text> : null}
                   </Box>
 
@@ -119,97 +152,131 @@ export function DetailView({
   );
 }
 
+/** Bordered container with a label in the top-left corner. */
+function Section({
+  label,
+  width,
+  children,
+}: {
+  label: string;
+  width: number;
+  children: ReactNode;
+}) {
+  return (
+    <Box flexDirection="column" borderStyle="round" borderColor={colors.border} width={width}>
+      <Box paddingX={1} flexDirection="column">
+        <Text bold color={colors.textMuted}>
+          {label}
+        </Text>
+        <Box marginTop={1} flexDirection="column">
+          {children}
+        </Box>
+      </Box>
+    </Box>
+  );
+}
+
+/** Plain bordered container (no label). */
+function Container({ width, children }: { width: number; children: ReactNode }) {
+  return (
+    <Box flexDirection="column" borderStyle="round" borderColor={colors.border} width={width}>
+      <Box paddingX={1} flexDirection="column">
+        {children}
+      </Box>
+    </Box>
+  );
+}
+
+const MAX_BODY_LINES = 40;
+// border (2) + paddingX (2) + left-accent bar + padding (2) = ~6
+const BOX_OVERHEAD = 6;
+
 function DetailItemBody({ item, cols }: { item: DisplayItem; cols: number }) {
-  const maxWidth = cols - 8;
+  // Width available inside the box for text content
+  const innerWidth = cols - BOX_OVERHEAD - 4; // 4 = border(2) + paddingX(2) inside the box
+  const boxWidth = cols - BOX_OVERHEAD;
+  const clamp = (text: string) => clampLines(limitLines(text, MAX_BODY_LINES), innerWidth);
 
   switch (item.item_type) {
     case "Thinking":
       return (
-        <Box paddingX={1} flexDirection="column">
-          <Text color={colors.itemThinking} wrap="wrap">
-            {item.text || "Thinking content is not recorded in session logs."}
+        <Container width={boxWidth}>
+          <Text color={colors.itemThinking} wrap="truncate">
+            {clamp(item.text || "Thinking content is not recorded in session logs.")}
           </Text>
-        </Box>
+        </Container>
       );
     case "Output":
       return (
-        <Box paddingX={1} flexDirection="column">
-          <Text wrap="wrap">{item.text}</Text>
-        </Box>
+        <Container width={boxWidth}>
+          <Text wrap="truncate">{clamp(item.text)}</Text>
+        </Container>
       );
     case "ToolCall":
       return (
-        <Box paddingX={1} flexDirection="column">
+        <Box flexDirection="column">
           {item.tool_input && (
-            <Box flexDirection="column">
-              <Text bold dimColor>
-                INPUT
+            <Section label="INPUT" width={boxWidth}>
+              <Text dimColor wrap="truncate">
+                {clamp(formatJson(item.tool_input))}
               </Text>
-              <Text dimColor wrap="wrap">
-                {truncate(formatJson(item.tool_input), maxWidth * 5)}
-              </Text>
-            </Box>
+            </Section>
           )}
           {item.tool_result && (
-            <Box flexDirection="column">
-              <Text bold dimColor>
-                RESULT
+            <Section label="RESULT" width={boxWidth}>
+              <Text color={item.tool_error ? colors.error : undefined} wrap="truncate">
+                {clamp(item.tool_result)}
               </Text>
-              <Text color={item.tool_error ? colors.error : undefined} wrap="wrap">
-                {truncate(item.tool_result, maxWidth * 5)}
-              </Text>
-            </Box>
+            </Section>
           )}
         </Box>
       );
     case "Subagent":
       return (
-        <Box paddingX={1} flexDirection="column">
-          {item.agent_id && (
-            <Box gap={1}>
-              <Text bold dimColor>
-                ID
-              </Text>
-              <Text dimColor>{item.agent_id}</Text>
-            </Box>
-          )}
-          {item.subagent_desc && (
-            <Box gap={1}>
-              <Text bold dimColor>
-                DESC
-              </Text>
-              <Text>{item.subagent_desc}</Text>
-            </Box>
+        <Box flexDirection="column">
+          {(item.agent_id || item.subagent_desc) && (
+            <Container width={boxWidth}>
+              {item.agent_id && (
+                <Box gap={1}>
+                  <Text color={colors.textMuted} bold>
+                    ID
+                  </Text>
+                  <Text dimColor>{item.agent_id}</Text>
+                </Box>
+              )}
+              {item.subagent_desc && (
+                <Box gap={1}>
+                  <Text color={colors.textMuted} bold>
+                    DESC
+                  </Text>
+                  <Text wrap="truncate">{item.subagent_desc}</Text>
+                </Box>
+              )}
+            </Container>
           )}
           {item.subagent_prompt && (
-            <Box flexDirection="column">
-              <Text bold dimColor>
-                PROMPT
-              </Text>
-              <Text wrap="wrap">{truncate(item.subagent_prompt, maxWidth * 3)}</Text>
-            </Box>
+            <Section label="PROMPT" width={boxWidth}>
+              <Text wrap="truncate">{clamp(item.subagent_prompt)}</Text>
+            </Section>
           )}
           {item.text && (
-            <Box flexDirection="column">
-              <Text bold dimColor>
-                CONTENT
-              </Text>
-              <Text wrap="wrap">{truncate(item.text, maxWidth * 3)}</Text>
-            </Box>
+            <Section label="CONTENT" width={boxWidth}>
+              <Text wrap="truncate">{clamp(item.text)}</Text>
+            </Section>
           )}
         </Box>
       );
     case "TeammateMessage":
       return (
-        <Box paddingX={1}>
-          <Text wrap="wrap">{item.text}</Text>
-        </Box>
+        <Container width={boxWidth}>
+          <Text wrap="truncate">{clamp(item.text)}</Text>
+        </Container>
       );
     case "HookEvent":
       return (
-        <Box paddingX={1} flexDirection="column">
+        <Container width={boxWidth}>
           <Box gap={1}>
-            <Text bold dimColor>
+            <Text color={colors.textMuted} bold>
               HOOK
             </Text>
             <Text>
@@ -218,19 +285,19 @@ function DetailItemBody({ item, cols }: { item: DisplayItem; cols: number }) {
           </Box>
           {item.hook_command && (
             <Box gap={1}>
-              <Text bold dimColor>
+              <Text color={colors.textMuted} bold>
                 CMD
               </Text>
               <Text dimColor>{item.hook_command}</Text>
             </Box>
           )}
-        </Box>
+        </Container>
       );
     default:
       return (
-        <Box paddingX={1}>
-          <Text wrap="wrap">{item.text}</Text>
-        </Box>
+        <Container width={boxWidth}>
+          <Text wrap="truncate">{clamp(item.text)}</Text>
+        </Container>
       );
   }
 }
