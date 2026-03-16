@@ -144,7 +144,9 @@ Features: session picker, message list with expand/collapse, live tailing via SS
 
 ```bash
 npm install
-npm run tauri dev        # dev mode with hot reload
+npm run tauri dev        # desktop app with hot reload
+npm run dev:web          # web mode (opens browser, no desktop window)
+npm run dev:tui          # TUI (requires backend running via tauri dev or dev:web)
 npm run tauri build      # production build
 ```
 
