@@ -1,9 +1,9 @@
 import { useMemo } from "react";
 import type { SessionInfo } from "../types";
-import { shortPath, projectKey, projectDisplayName } from "../lib/format";
 import { useScrollToSelected } from "../hooks/useScrollToSelected";
 import { RefreshIcon, GitBranchIcon, GitMergeIcon } from "./Icons";
 import { OngoingDots } from "./OngoingDots";
+import { buildFlatItems } from "../../shared/projectTree";
 
 interface ProjectTreeProps {
   sessions: SessionInfo[];
@@ -17,202 +17,14 @@ interface ProjectTreeProps {
   style?: React.CSSProperties;
 }
 
-class ProjectNode {
-  constructor(
-    public name: string,
-    public key: string,
-    public sessionCount: number,
-    public hasOngoing: boolean,
-  ) {}
-
-  addSession(isOngoing: boolean) {
-    this.sessionCount++;
-    if (isOngoing) this.hasOngoing = true;
-  }
-
-  static fromSessions(sessions: SessionInfo[]): ProjectNode[] {
-    const map = new Map<string, ProjectNode>();
-    for (const s of sessions) {
-      const key = projectKey(s.path);
-      const existing = map.get(key);
-      if (existing) {
-        existing.addSession(s.is_ongoing);
-      } else {
-        map.set(
-          key,
-          new ProjectNode(shortPath(s.cwd) || projectDisplayName(key), key, 1, s.is_ongoing),
-        );
-      }
-    }
-    return [...map.values()].toSorted((a, b) => a.name.localeCompare(b.name));
-  }
-}
-
-class TreeNode {
-  children: TreeNode[] = [];
-
-  constructor(public node: ProjectNode) {}
-
-  static cmp(a: TreeNode, b: TreeNode): number {
-    return a.node.name.localeCompare(b.node.name);
-  }
-
-  /** Short label relative to a parent key. */
-  static childLabel(parentKey: string, childKey: string): string {
-    return childKey.slice(parentKey.length).replace(/^-+/, "") || projectDisplayName(childKey);
-  }
-
-  /** Build a tree from flat nodes — child if B.key starts with A.key + "-". */
-  static buildTree(nodes: ProjectNode[]): TreeNode[] {
-    const sorted = nodes.toSorted((a, b) => a.key.length - b.key.length);
-    const roots: TreeNode[] = [];
-    const all: TreeNode[] = [];
-
-    for (const node of sorted) {
-      let parent: TreeNode | undefined;
-      for (const candidate of all) {
-        if (
-          node.key.startsWith(candidate.node.key + "-") &&
-          (!parent || candidate.node.key.length > parent.node.key.length)
-        ) {
-          parent = candidate;
-        }
-      }
-
-      const tn = new TreeNode(node);
-      all.push(tn);
-
-      if (parent) {
-        tn.node = new ProjectNode(
-          TreeNode.childLabel(parent.node.key, node.key),
-          node.key,
-          node.sessionCount,
-          node.hasOngoing,
-        );
-        parent.children.push(tn);
-      } else {
-        roots.push(tn);
-      }
-    }
-
-    roots.sort(TreeNode.cmp);
-    for (const r of all) r.children.sort(TreeNode.cmp);
-    return roots;
-  }
-}
-
-type WorktreeKind = "worktrees" | "claude-worktrees";
-
-class FlatItem {
-  constructor(
-    public key: string | null,
-    public name: string,
-    public count: number,
-    public ongoing: boolean,
-    public depth: number,
-    public isGroup: boolean,
-  ) {}
-
-  static detectWorktreeKind(parentKey: string, childKey: string): WorktreeKind | null {
-    const rest = childKey.slice(parentKey.length);
-    if (rest.startsWith("--claude-worktrees-")) return "claude-worktrees";
-    if (rest.startsWith("-worktrees-")) return "worktrees";
-    return null;
-  }
-
-  static worktreeLeafName(parentKey: string, childKey: string, kind: WorktreeKind): string {
-    const prefixLen =
-      kind === "claude-worktrees" ? "--claude-worktrees-".length : "-worktrees-".length;
-    return (
-      childKey.slice(parentKey.length + prefixLen).replace(/^-+/, "") ||
-      projectDisplayName(childKey)
-    );
-  }
-
-  static fromTree(roots: TreeNode[]): FlatItem[] {
-    const items: FlatItem[] = [];
-
-    function walk(nodes: TreeNode[], depth: number, parentKey: string | null) {
-      for (const tn of nodes) {
-        items.push(
-          new FlatItem(
-            tn.node.key,
-            tn.node.name,
-            tn.node.sessionCount,
-            tn.node.hasOngoing,
-            depth,
-            false,
-          ),
-        );
-
-        // Categorise children into worktree groups and regular
-        const groups = new Map<WorktreeKind, TreeNode[]>();
-        const regular: TreeNode[] = [];
-        for (const child of tn.children) {
-          const kind =
-            parentKey !== null || depth === 0
-              ? FlatItem.detectWorktreeKind(tn.node.key, child.node.key)
-              : null;
-          if (kind) {
-            let list = groups.get(kind);
-            if (!list) {
-              list = [];
-              groups.set(kind, list);
-            }
-            list.push(child);
-          } else {
-            regular.push(child);
-          }
-        }
-
-        // Emit worktree group headers + their children
-        for (const [kind, children] of groups) {
-          const totalCount = children.reduce((s, c) => s + c.node.sessionCount, 0);
-          const anyOngoing = children.some((c) => c.node.hasOngoing);
-          items.push(
-            new FlatItem(
-              `__group:${kind}:${tn.node.key}`,
-              kind,
-              totalCount,
-              anyOngoing,
-              depth + 1,
-              true,
-            ),
-          );
-          for (const child of children) {
-            items.push(
-              new FlatItem(
-                child.node.key,
-                FlatItem.worktreeLeafName(tn.node.key, child.node.key, kind),
-                child.node.sessionCount,
-                child.node.hasOngoing,
-                depth + 2,
-                false,
-              ),
-            );
-            walk(child.children, depth + 3, child.node.key);
-          }
-        }
-
-        walk(regular, depth + 1, tn.node.key);
-      }
-    }
-
-    walk(roots, 0, null);
-    return items;
-  }
-}
-
 /**
  * Returns the ordered list of selectable keys as displayed in the tree.
  * Index 0 = null ("All Projects"), then project keys and group keys in tree order.
  */
 export function useProjectKeys(sessions: SessionInfo[]): (string | null)[] {
   return useMemo(() => {
-    const nodes = ProjectNode.fromSessions(sessions);
-    const tree = TreeNode.buildTree(nodes);
-    const flat = FlatItem.fromTree(tree);
-    return [null, ...flat.map((f) => f.key)];
+    const flat = buildFlatItems(sessions);
+    return flat.map((f) => f.key);
   }, [sessions]);
 }
 
@@ -227,25 +39,9 @@ export function ProjectTree({
   refreshing,
   style,
 }: ProjectTreeProps) {
-  const flatItems = useMemo(() => {
-    const nodes = ProjectNode.fromSessions(sessions);
-    const tree = TreeNode.buildTree(nodes);
-    return FlatItem.fromTree(tree);
-  }, [sessions]);
+  const allItems = useMemo(() => buildFlatItems(sessions), [sessions]);
 
   const scrollRef = useScrollToSelected(highlightedIndex);
-
-  const allItems: FlatItem[] = [
-    {
-      key: null,
-      name: "All Projects",
-      count: sessions.length,
-      ongoing: false,
-      depth: 0,
-      isGroup: false,
-    },
-    ...flatItems,
-  ];
 
   return (
     <div
