@@ -7,24 +7,48 @@ interface OngoingDotsProps {
 }
 
 /**
+ * Single shared frame counter — all OngoingDots instances share one timer
+ * to avoid triggering N separate re-render intervals.
+ */
+let globalFrame = 0;
+let listenerCount = 0;
+let globalTimer: ReturnType<typeof setInterval> | null = null;
+const listeners = new Set<() => void>();
+
+function subscribe(cb: () => void): () => void {
+  listeners.add(cb);
+  listenerCount++;
+  if (!globalTimer) {
+    globalTimer = setInterval(() => {
+      globalFrame = (globalFrame + 1) % 7;
+      for (const fn of listeners) fn();
+    }, 300);
+  }
+  return () => {
+    listeners.delete(cb);
+    listenerCount--;
+    if (listenerCount <= 0 && globalTimer) {
+      clearInterval(globalTimer);
+      globalTimer = null;
+      listenerCount = 0;
+    }
+  };
+}
+
+/**
  * Animated pulsing dots indicator — terminal equivalent of the web's
- * CSS-animated OngoingDots. Each dot lights up in sequence then fades,
- * creating a wave effect matching the web's staggered animation.
+ * CSS-animated OngoingDots. Shares a single global timer across all instances.
  */
 export function OngoingDots({ count = 5 }: OngoingDotsProps) {
-  const [frame, setFrame] = useState(0);
+  const [frame, setFrame] = useState(globalFrame);
 
   useEffect(() => {
-    const timer = setInterval(() => {
-      setFrame((f) => (f + 1) % (count + 2));
-    }, 200);
-    return () => clearInterval(timer);
-  }, [count]);
+    return subscribe(() => setFrame(globalFrame));
+  }, []);
 
   const dots: string[] = [];
   for (let i = 0; i < count; i++) {
-    // "active" dot is bright, others dim — active sweeps left to right
-    dots.push(i === frame || i === frame - 1 ? "●" : "·");
+    dots.push(i === frame % (count + 2) || i === (frame % (count + 2)) - 1 ? "●" : "·");
   }
 
   return (
