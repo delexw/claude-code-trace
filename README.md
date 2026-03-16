@@ -14,19 +14,12 @@ Reads session logs from `~/.claude/` and renders them as a scrollable conversati
 
 ## Install
 
-### Homebrew (macOS)
-
-```bash
-brew install --cask delexw/tap/claude-code-trace
-claude-code-trace --web   # opens browser automatically
-```
-
-### cargo install (any platform with Rust)
+### cargo install (any platform with Rust + Node.js)
 
 ```bash
 git clone git@github.com:delexw/claude-code-trace.git
 cd claude-code-trace
-./script/install.sh       # builds frontend + installs binary
+./script/install.sh       # builds frontend + installs binary to ~/.cargo/bin
 claude-code-trace --web   # opens browser automatically
 ```
 
