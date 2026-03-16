@@ -1,0 +1,1 @@
+/autoresearch based on tail-claude Bubble team theme and layout only not parsers and function, refractor the tui layout and theme
