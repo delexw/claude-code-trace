@@ -47,10 +47,10 @@ describe("roleColor", () => {
 
 describe("roleIcon", () => {
   it("returns correct icons", () => {
-    expect(roleIcon("claude")).toBe("🤖");
-    expect(roleIcon("user")).toBe("👤");
-    expect(roleIcon("system")).toBe("⚙️");
-    expect(roleIcon("other")).toBe("  ");
+    expect(roleIcon("claude")).toBe("✦");
+    expect(roleIcon("user")).toBe("●");
+    expect(roleIcon("system")).toBe("$");
+    expect(roleIcon("other")).toBe(" ");
   });
 });
 

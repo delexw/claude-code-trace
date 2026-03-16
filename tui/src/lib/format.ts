@@ -44,17 +44,17 @@ export function roleColor(role: string): string {
   }
 }
 
-/** Returns a unicode icon for a message role. */
+/** Returns a unicode icon for a message role (matches web's VscAccount/Claude/VscTerminal). */
 export function roleIcon(role: string): string {
   switch (role) {
     case "claude":
-      return "🤖";
+      return "✦";
     case "user":
-      return "👤";
+      return "●";
     case "system":
-      return "⚙️";
+      return "$";
     default:
-      return "  ";
+      return " ";
   }
 }
 

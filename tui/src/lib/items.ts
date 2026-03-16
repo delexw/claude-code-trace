@@ -1,19 +1,19 @@
 import type { DisplayItem } from "../api.js";
 import { truncate } from "./format.js";
 
-/** Unicode icon for a DisplayItem type. */
+/** Unicode icon for a DisplayItem type (matches web's Icons.tsx). */
 export function getItemIcon(item: DisplayItem): string {
   switch (item.item_type) {
     case "Thinking":
-      return "💭";
+      return "◆";
     case "Output":
-      return "✎";
+      return "▪";
     case "ToolCall":
-      return item.tool_error ? "⚠" : "⚙";
+      return item.tool_error ? "✗" : "⚙";
     case "Subagent":
-      return "🤖";
+      return "✦";
     case "TeammateMessage":
-      return "👥";
+      return "◈";
     case "HookEvent":
       return "⚡";
     default:

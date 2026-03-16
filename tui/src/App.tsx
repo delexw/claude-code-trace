@@ -360,8 +360,10 @@ export function App() {
     }
   };
 
+  const termHeight = process.stdout.rows || 24;
+
   return (
-    <Box flexDirection="column">
+    <Box flexDirection="column" height={termHeight}>
       {sessionPath && view !== "picker" && (
         <InfoBar
           meta={meta}
@@ -372,7 +374,7 @@ export function App() {
         />
       )}
 
-      <Box flexDirection="row">
+      <Box flexDirection="row" flexGrow={1}>
         <ProjectTree
           sessions={allSessions}
           selectedProject={selectedProject}

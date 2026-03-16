@@ -119,15 +119,15 @@ export function MessageList({ messages, selectedIndex, expandedSet, ongoing }: M
                           </Text>
                         ) : item.item_type === "Thinking" ? (
                           <Text color={colors.itemThinking}>
-                            💭 {truncate(item.text, contentWidth - 10)}
+                            ◆ {truncate(item.text, contentWidth - 10)}
                           </Text>
                         ) : item.item_type === "Output" ? (
                           <Text color={colors.itemOutput}>
-                            ✎ {truncate(item.text, contentWidth - 10)}
+                            ▪ {truncate(item.text, contentWidth - 10)}
                           </Text>
                         ) : item.item_type === "Subagent" ? (
                           <Text color={colors.itemAgent}>
-                            🤖 {item.subagent_type || "Agent"}
+                            ✦ {item.subagent_type || "Agent"}
                             {item.subagent_desc
                               ? ` — ${truncate(item.subagent_desc, contentWidth - 20)}`
                               : ""}
@@ -135,7 +135,7 @@ export function MessageList({ messages, selectedIndex, expandedSet, ongoing }: M
                           </Text>
                         ) : item.item_type === "TeammateMessage" ? (
                           <Text color={colors.itemTeammate}>
-                            👥 {item.team_member_name || "Teammate"}:{" "}
+                            ◈ {item.team_member_name || "Teammate"}:{" "}
                             {truncate(item.text, contentWidth - 20)}
                           </Text>
                         ) : item.item_type === "HookEvent" ? (

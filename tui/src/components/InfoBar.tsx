@@ -69,7 +69,6 @@ export function InfoBar({ meta, messages, sessionTotals, sessionPath, ongoing }:
       borderStyle="single"
       borderLeft={false}
       borderRight={false}
-      borderTop={false}
       borderColor={colors.border}
     >
       {projectName ? (
