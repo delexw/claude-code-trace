@@ -1,0 +1,25 @@
+{
+  "cli_version": "0.5.0",
+  "checkpoint_id": "b70339f5bff2",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "tui/src/components/TeamBoard.tsx"
+  ],
+  "sessions": [
+    {
+      "metadata": "/b7/0339f5bff2/0/metadata.json",
+      "transcript": "/b7/0339f5bff2/0/full.jsonl",
+      "content_hash": "/b7/0339f5bff2/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 3,
+    "cache_creation_tokens": 730,
+    "cache_read_tokens": 417318,
+    "output_tokens": 404,
+    "api_call_count": 3
+  }
+}
