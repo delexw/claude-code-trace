@@ -1,0 +1,1 @@
+I can see teh orphan subagetn in the sesssion linked to the 1st Claude agent response which is session start. The connection looks wired as the Claude session happed earlier than user message... I think in this case. We'd better create a dummy session and link the orpahn subagetn in
