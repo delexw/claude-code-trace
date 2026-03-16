@@ -333,3 +333,7 @@ You can use eslint rule
 ---
 
 No... I think you need to add it to ts.config using type node.. Alos should only on ts.config for all
+
+---
+
+'/Users/yang.liu/Envato/others/tail-claude-gui/shared/tsconfig.json'
