@@ -55,116 +55,106 @@ export function MessageList({ messages, selectedIndex, expandedSet, ongoing }: M
         const borderClr = isSelected ? colors.accent : getRoleBorderColor(msg.role, msg.is_error);
 
         return (
-          <Box
-            key={idx}
-            flexDirection="column"
-            borderStyle="single"
-            borderColor={borderClr}
-            borderLeft
-            borderRight={false}
-            borderTop={false}
-            borderBottom={false}
-            paddingLeft={1}
-            marginBottom={0}
-          >
-            {/* Header: selection indicator + role icon + name + model + badges */}
-            <Box gap={1}>
-              <Text
-                bold
-                inverse={isSelected}
-                color={isSelected ? colors.accent : roleColor(msg.role)}
-              >
-                {isSelected ? "▸ " : "  "}
-                {roleIcon(msg.role)}{" "}
-                {msg.role === "claude" ? "Claude" : msg.role === "user" ? "User" : "System"}
-              </Text>
-              {model ? (
-                <Text color={modelColor(msg.model)} dimColor={!isSelected}>
-                  {model}
+          <Box key={idx} flexDirection="row" marginBottom={0}>
+            {/* Left accent border */}
+            <Text color={borderClr}>│</Text>
+            <Box flexDirection="column" flexGrow={1} paddingLeft={1}>
+              {/* Header: selection indicator + role icon + name + model + badges */}
+              <Box gap={1}>
+                <Text
+                  bold
+                  inverse={isSelected}
+                  color={isSelected ? colors.accent : roleColor(msg.role)}
+                >
+                  {isSelected ? "▸ " : "  "}
+                  {roleIcon(msg.role)}{" "}
+                  {msg.role === "claude" ? "Claude" : msg.role === "user" ? "User" : "System"}
                 </Text>
-              ) : null}
-              {msg.subagent_label ? (
-                <Text color={colors.itemAgent} dimColor>
-                  [{msg.subagent_label}]
-                </Text>
-              ) : null}
-              {isLast && ongoing ? (
-                <Text color={colors.ongoing} bold>
-                  ● active
-                </Text>
-              ) : null}
-              {isSelected ? (
-                <Text dimColor>
-                  [{idx + 1}/{messages.length}]
-                </Text>
-              ) : null}
-            </Box>
-
-            {/* Content */}
-            <Box>
-              <Text dimColor={!isSelected} wrap={isExpanded ? "wrap" : "truncate"}>
-                {contentPreview}
-              </Text>
-            </Box>
-
-            {/* Stats bar */}
-            <StatsBar stats={stats} />
-
-            {/* Expanded items */}
-            {isExpanded && msg.items.length > 0 && (
-              <Box flexDirection="column" paddingLeft={2} marginTop={0}>
-                {msg.items.map((item) => (
-                  <Box
-                    key={`${item.item_type}-${item.tool_name || ""}-${item.text.slice(0, 20)}`}
-                    borderStyle="single"
-                    borderColor={colors.border}
-                    borderLeft
-                    borderRight={false}
-                    borderTop={false}
-                    borderBottom={false}
-                    paddingLeft={1}
-                  >
-                    {item.item_type === "ToolCall" ? (
-                      <Text color={getItemColor("ToolCall", !!item.tool_error)}>
-                        ⚙ {item.tool_name}
-                        {item.tool_summary
-                          ? ` — ${truncate(item.tool_summary, contentWidth - 20)}`
-                          : ""}
-                      </Text>
-                    ) : item.item_type === "Thinking" ? (
-                      <Text color={colors.itemThinking}>
-                        💭 {truncate(item.text, contentWidth - 10)}
-                      </Text>
-                    ) : item.item_type === "Output" ? (
-                      <Text color={colors.itemOutput}>
-                        ✎ {truncate(item.text, contentWidth - 10)}
-                      </Text>
-                    ) : item.item_type === "Subagent" ? (
-                      <Text color={colors.itemAgent}>
-                        🤖 {item.subagent_type || "Agent"}
-                        {item.subagent_desc
-                          ? ` — ${truncate(item.subagent_desc, contentWidth - 20)}`
-                          : ""}
-                        {item.subagent_ongoing ? " ●" : ""}
-                      </Text>
-                    ) : item.item_type === "TeammateMessage" ? (
-                      <Text color={colors.itemTeammate}>
-                        👥 {item.team_member_name || "Teammate"}:{" "}
-                        {truncate(item.text, contentWidth - 20)}
-                      </Text>
-                    ) : item.item_type === "HookEvent" ? (
-                      <Text color={colors.itemHook}>
-                        ⚡ {item.hook_event}: {item.hook_name}
-                      </Text>
-                    ) : (
-                      <Text color={colors.textDim}>
-                        {item.item_type}: {truncate(item.text, contentWidth - 20)}
-                      </Text>
-                    )}
-                  </Box>
-                ))}
+                {model ? (
+                  <Text color={modelColor(msg.model)} dimColor={!isSelected}>
+                    {model}
+                  </Text>
+                ) : null}
+                {msg.subagent_label ? (
+                  <Text color={colors.itemAgent} dimColor>
+                    [{msg.subagent_label}]
+                  </Text>
+                ) : null}
+                {isLast && ongoing ? (
+                  <Text color={colors.ongoing} bold>
+                    ● active
+                  </Text>
+                ) : null}
+                {isSelected ? (
+                  <Text dimColor>
+                    [{idx + 1}/{messages.length}]
+                  </Text>
+                ) : null}
               </Box>
-            )}
+
+              {/* Content */}
+              <Box>
+                <Text dimColor={!isSelected} wrap={isExpanded ? "wrap" : "truncate"}>
+                  {contentPreview}
+                </Text>
+              </Box>
+
+              {/* Stats bar */}
+              <StatsBar stats={stats} />
+
+              {/* Expanded items */}
+              {isExpanded && msg.items.length > 0 && (
+                <Box flexDirection="column" paddingLeft={2} marginTop={0}>
+                  {msg.items.map((item) => (
+                    <Box
+                      key={`${item.item_type}-${item.tool_name || ""}-${item.text.slice(0, 20)}`}
+                      flexDirection="row"
+                    >
+                      <Text color={colors.border}>│</Text>
+                      <Box paddingLeft={1}>
+                        {item.item_type === "ToolCall" ? (
+                          <Text color={getItemColor("ToolCall", !!item.tool_error)}>
+                            ⚙ {item.tool_name}
+                            {item.tool_summary
+                              ? ` — ${truncate(item.tool_summary, contentWidth - 20)}`
+                              : ""}
+                          </Text>
+                        ) : item.item_type === "Thinking" ? (
+                          <Text color={colors.itemThinking}>
+                            💭 {truncate(item.text, contentWidth - 10)}
+                          </Text>
+                        ) : item.item_type === "Output" ? (
+                          <Text color={colors.itemOutput}>
+                            ✎ {truncate(item.text, contentWidth - 10)}
+                          </Text>
+                        ) : item.item_type === "Subagent" ? (
+                          <Text color={colors.itemAgent}>
+                            🤖 {item.subagent_type || "Agent"}
+                            {item.subagent_desc
+                              ? ` — ${truncate(item.subagent_desc, contentWidth - 20)}`
+                              : ""}
+                            {item.subagent_ongoing ? " ●" : ""}
+                          </Text>
+                        ) : item.item_type === "TeammateMessage" ? (
+                          <Text color={colors.itemTeammate}>
+                            👥 {item.team_member_name || "Teammate"}:{" "}
+                            {truncate(item.text, contentWidth - 20)}
+                          </Text>
+                        ) : item.item_type === "HookEvent" ? (
+                          <Text color={colors.itemHook}>
+                            ⚡ {item.hook_event}: {item.hook_name}
+                          </Text>
+                        ) : (
+                          <Text color={colors.textDim}>
+                            {item.item_type}: {truncate(item.text, contentWidth - 20)}
+                          </Text>
+                        )}
+                      </Box>
+                    </Box>
+                  ))}
+                </Box>
+              )}
+            </Box>
           </Box>
         );
       })}

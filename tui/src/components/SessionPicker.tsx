@@ -239,39 +239,38 @@ export function SessionPicker({
                   : colors.border;
 
               return (
-                <Box
-                  key={s.path}
-                  flexDirection="column"
-                  borderStyle="single"
-                  borderLeft
-                  borderRight={false}
-                  borderTop={false}
-                  borderBottom={false}
-                  borderColor={borderClr}
-                  paddingLeft={1}
-                >
-                  {/* Top line: selection indicator + preview + active badge */}
-                  <Box gap={1}>
-                    <Text bold inverse={isSelected} color={isSelected ? colors.accent : undefined}>
-                      {isSelected ? "▸ " : "  "}
-                      {truncate(s.first_message || s.session_id, cols - 28)}
-                    </Text>
-                    {s.is_ongoing && (
-                      <Text color={colors.ongoing} bold>
-                        ● ACTIVE
+                <Box key={s.path} flexDirection="row">
+                  {/* Left accent border */}
+                  <Text color={borderClr}>{isSelected ? "▸" : "│"}</Text>
+                  <Box flexDirection="column" flexGrow={1} paddingLeft={1}>
+                    {/* Top line: preview + active badge */}
+                    <Box gap={1}>
+                      <Text
+                        bold={isSelected}
+                        inverse={isSelected}
+                        color={isSelected ? colors.accent : undefined}
+                      >
+                        {truncate(s.first_message || s.session_id, cols - 28)}
                       </Text>
-                    )}
-                  </Box>
-                  {/* Meta line */}
-                  <Box gap={1}>
-                    {model && <Text color={modelColor(s.model)}>{model}</Text>}
-                    <Text dimColor>{s.turn_count} turns</Text>
-                    {s.total_tokens > 0 && <Text dimColor>{formatTokens(s.total_tokens)} tok</Text>}
-                    {s.cost_usd > 0 && (
-                      <Text color={colors.tokenHigh}>{formatCost(s.cost_usd)}</Text>
-                    )}
-                    {s.duration_ms > 0 && <Text dimColor>{formatDuration(s.duration_ms)}</Text>}
-                    <Text dimColor>{timeAgo(s.mod_time)}</Text>
+                      {s.is_ongoing && (
+                        <Text color={colors.ongoing} bold>
+                          ● ACTIVE
+                        </Text>
+                      )}
+                    </Box>
+                    {/* Meta line */}
+                    <Box gap={1}>
+                      {model && <Text color={modelColor(s.model)}>{model}</Text>}
+                      <Text dimColor>{s.turn_count} turns</Text>
+                      {s.total_tokens > 0 && (
+                        <Text dimColor>{formatTokens(s.total_tokens)} tok</Text>
+                      )}
+                      {s.cost_usd > 0 && (
+                        <Text color={colors.tokenHigh}>{formatCost(s.cost_usd)}</Text>
+                      )}
+                      {s.duration_ms > 0 && <Text dimColor>{formatDuration(s.duration_ms)}</Text>}
+                      <Text dimColor>{timeAgo(s.mod_time)}</Text>
+                    </Box>
                   </Box>
                 </Box>
               );

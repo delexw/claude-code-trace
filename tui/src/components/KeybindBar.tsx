@@ -35,7 +35,8 @@ const listKeysWithTeams: KeyHint[] = [
 
 const detailKeys: KeyHint[] = [
   { key: "j/k", label: "items" },
-  { key: "Tab", label: "toggle" },
+  { key: "Enter/Tab", label: "toggle" },
+  { key: "e/c", label: "expand" },
   { key: "q/Esc", label: "back" },
 ];
 

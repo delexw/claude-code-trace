@@ -79,10 +79,6 @@ function itemBorderColor(item: DisplayItem, isSelected: boolean): string {
   return getItemColor(item.item_type, !!item.tool_error);
 }
 
-function itemColor(item: DisplayItem): string {
-  return getItemColor(item.item_type, !!item.tool_error);
-}
-
 export function DetailView({ message, selectedItem, expandedItems, ongoing }: DetailViewProps) {
   const cols = process.stdout.columns || 80;
   const stats = statsFromMessage(message);
@@ -137,42 +133,40 @@ export function DetailView({ message, selectedItem, expandedItems, ongoing }: De
           <Text wrap="wrap">{message.content}</Text>
         </Box>
       ) : (
-        <Box flexDirection="column" paddingX={0}>
+        <Box flexDirection="column">
           {visible.map((item, i) => {
             const idx = start + i;
             const isSelected = idx === selectedItem;
             const isExpanded = expandedItems.has(idx);
-            const borderClr = itemBorderColor(item, isSelected);
+            const clr = itemBorderColor(item, isSelected);
 
             return (
-              <Box
-                key={idx}
-                flexDirection="column"
-                borderStyle="round"
-                borderColor={borderClr}
-                marginBottom={0}
-              >
-                {/* Item header */}
-                <Box paddingX={1} gap={1}>
-                  <Text bold={isSelected} color={itemColor(item)}>
-                    {isExpanded ? "▼" : "▶"} {getItemIcon(item)} {getItemName(item)}
-                  </Text>
-                  {getItemSummary(item) ? (
-                    <Text dimColor>— {truncate(getItemSummary(item), cols - 35)}</Text>
-                  ) : null}
-                  {item.duration_ms > 0 ? (
-                    <Text dimColor>{formatDuration(item.duration_ms)}</Text>
-                  ) : null}
-                  {item.subagent_ongoing ? (
-                    <Text color={colors.ongoing} bold>
-                      ●
+              <Box key={idx} flexDirection="row">
+                {/* Left accent border */}
+                <Text color={clr}>│</Text>
+                <Box flexDirection="column" flexGrow={1} paddingLeft={1}>
+                  {/* Item header */}
+                  <Box gap={1}>
+                    <Text bold={isSelected} inverse={isSelected} color={clr}>
+                      {isExpanded ? "▼" : "▶"} {getItemIcon(item)} {getItemName(item)}
                     </Text>
-                  ) : null}
-                  {item.agent_id ? <Text dimColor>[{item.agent_id.slice(0, 8)}]</Text> : null}
-                </Box>
+                    {getItemSummary(item) ? (
+                      <Text dimColor>— {truncate(getItemSummary(item), cols - 35)}</Text>
+                    ) : null}
+                    {item.duration_ms > 0 ? (
+                      <Text dimColor>{formatDuration(item.duration_ms)}</Text>
+                    ) : null}
+                    {item.subagent_ongoing ? (
+                      <Text color={colors.ongoing} bold>
+                        ●
+                      </Text>
+                    ) : null}
+                    {item.agent_id ? <Text dimColor>[{item.agent_id.slice(0, 8)}]</Text> : null}
+                  </Box>
 
-                {/* Expanded body */}
-                {isExpanded && <DetailItemBody item={item} cols={cols} />}
+                  {/* Expanded body */}
+                  {isExpanded && <DetailItemBody item={item} cols={cols} />}
+                </Box>
               </Box>
             );
           })}

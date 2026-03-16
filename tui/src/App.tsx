@@ -271,7 +271,7 @@ export function App() {
           setSelectedItem((i) => Math.min(i + 1, items.length - 1));
         } else if (input === "k" || key.upArrow) {
           setSelectedItem((i) => Math.max(i - 1, 0));
-        } else if (key.tab) {
+        } else if (key.tab || key.return) {
           toggleItem(selectedItem);
         } else if (input === "e") {
           const all = new Set<number>();
