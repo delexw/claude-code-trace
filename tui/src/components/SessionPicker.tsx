@@ -83,9 +83,9 @@ export function SessionPicker({ sessions, loading, error, selectedIndex }: Sessi
     );
   }
 
-  // 2 lines per session card + date headers
+  // 3 lines per session card (message + metadata + separator) + date headers
   const rows = process.stdout.rows || 24;
-  const windowSize = Math.max(3, Math.floor((rows - 4) / 2));
+  const windowSize = Math.max(3, Math.floor((rows - 6) / 3));
   const { start, end } = stableWindow("picker", selectedIndex, sessions.length, windowSize);
 
   let flatIdx = 0;
@@ -177,9 +177,12 @@ export function SessionPicker({ sessions, loading, error, selectedIndex }: Sessi
                       {"\uF017"} {timeAgo(s.mod_time)}
                     </Text>
                   </Box>
-                  {/* Thin separator — matches Go TUI's horizontal rule between cards */}
+                  {/* Thin separator — matches Go TUI's horizontal rule between cards.
+                      Use truncate so it doesn't wrap if flex container is narrower than cols. */}
                   <Box paddingX={1}>
-                    <Text color={colors.textMuted}>{"─".repeat(Math.max(10, cols - 4))}</Text>
+                    <Text color={colors.textMuted} wrap="truncate">
+                      {"─".repeat(200)}
+                    </Text>
                   </Box>
                 </Box>
               );
