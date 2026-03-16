@@ -8,6 +8,7 @@ interface KeyHint {
 }
 
 const pickerKeys: KeyHint[] = [
+  { key: "h", label: "sidebar" },
   { key: "j/k", label: "nav" },
   { key: "Enter", label: "open" },
   { key: "/", label: "search" },
@@ -15,6 +16,7 @@ const pickerKeys: KeyHint[] = [
 ];
 
 const listKeys: KeyHint[] = [
+  { key: "h", label: "sidebar" },
   { key: "j/k", label: "nav" },
   { key: "G/g", label: "jump" },
   { key: "Tab", label: "toggle" },

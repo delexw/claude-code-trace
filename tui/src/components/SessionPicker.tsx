@@ -1,8 +1,7 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useMemo } from "react";
 import { Box, Text, useInput } from "ink";
 import { Spinner } from "@inkjs/ui";
-import { api, type SessionInfo } from "../api.js";
-import { useSSE } from "../useSSE.js";
+import type { SessionInfo } from "../api.js";
 import {
   formatTokens,
   formatCost,
@@ -14,6 +13,9 @@ import {
 } from "../lib/format.js";
 
 interface SessionPickerProps {
+  sessions: SessionInfo[];
+  loading: boolean;
+  error: string;
   onSelect: (session: SessionInfo) => void;
   onQuit: () => void;
 }
@@ -55,54 +57,10 @@ function groupByDate(items: SessionInfo[]): DateGroup[] {
     .map((category) => ({ category, items: groups[category] }));
 }
 
-export function SessionPicker({ onSelect, onQuit }: SessionPickerProps) {
-  const [sessions, setSessions] = useState<SessionInfo[]>([]);
-  const [loading, setLoading] = useState(true);
+export function SessionPicker({ sessions, loading, error, onSelect, onQuit }: SessionPickerProps) {
   const [selected, setSelected] = useState(0);
-  const [error, setError] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [searchActive, setSearchActive] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    const attempt = async (retries: number): Promise<void> => {
-      try {
-        const d = await api.getProjectDirs();
-        if (cancelled) return;
-        if (d.length === 0) {
-          setError("No project directories found. Run the desktop app first to configure.");
-          setLoading(false);
-          return;
-        }
-        const list = await api.discoverSessions(d);
-        if (cancelled) return;
-        setSessions(list);
-        setLoading(false);
-        await api.watchPicker(d);
-      } catch (e) {
-        if (cancelled) return;
-        if (retries > 0) {
-          await new Promise((r) => setTimeout(r, 1000));
-          if (!cancelled) return attempt(retries - 1);
-        }
-        setError(`Cannot connect to backend. Is the app running?\n${e}`);
-        setLoading(false);
-      }
-    };
-    attempt(10); // retry up to 10 times (10s)
-    return () => {
-      cancelled = true;
-      api.unwatchPicker().catch(() => {});
-    };
-  }, []);
-
-  // Live updates to session list
-  useSSE<{ sessions: SessionInfo[] }>(
-    "picker-update",
-    useCallback((payload) => {
-      if (payload.sessions) setSessions(payload.sessions);
-    }, []),
-  );
 
   const filtered = useMemo(() => {
     if (!searchQuery) return sessions;

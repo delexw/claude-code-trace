@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { Box, useApp, useInput } from "ink";
 import { Spinner } from "@inkjs/ui";
 import type {
@@ -18,6 +18,7 @@ import { TeamBoard } from "./components/TeamBoard.js";
 import { DebugViewer } from "./components/DebugViewer.js";
 import { InfoBar } from "./components/InfoBar.js";
 import { KeybindBar } from "./components/KeybindBar.js";
+import { ProjectTree, useProjectEntries } from "./components/ProjectTree.js";
 
 type ViewState = "picker" | "list" | "detail" | "team" | "debug";
 
@@ -25,7 +26,68 @@ export function App() {
   const { exit } = useApp();
   const [view, setView] = useState<ViewState>("picker");
 
-  // Session state
+  // ---------- Picker / project tree state (lifted from SessionPicker) ----------
+  const [allSessions, setAllSessions] = useState<SessionInfo[]>([]);
+  const [pickerLoading, setPickerLoading] = useState(true);
+  const [pickerError, setPickerError] = useState("");
+  const [selectedProject, setSelectedProject] = useState<string | null>(null);
+  const [sidebarFocused, setSidebarFocused] = useState(false);
+  const [sidebarHighlight, setSidebarHighlight] = useState(0);
+
+  const projectEntries = useProjectEntries(allSessions);
+
+  // Filter sessions by selected project
+  const pickerSessions = useMemo(() => {
+    if (selectedProject === null) return allSessions;
+    return allSessions.filter((s) => {
+      const match = s.path.match(/[/\\]\.claude[/\\]projects[/\\]([^/\\]+)/);
+      return match ? match[1] === selectedProject : false;
+    });
+  }, [allSessions, selectedProject]);
+
+  // Discover sessions on mount
+  useEffect(() => {
+    let cancelled = false;
+    const attempt = async (retries: number): Promise<void> => {
+      try {
+        const d = await api.getProjectDirs();
+        if (cancelled) return;
+        if (d.length === 0) {
+          setPickerError("No project directories found. Run the desktop app first to configure.");
+          setPickerLoading(false);
+          return;
+        }
+        const list = await api.discoverSessions(d);
+        if (cancelled) return;
+        setAllSessions(list);
+        setPickerLoading(false);
+        await api.watchPicker(d);
+      } catch (e) {
+        if (cancelled) return;
+        if (retries > 0) {
+          await new Promise((r) => setTimeout(r, 1000));
+          if (!cancelled) return attempt(retries - 1);
+        }
+        setPickerError(`Cannot connect to backend. Is the app running?\n${e}`);
+        setPickerLoading(false);
+      }
+    };
+    attempt(10);
+    return () => {
+      cancelled = true;
+      api.unwatchPicker().catch(() => {});
+    };
+  }, []);
+
+  // Live picker updates
+  useSSE<{ sessions: SessionInfo[] }>(
+    "picker-update",
+    useCallback((payload) => {
+      if (payload.sessions) setAllSessions(payload.sessions);
+    }, []),
+  );
+
+  // ---------- Session state ----------
   const [sessionPath, setSessionPath] = useState("");
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [teams, setTeams] = useState<TeamSnapshot[]>([]);
@@ -54,7 +116,6 @@ export function App() {
   const [debugEntries, setDebugEntries] = useState<DebugEntry[]>([]);
   const [debugSelected, setDebugSelected] = useState(0);
 
-  // Load a session
   const loadSession = useCallback(async (path: string) => {
     setLoading(true);
     try {
@@ -74,7 +135,7 @@ export function App() {
     setLoading(false);
   }, []);
 
-  // Live updates via SSE
+  // Live session updates
   useSSE<{
     messages: DisplayMessage[];
     ongoing: boolean;
@@ -102,23 +163,26 @@ export function App() {
     ),
   );
 
-  // Cleanup watcher on unmount
   useEffect(() => {
     return () => {
       api.unwatchSession().catch(() => {});
     };
   }, []);
 
-  // Handle session selection
   const handleSelectSession = useCallback(
     (session: SessionInfo) => {
       loadSession(session.path);
       setView("list");
+      setSidebarFocused(false);
     },
     [loadSession],
   );
 
-  // Toggle message expand
+  const handleSelectProject = useCallback((key: string | null) => {
+    setSelectedProject(key);
+    setSidebarFocused(false);
+  }, []);
+
   const toggleMessage = useCallback((idx: number) => {
     setExpandedMessages((prev) => {
       const next = new Set(prev);
@@ -128,7 +192,6 @@ export function App() {
     });
   }, []);
 
-  // Toggle detail item expand
   const toggleItem = useCallback((idx: number) => {
     setExpandedItems((prev) => {
       const next = new Set(prev);
@@ -138,11 +201,30 @@ export function App() {
     });
   }, []);
 
-  // Keyboard handling
+  // ---------- Keyboard ----------
   useInput((input, key) => {
+    // Sidebar navigation (when focused)
+    if (sidebarFocused && view === "picker") {
+      if (input === "j" || key.downArrow) {
+        setSidebarHighlight((i) => Math.min(i + 1, projectEntries.length - 1));
+      } else if (input === "k" || key.upArrow) {
+        setSidebarHighlight((i) => Math.max(i - 1, 0));
+      } else if (key.return) {
+        const entry = projectEntries[sidebarHighlight];
+        if (entry) handleSelectProject(entry.key);
+      } else if (input === "l" || key.rightArrow || key.escape) {
+        setSidebarFocused(false);
+      } else if (input === "q") {
+        exit();
+      }
+      return;
+    }
+
     switch (view) {
       case "list": {
-        if (input === "j" || key.downArrow) {
+        if (input === "h" || key.leftArrow) {
+          setSidebarFocused(true);
+        } else if (input === "j" || key.downArrow) {
           setSelectedMessage((i) => Math.min(i + 1, messages.length - 1));
         } else if (input === "k" || key.upArrow) {
           setSelectedMessage((i) => Math.max(i - 1, 0));
@@ -153,7 +235,8 @@ export function App() {
         } else if (key.tab) {
           toggleMessage(selectedMessage);
         } else if (key.return) {
-          if (messages.length > 0 && messages[selectedMessage]?.items.length > 0) {
+          // Open detail for ANY message, not just ones with items
+          if (messages.length > 0 && messages[selectedMessage]) {
             setSelectedItem(0);
             setExpandedItems(new Set());
             setView("detail");
@@ -218,17 +301,28 @@ export function App() {
         break;
       }
       case "picker": {
-        // picker handles its own input
+        if (input === "h" || key.leftArrow) {
+          setSidebarFocused(true);
+        }
+        // other picker keys handled by SessionPicker itself
         break;
       }
     }
   });
 
-  // Render
+  // ---------- Render ----------
   const renderView = () => {
     switch (view) {
       case "picker":
-        return <SessionPicker onSelect={handleSelectSession} onQuit={exit} />;
+        return (
+          <SessionPicker
+            sessions={pickerSessions}
+            loading={pickerLoading}
+            error={pickerError}
+            onSelect={handleSelectSession}
+            onQuit={exit}
+          />
+        );
       case "list":
         if (loading) {
           return (
@@ -266,7 +360,7 @@ export function App() {
 
   return (
     <Box flexDirection="column">
-      {/* Info bar — bordered top bar when session loaded */}
+      {/* Info bar */}
       {sessionPath && view !== "picker" && (
         <InfoBar
           meta={meta}
@@ -277,12 +371,23 @@ export function App() {
         />
       )}
 
-      {/* Main body — main content fills available space */}
-      <Box flexGrow={1} flexDirection="column">
-        {renderView()}
+      {/* Main body: sidebar + content */}
+      <Box flexGrow={1} flexDirection="row">
+        {/* Project tree sidebar — always visible */}
+        <ProjectTree
+          sessions={allSessions}
+          selectedProject={selectedProject}
+          highlightedIndex={sidebarHighlight}
+          isFocused={sidebarFocused}
+        />
+
+        {/* Main content */}
+        <Box flexGrow={1} flexDirection="column">
+          {renderView()}
+        </Box>
       </Box>
 
-      {/* Keybind bar — bordered bottom bar */}
+      {/* Keybind bar */}
       <KeybindBar
         view={view}
         hasTeams={teams.length > 0}

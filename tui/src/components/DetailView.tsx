@@ -151,15 +151,17 @@ export function DetailView({ message, selectedItem, expandedItems, ongoing }: De
             </Text>
           ) : null}
         </Box>
-        <Text dimColor wrap="truncate">
-          {truncate(message.content, cols - 4)}
-        </Text>
+        {items.length > 0 ? (
+          <Text dimColor wrap="truncate">
+            {truncate(message.content, cols - 4)}
+          </Text>
+        ) : null}
       </Box>
 
-      {/* Items as bordered cards */}
+      {/* Full content when no items (e.g. user messages) */}
       {items.length === 0 ? (
-        <Box paddingX={1}>
-          <Text dimColor>No detail items</Text>
+        <Box paddingX={1} flexDirection="column">
+          <Text wrap="wrap">{message.content}</Text>
         </Box>
       ) : (
         <Box flexDirection="column" paddingX={0}>
