@@ -132,33 +132,64 @@ export function SessionPicker({ sessions, loading, error, selectedIndex }: Sessi
               if (idx < start || idx >= end) return null;
               const isSelected = idx === selectedIndex;
               const model = s.model ? shortModel(s.model) : "";
-              const borderClr = isSelected
-                ? colors.accent
-                : s.is_ongoing
-                  ? colors.ongoing
-                  : colors.border;
               const msgMaxLen = cols - 6;
 
               return (
                 <Box key={s.path} flexDirection="column">
-                  {/* Line 1: message */}
+                  {/* Line 1: message preview */}
                   <Box>
-                    <Text color={borderClr}>{isSelected ? " ▸ " : " │ "}</Text>
-                    <Text bold={isSelected} color={isSelected ? colors.accent : colors.textPrimary}>
+                    <Text color={isSelected ? colors.accent : colors.border}>
+                      {isSelected ? " \u25B8 " : " \u2502 "}
+                    </Text>
+                    {s.is_ongoing && (
+                      <>
+                        <OngoingDot />
+                        <Text> </Text>
+                      </>
+                    )}
+                    <Text
+                      bold={isSelected}
+                      color={isSelected ? colors.accent : colors.textPrimary}
+                      backgroundColor={isSelected ? colors.pickerSelectedBg : undefined}
+                    >
                       {truncate(s.first_message || s.session_id, msgMaxLen)}
                     </Text>
-                    {s.is_ongoing && <OngoingDot />}
                   </Box>
-                  {/* Line 2: metadata */}
+                  {/* Line 2: metadata with Nerd Font icons — matches Go TUI */}
                   <Box>
-                    <Text color={borderClr}>{isSelected ? " ▸ " : " │ "}</Text>
-                    {model && <Text color={modelColor(s.model)}>{model}</Text>}
-                    <Text dimColor> {s.turn_count}t</Text>
-                    {s.total_tokens > 0 && <Text dimColor> {formatTokens(s.total_tokens)}</Text>}
-                    {s.cost_usd > 0 && (
-                      <Text color={colors.tokenHigh}> {formatCost(s.cost_usd)}</Text>
+                    <Text color={isSelected ? colors.accent : colors.border}>
+                      {isSelected ? " \u25B8 " : " \u2502 "}
+                    </Text>
+                    {model && (
+                      <Text color={modelColor(s.model)}>
+                        {model.padEnd(10)}
+                      </Text>
                     )}
-                    <Text dimColor> {timeAgo(s.mod_time)}</Text>
+                    {s.git_branch ? (
+                      <Text color={colors.gitBranch}>
+                        {" "}{"\uE0A0"} {truncate(s.git_branch, 20)}
+                      </Text>
+                    ) : null}
+                    <Text dimColor>
+                      {" "}{"\uF086"} {String(s.turn_count).padStart(3)}
+                    </Text>
+                    {s.total_tokens > 0 && (
+                      <Text color={s.total_tokens > 150000 ? colors.tokenHigh : colors.textDim}>
+                        {" "}{"\uEDE8"} {formatTokens(s.total_tokens)}
+                      </Text>
+                    )}
+                    {s.cost_usd > 0 && (
+                      <Text color={colors.tokenHigh}>
+                        {" "}{formatCost(s.cost_usd)}
+                      </Text>
+                    )}
+                    <Text dimColor>
+                      {" "}{"\uF017"} {timeAgo(s.mod_time)}
+                    </Text>
+                  </Box>
+                  {/* Thin separator — matches Go TUI's horizontal rule between cards */}
+                  <Box paddingX={1}>
+                    <Text color={colors.textMuted}>{"─".repeat(Math.max(10, cols - 4))}</Text>
                   </Box>
                 </Box>
               );
