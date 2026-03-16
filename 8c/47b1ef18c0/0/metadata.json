@@ -1,0 +1,46 @@
+{
+  "cli_version": "0.5.0",
+  "checkpoint_id": "8c47b1ef18c0",
+  "session_id": "dc4d3a79-3c48-4d1f-a1d6-c8d385c3e2fd",
+  "strategy": "manual-commit",
+  "created_at": "2026-03-16T22:18:43.09139Z",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "tui/src/components/DebugViewer.tsx",
+    "tui/src/components/DetailView.tsx",
+    "tui/src/components/InfoBar.tsx",
+    "tui/src/components/MessageList.tsx",
+    "tui/src/components/OngoingDots.tsx",
+    "tui/src/components/ProjectTree.tsx",
+    "tui/src/components/SessionPicker.tsx",
+    "tui/src/components/StatsBar.tsx",
+    "tui/src/components/TeamBoard.tsx",
+    "tui/src/lib/format.test.ts",
+    "tui/src/lib/format.ts",
+    "tui/src/lib/items.ts"
+  ],
+  "agent": "Claude Code",
+  "turn_id": "0adb0d58d6b1",
+  "checkpoint_transcript_start": 513,
+  "transcript_lines_at_start": 513,
+  "token_usage": {
+    "input_tokens": 54,
+    "cache_creation_tokens": 35783,
+    "cache_read_tokens": 8456709,
+    "output_tokens": 15975,
+    "api_call_count": 52
+  },
+  "session_metrics": {
+    "turn_count": 2
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-03-16T22:18:42.646357Z",
+    "agent_lines": 0,
+    "human_added": 108,
+    "human_modified": 44,
+    "human_removed": 0,
+    "total_committed": 109,
+    "agent_percentage": 0
+  }
+}
