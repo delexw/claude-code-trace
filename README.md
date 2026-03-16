@@ -19,8 +19,11 @@ Reads session logs from `~/.claude/` and renders them as a scrollable conversati
 ```bash
 git clone git@github.com:delexw/claude-code-trace.git
 cd claude-code-trace
-./script/install.sh       # builds frontend + installs binary to ~/.cargo/bin
-claude-code-trace --web   # opens browser automatically
+./script/install.sh       # builds everything + installs to PATH
+
+claude-code-trace          # desktop app
+claude-code-trace --web    # web mode (opens browser)
+cctrace-tui                # terminal UI (requires backend running)
 ```
 
 ### Download pre-built
@@ -133,21 +136,14 @@ A terminal-based viewer that connects to the same HTTP API. No browser needed â€
 
 ```bash
 # First time setup
-cd tui && npm install && npm run build && cd ..
+cd tui && npm install && cd ..
 
-# Then run (two terminals):
-npm run dev:web          # Terminal 1: starts backend (opens browser too)
-npm run dev:tui          # Terminal 2: runs TUI in terminal
-```
+# Single command (starts backend + TUI together):
+npm run dev:tui
 
-If you installed the desktop app:
-
-```bash
-# Terminal 1: start backend
-claude-code-trace --web
-
-# Terminal 2: run TUI
-cd tui && node dist/cli.js
+# Or if you installed via script/install.sh:
+claude-code-trace --web &   # start backend in background
+cctrace-tui                 # run TUI
 ```
 
 Features: session picker, message list with expand/collapse, live tailing via SSE, vim-style keybinds (j/k/G/g/Tab/e/c/q).
@@ -158,7 +154,7 @@ Features: session picker, message list with expand/collapse, live tailing via SS
 npm install
 npm run tauri dev        # desktop app with hot reload
 npm run dev:web          # web mode (opens browser, no desktop window)
-npm run dev:tui          # TUI (requires backend running via tauri dev or dev:web)
+npm run dev:tui          # TUI (starts backend + terminal UI together)
 npm run tauri build      # production build
 ```
 
