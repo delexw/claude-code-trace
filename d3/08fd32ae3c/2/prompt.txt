@@ -1,0 +1,1 @@
+/autoresearch review the message detail layout and render
