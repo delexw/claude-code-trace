@@ -1,0 +1,169 @@
+Can TUI has same layout not list?
+
+---
+
+Cannot connect to backend. Is the app running?
+ TypeError: fetch failed
+
+---
+
+-> % npm run dev:tui
+
+> claude-code-trace@0.4.0 dev:tui
+> tauri dev -- -- --headless & sleep 5 && cd tui && npm run build && node dist/tui/src/cli.js
+
+     Running BeforeDevCommand (`npm run dev`)
+
+> claude-code-trace@0.4.0 dev
+> vite
+
+
+  VITE v7.3.1  ready in 107 ms
+
+  ➜  Local:   http://localhost:1420/
+     Running DevCommand (`cargo  run --no-default-features --color always -- --headless`)
+        Info Watching /Users/yang.liu/Envato/others/tail-claude-gui/src-tauri for changes...
+   Compiling claude-code-trace v0.4.0 (/Users/yang.liu/Envato/others/tail-claude-gui/src-tauri)
+    Building [=======================> ] 425/426: claude-code-trace(bin)                                                                                                                                                                              
+> claude-code-trace-tui@0.4.0 build
+> tsc
+
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 3.45s
+     Running `target/debug/claude-code-trace --headless`
+
+ Cannot connect to backend. Is the app running?
+ TypeError: fetch failed
+
+---
+
+I can not open each message details such as Bash message... Also no proejct tree side pannel
+
+---
+
+Error: API /api/picker/watch: Unprocessable Entity
+
+---
+
+When select up and down focuing on left tree... the slection is also change on right list
+
+---
+
+Can not expand this item. Also the layout of left border is wried
+
+---
+
+Can TUI dot flashing as well? 5 dots anima?
+
+---
+
+The tree name looks not right, please also use the tree nodes from web and desktop
+
+---
+
+/autoresearch the tui should follow SOLID and clean code
+
+---
+
+Why web and desktip version can not share
+
+---
+
+Can you review your overall changes
+
+---
+
+skip my latest message.. and cnfigure review
+
+---
+
+the auto scroll to latest message when session is active is nto wprking for web and desktop now
+
+---
+
+<task-notification>
+<task-id>a98057da123736b45</task-id>
+<tool-use-id>toolu_01Uviy9JvFaY1GKPKd1qLsqL</tool-use-id>
+<output-file>/private/tmp/claude-502/-Users-yang-liu-Envato-others-tail-claude-gui/5a2c57df-1415-46b8-bb17-0da4bc66818d/tasks/a98057da123736b45.output</output-file>
+<status>completed</status>
+<summary>Agent "Extract shared project tree logic" completed</summary>
+<result>All 291 tests pass (275 existing + 16 new shared tests). All checks green.
+
+Here is a summary of what was done:
+
+**New file created:**
+- `/Users/yang.liu/Envato/others/tail-claude-gui/shared/projectTree.ts` -- Pure tree-building logic extracted into a shared module with all requested exports: `ProjectNode` interface, `buildProjectNodes()`, `TreeNode` interface, `treeNodeCmp()`, `buildTree()`, `WorktreeKind` type, `detectWorktreeKind()`, `worktreeLeafName()`, `FlatItem` interface, `flattenTree()`, and `buildFlatItems()`.
+
+- `/Users/yang.liu/Envato/others/tail-claude-gui/shared/projectTree.test.ts` -- 16 tests covering all shared functions.
+
+**Files updated:**
+- `/Users/yang.liu/Envato/others/tail-claude-gui/src/components/ProjectTree.tsx` -- Removed all class definitions (`ProjectNode`, `TreeNode`, `FlatItem`) and their static methods. Now imports `buildFlatItems` from `shared/projectTree`. Both `useProjectKeys` and the `ProjectTree` component use `buildFlatItems()`.
+
+- `/Users/yang.liu/Envato/others/tail-claude-gui/tui/src/components/ProjectTree.tsx` -- Removed all duplicated interfaces and functions (~160 lines of tree-building logic). Now imports `buildFlatItems` and `FlatItem` from `shared/projectTree`. The TUI-specific worktree group icon prefix (`"⑃ "`) is applied in the render rather than in the data.
+
+- `/Users/yang.liu/Envato/others/tail-claude-gui/vitest.config.ts` -- Added `"shared/**/*.test.{ts,tsx}"` to the include pattern so shared tests are picked up.</result>
+<usage><total_tokens>53720</total_tokens><tool_uses>44</tool_uses><duration_ms>281409</duration_ms></usage>
+</task-notification>
+Full transcript available at: /private/tmp/claude-502/-Users-yang-liu-Envato-others-tail-claude-gui/5a2c57df-1415-46b8-bb17-0da4bc66818d/tasks/a98057da123736b45.output
+
+---
+
+yes, auto scroll not working also make the scroll smooth
+
+---
+
+HTTP API: listening on http://127.0.0.1:11423
+ ready!
+node:internal/modules/esm/resolve:274
+    throw new ERR_MODULE_NOT_FOUND(
+          ^
+
+Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/Users/yang.liu/Envato/others/tail-claude-gui/tui/dist/shared/format' imported from /Users/yang.liu/Envato/others/tail-claude-gui/tui/dist/shared/projectTree.js
+    at finalizeResolution (node:internal/modules/esm/resolve:274:11)
+    at moduleResolve (node:internal/modules/esm/resolve:859:10)
+    at defaultResolve (node:internal/modules/esm/resolve:983:11)
+    at #cachedDefaultResolve (node:internal/modules/esm/loader:731:20)
+    at ModuleLoader.resolve (node:internal/modules/esm/loader:708:38)
+    at ModuleLoader.getModuleJobForImport (node:internal/modules/esm/loader:310:38)
+    at ModuleJob._link (node:internal/modules/esm/module_job:182:49) {
+  code: 'ERR_MODULE_NOT_FOUND',
+  url: 'file:///Users/yang.liu/Envato/others/tail-claude-gui/tui/dist/shared/f
+
+---
+
+contineu
+
+---
+
+The up/down j/q navigation isn't work at all
+
+---
+
+No, keyboard select in TUI isn't work at all
+
+---
+
+I can't scroll up to see the content.. no matter what I input just jump to bottom
+
+---
+
+The top no boudnary... the bottom doesn't extend to bottom.. the hight isn't responsible... and should use same icon as web and desktop anywhere
+
+---
+
+right aligned please
+
+---
+
+The session and tree level green dots doesn't dispear
+
+---
+
+The fix should follow web and desktop and do not commit iwthout i review
+
+---
+
+Why text are not left aligned?
+
+---
+
+In subagent. I can only see user message no agent message list
