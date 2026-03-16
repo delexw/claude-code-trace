@@ -1,12 +1,15 @@
 import type { ReactNode } from "react";
 import { Box, Text } from "ink";
 import type { DisplayMessage, DisplayItem } from "../api.js";
-import { formatDuration, truncate, roleColor, roleIcon, formatJson } from "../lib/format.js";
+import { formatDuration, formatTokens, truncate, roleColor, roleIcon, formatJson } from "../lib/format.js";
 import { colors, getItemColor, getTeamColor } from "../lib/theme.js";
 import { getItemIcon, getItemName, getItemSummary } from "../lib/items.js";
 import { StatsBar, statsFromMessage } from "./StatsBar.js";
 import { BrailleSpinner, OngoingDot } from "./OngoingDots.js";
 import { stableWindow } from "../lib/window.js";
+
+/** Max content width — matches Go TUI's maxContentWidth. */
+const MAX_CONTENT_WIDTH = 160;
 
 /** Limit text to maxLines while preserving newlines. Appends "…" if truncated. */
 function limitLines(text: string, maxLines: number): string {
@@ -48,6 +51,7 @@ export function DetailView({
   depth = 0,
 }: DetailViewProps) {
   const cols = process.stdout.columns || 80;
+  const contentWidth = Math.min(cols, MAX_CONTENT_WIDTH);
   const stats = statsFromMessage(message);
   const items = message.items;
 
@@ -55,23 +59,21 @@ export function DetailView({
   const { start, end } = stableWindow("detail", selectedItem, items.length, windowSize);
   const visible = items.slice(start, end);
 
-  // Fixed-width name column — computed from ALL items so it doesn't shift
-  const maxNameLen = Math.max(4, ...items.map((it) => getItemName(it).length));
+  // Fixed-width name column — computed from ALL items so it doesn't shift (matches Go TUI's 12-char pad)
+  const maxNameLen = Math.max(12, ...items.map((it) => getItemName(it).length));
 
   return (
     <Box flexDirection="column">
-      {/* Message header */}
+      {/* Message header — round border (matches Go TUI's RoundedBorder) */}
       <Box
         flexDirection="column"
-        borderStyle="single"
+        borderStyle="round"
         borderColor={colors.border}
-        borderLeft={false}
-        borderRight={false}
-        borderTop={false}
-        paddingX={1}
+        paddingX={2}
+        width={contentWidth}
       >
         <Box gap={1}>
-          {depth > 0 ? <Text dimColor>{"▸".repeat(depth)} </Text> : null}
+          {depth > 0 ? <Text dimColor>{"\u25B8".repeat(depth)} </Text> : null}
           <Text bold color={roleColor(message.role)}>
             {roleIcon(message.role)}{" "}
             {message.role === "claude" ? "Claude" : message.role === "user" ? "User" : "System"}
@@ -84,14 +86,14 @@ export function DetailView({
         </Box>
         {items.length > 0 ? (
           <Text dimColor wrap="truncate">
-            {truncate(message.content, cols - 4)}
+            {truncate(message.content, contentWidth - 8)}
           </Text>
         ) : null}
       </Box>
 
       {/* Full content when no items */}
       {items.length === 0 ? (
-        <Box paddingX={1} flexDirection="column">
+        <Box paddingX={2} flexDirection="column">
           <Text wrap="wrap">{message.content}</Text>
         </Box>
       ) : (
@@ -103,6 +105,10 @@ export function DetailView({
             const clr = itemBorderColor(item, isSelected);
             const hasAgent = item.subagent_messages.length > 0;
             const teamClr = item.team_color ? getTeamColor(item.team_color) : undefined;
+            const accentClr = hasAgent && teamClr ? teamClr : clr;
+
+            // Go TUI format: {cursor} {icon} {name:<maxNameLen} {summary}  {tokens:>9} {duration:<5}
+            const summaryMaxLen = contentWidth - maxNameLen - 30; // leave room for tokens + duration
 
             return (
               <Box
@@ -111,37 +117,46 @@ export function DetailView({
                 marginBottom={0}
               >
                 {/* Left accent — double bar for subagents with messages */}
-                <Text color={hasAgent && teamClr ? teamClr : clr}>{hasAgent ? "┃" : "│"}</Text>
+                <Text color={accentClr}>{hasAgent ? "┃" : "│"}</Text>
                 <Box flexDirection="column" flexGrow={1} paddingLeft={1}>
-                  {/* Item header */}
-                  <Box gap={1}>
+                  {/* Item header row — Go TUI aligned format */}
+                  <Box>
+                    {/* Cursor + icon + name (fixed width) */}
                     <Text
                       bold={isSelected}
                       inverse={isSelected}
-                      color={hasAgent && teamClr ? teamClr : clr}
+                      color={accentClr}
                     >
-                      {isExpanded ? "▼" : "▶"} {getItemIcon(item)}{" "}
+                      {isExpanded ? "\u02C5" : "\u02C3"} {getItemIcon(item)}{" "}
                       {getItemName(item).padEnd(maxNameLen)}
                     </Text>
+                    {/* Summary */}
                     {getItemSummary(item) ? (
                       <Text dimColor>
-                        — {truncate(getItemSummary(item), cols - maxNameLen - 12)}
+                        {" "}{truncate(getItemSummary(item), summaryMaxLen)}
+                      </Text>
+                    ) : null}
+                    {/* Spacer */}
+                    <Box flexGrow={1} />
+                    {/* Right-aligned: tokens + duration */}
+                    {item.token_count > 0 ? (
+                      <Text dimColor>
+                        {formatTokens(item.token_count).padStart(9)}
                       </Text>
                     ) : null}
                     {item.duration_ms > 0 ? (
-                      <Text dimColor>{formatDuration(item.duration_ms)}</Text>
+                      <Text dimColor> {formatDuration(item.duration_ms).padEnd(5)}</Text>
                     ) : null}
                     {item.subagent_ongoing ? <OngoingDot /> : null}
                     {hasAgent ? (
                       <Text color={teamClr || colors.itemAgent} dimColor>
-                        [{item.subagent_messages.length} msg]
+                        {" "}[{item.subagent_messages.length} msg]
                       </Text>
                     ) : null}
-                    {item.agent_id ? <Text dimColor>[{item.agent_id.slice(0, 8)}]</Text> : null}
                   </Box>
 
                   {/* Expanded body */}
-                  {isExpanded && <DetailItemBody item={item} cols={cols} />}
+                  {isExpanded && <DetailItemBody item={item} cols={contentWidth} />}
                 </Box>
               </Box>
             );
