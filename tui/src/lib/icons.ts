@@ -1,42 +1,46 @@
 /**
  * Centralized icon/glyph definitions for the TUI.
- * Matches the Go TUI's icons.go — all Nerd Font glyphs use explicit
- * Unicode escapes to prevent corruption.
  *
- * Requires a Nerd Font patched terminal font for proper rendering.
+ * Uses standard Unicode symbols that render in ANY terminal font —
+ * no Nerd Font or patched font required. All codepoints are in the
+ * Basic Multilingual Plane (BMP) and supported by virtually all fonts.
+ *
+ * Previous version used Nerd Font PUA glyphs (U+E000–U+F8FF, U+F0000+)
+ * which rendered as empty boxes (□) in terminals without Nerd Font.
  */
 
 // ── Role Icons ──────────────────────────────────────────────────────
 
-export const IconClaude = "\u{F167A}"; // nf-md-robot_outline (U+F167A)
-export const IconUser = "\uF007"; // nf-fa-user (U+F007)
-export const IconSystem = "\uF120"; // nf-fa-terminal (U+F120)
-export const IconSystemErr = "\uF06A"; // nf-fa-circle_exclamation (U+F06A)
+export const IconClaude = "\u2726"; // four-pointed star ✦ (U+2726)
+export const IconUser = "\u25CF"; // filled circle ● (U+25CF)
+export const IconSystem = "$"; // dollar sign (standard terminal prompt)
+export const IconSystemErr = "!"; // exclamation mark
 
 // ── Item Type Icons ─────────────────────────────────────────────────
 
-export const IconThinking = "\uF0EB"; // nf-fa-lightbulb (U+F0EB)
-export const IconOutput = "\u{F0182}"; // nf-md-comment_outline (U+F0182)
-export const IconTool = "\u{F0BE0}"; // nf-md-wrench_outline (U+F0BE0)
-export const IconSubagent = "\u{F167A}"; // nf-md-robot_outline (U+F167A)
-export const IconTeammate = "\u{F167A}"; // nf-md-robot_outline (U+F167A)
-export const IconHook = "\uF0E7"; // nf-fa-bolt (U+F0E7) — lightning for hooks/events
+export const IconThinking = "\u25C6"; // black diamond ◆ (U+25C6)
+export const IconOutput = "\u25AA"; // black small square ▪ (U+25AA)
+export const IconTool = "\u2699"; // gear ⚙ (U+2699)
+export const IconSubagent = "\u2726"; // four-pointed star ✦ (U+2726)
+export const IconTeammate = "\u25C8"; // white diamond containing black small diamond ◈ (U+25C8)
+export const IconHook = "\u26A1"; // high voltage ⚡ (U+26A1)
 
 // ── Navigation/Cursor Icons ─────────────────────────────────────────
 
 export const IconSelected = "\u2502"; // box drawing vertical │ (U+2502)
-export const IconExpanded = "\uF078"; // nf-fa-chevron_down (U+F078)
-export const IconCollapsed = "\uF054"; // nf-fa-chevron_right (U+F054)
-export const IconDrillDown = "\uF061"; // nf-fa-arrow_right (U+F061)
+export const IconExpanded = "\u25BE"; // down-pointing small triangle ▾ (U+25BE)
+export const IconCollapsed = "\u25B8"; // right-pointing small triangle ▸ (U+25B8)
+export const IconDrillDown = "\u2192"; // rightwards arrow → (U+2192)
 export const IconEllipsis = "\u2026"; // horizontal ellipsis … (U+2026)
 
 // ── Metadata Icons ──────────────────────────────────────────────────
+// Use simple ASCII/Latin-1 characters that render in any font.
 
-export const IconBranch = "\uE0A0"; // nf-pl-branch (U+E0A0)
-export const IconChat = "\uF086"; // nf-fa-comments (U+F086)
-export const IconClock = "\uF017"; // nf-fa-clock (U+F017)
-export const IconToken = "\uEDE8"; // nf-fa-coins (U+EDE8)
-export const IconSession = "\u{F0237}"; // nf-md-fingerprint (U+F0237)
+export const IconBranch = "*"; // asterisk — conventional git branch marker
+export const IconChat = "#"; // hash — turn/message count
+export const IconClock = "~"; // tilde — relative time
+export const IconToken = "$"; // dollar — token/cost
+export const IconSession = "@"; // at-sign — session identity
 export const IconDot = "\u00B7"; // middle dot · (U+00B7)
 
 // ── Task Status Icons ───────────────────────────────────────────────
@@ -56,13 +60,13 @@ export const IconTreeBranch = "\u2514"; // └ (U+2514)
 // ── Activity Indicators ─────────────────────────────────────────────
 
 export const IconOngoingDot = "\u25CF"; // filled circle ● (U+25CF)
-export const IconBead = "\uEABC"; // nf-cod-circle (U+EABC)
+export const IconBead = "\u25CF"; // filled circle ● (U+25CF) — same as ongoing
 
 // ── Project Tree ────────────────────────────────────────────────────
 
-export const IconSelected2 = "\u25B8"; // small right triangle ▸ (U+25B8)
-export const IconGroup = "\u2483"; // ⑃ (U+2483)
+export const IconSelected2 = "\u25B8"; // right-pointing small triangle ▸ (U+25B8)
+export const IconGroup = "\u2261"; // triple horizontal bar ≡ (U+2261)
 
-// ── Spawn (Ink-only, no Go equivalent) ──────────────────────────────
+// ── Spawn ───────────────────────────────────────────────────────────
 
-export const IconSpawn = "\uF061"; // nf-fa-arrow_right (U+F061) — reuse drill-down for spawns
+export const IconSpawn = "\u2192"; // rightwards arrow → (U+2192)
