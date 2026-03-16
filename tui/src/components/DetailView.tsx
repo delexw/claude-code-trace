@@ -1,4 +1,3 @@
-import type { ReactNode } from "react";
 import { Box, Text } from "ink";
 import type { DisplayMessage, DisplayItem } from "../api.js";
 import {
@@ -20,6 +19,7 @@ import {
   IconBarSingle,
   IconBarDouble,
   IconSelected2,
+  IconHRule,
 } from "../lib/icons.js";
 
 /** Max content width — matches Go TUI's maxContentWidth. */
@@ -169,132 +169,114 @@ export function DetailView({
   );
 }
 
-/** Bordered container with a label in the top-left corner. */
-function Section({
-  label,
-  width,
-  children,
-}: {
-  label: string;
-  width: number;
-  children: ReactNode;
-}) {
-  return (
-    <Box flexDirection="column" borderStyle="round" borderColor={colors.border} width={width}>
-      <Box paddingX={1} flexDirection="column">
-        <Text bold color={colors.textMuted}>
-          {label}
-        </Text>
-        <Box marginTop={1} flexDirection="column">
-          {children}
-        </Box>
-      </Box>
-    </Box>
-  );
-}
-
-/** Plain bordered container (no label). */
-function Container({ width, children }: { width: number; children: ReactNode }) {
-  return (
-    <Box flexDirection="column" borderStyle="round" borderColor={colors.border} width={width}>
-      <Box paddingX={1} flexDirection="column">
-        {children}
-      </Box>
-    </Box>
-  );
-}
-
+/**
+ * Expanded item body — matches Go TUI: 4-space indent, plain text, no bordered boxes.
+ * ToolCall Input/Result separated by dashed line. Section headers are bold+dim labels.
+ */
 const MAX_BODY_LINES = 40;
-// border (2) + paddingX (2) + left-accent bar + padding (2) = ~6
-const BOX_OVERHEAD = 6;
+// Left accent bar(1) + paddingLeft(1) + body indent(4) = 6
+const BODY_INDENT_OVERHEAD = 6;
 
 function DetailItemBody({ item, cols }: { item: DisplayItem; cols: number }) {
-  // Width available inside the box for text content
-  const innerWidth = cols - BOX_OVERHEAD - 4; // 4 = border(2) + paddingX(2) inside the box
-  const boxWidth = cols - BOX_OVERHEAD;
-  const clamp = (text: string) => clampLines(limitLines(text, MAX_BODY_LINES), innerWidth);
+  const wrapWidth = Math.max(cols - BODY_INDENT_OVERHEAD - 4, 20); // matches Go: max(width-8, 20)
+  const clamp = (text: string) => clampLines(limitLines(text, MAX_BODY_LINES), wrapWidth);
+  const hrule = IconHRule.repeat(Math.min(wrapWidth, 40));
 
   switch (item.item_type) {
     case "Thinking":
       return (
-        <Container width={boxWidth}>
+        <Box flexDirection="column" paddingLeft={4}>
           <Text color={colors.itemThinking} wrap="truncate">
             {clamp(item.text || "Thinking content is not recorded in session logs.")}
           </Text>
-        </Container>
+        </Box>
       );
     case "Output":
       return (
-        <Container width={boxWidth}>
+        <Box flexDirection="column" paddingLeft={4}>
           <Text wrap="truncate">{clamp(item.text)}</Text>
-        </Container>
+        </Box>
       );
     case "ToolCall":
       return (
-        <Box flexDirection="column">
+        <Box flexDirection="column" paddingLeft={4}>
           {item.tool_input && (
-            <Section label="INPUT" width={boxWidth}>
+            <Box flexDirection="column">
+              <Text bold color={colors.textSecondary}>
+                Input:
+              </Text>
               <Text dimColor wrap="truncate">
                 {clamp(formatJson(item.tool_input))}
               </Text>
-            </Section>
+            </Box>
+          )}
+          {item.tool_input && item.tool_result && (
+            <Text color={colors.textMuted}>{hrule}</Text>
           )}
           {item.tool_result && (
-            <Section label="RESULT" width={boxWidth}>
+            <Box flexDirection="column">
+              <Text bold color={item.tool_error ? colors.error : colors.textSecondary}>
+                {item.tool_error ? "Error:" : "Result:"}
+              </Text>
               <Text color={item.tool_error ? colors.error : undefined} wrap="truncate">
                 {clamp(item.tool_result)}
               </Text>
-            </Section>
+            </Box>
           )}
         </Box>
       );
     case "Subagent":
       return (
-        <Box flexDirection="column">
-          {(item.agent_id || item.subagent_desc) && (
-            <Container width={boxWidth}>
-              {item.agent_id && (
-                <Box gap={1}>
-                  <Text color={colors.textMuted} bold>
-                    ID
-                  </Text>
-                  <Text dimColor>{item.agent_id}</Text>
-                </Box>
-              )}
-              {item.subagent_desc && (
-                <Box gap={1}>
-                  <Text color={colors.textMuted} bold>
-                    DESC
-                  </Text>
-                  <Text wrap="truncate">{item.subagent_desc}</Text>
-                </Box>
-              )}
-            </Container>
+        <Box flexDirection="column" paddingLeft={4}>
+          {item.agent_id && (
+            <Box gap={1}>
+              <Text color={colors.textMuted} bold>
+                id:
+              </Text>
+              <Text dimColor>{item.agent_id}</Text>
+            </Box>
+          )}
+          {item.subagent_desc && (
+            <Box gap={1}>
+              <Text color={colors.textMuted} bold>
+                description:
+              </Text>
+              <Text wrap="truncate">{truncate(item.subagent_desc, wrapWidth - 15)}</Text>
+            </Box>
           )}
           {item.subagent_prompt && (
-            <Section label="PROMPT" width={boxWidth}>
-              <Text wrap="truncate">{clamp(item.subagent_prompt)}</Text>
-            </Section>
+            <Box flexDirection="column">
+              <Text color={colors.textMuted} bold>
+                prompt:
+              </Text>
+              <Text dimColor wrap="truncate">
+                {clamp(item.subagent_prompt)}
+              </Text>
+            </Box>
           )}
           {item.text && (
-            <Section label="CONTENT" width={boxWidth}>
+            <Box flexDirection="column">
+              <Text color={colors.textMuted}>{hrule}</Text>
+              <Text bold color={colors.textSecondary}>
+                Result:
+              </Text>
               <Text wrap="truncate">{clamp(item.text)}</Text>
-            </Section>
+            </Box>
           )}
         </Box>
       );
     case "TeammateMessage":
       return (
-        <Container width={boxWidth}>
+        <Box flexDirection="column" paddingLeft={4}>
           <Text wrap="truncate">{clamp(item.text)}</Text>
-        </Container>
+        </Box>
       );
     case "HookEvent":
       return (
-        <Container width={boxWidth}>
+        <Box flexDirection="column" paddingLeft={4}>
           <Box gap={1}>
             <Text color={colors.textMuted} bold>
-              HOOK
+              hook:
             </Text>
             <Text>
               {item.hook_event}: {item.hook_name}
@@ -303,18 +285,18 @@ function DetailItemBody({ item, cols }: { item: DisplayItem; cols: number }) {
           {item.hook_command && (
             <Box gap={1}>
               <Text color={colors.textMuted} bold>
-                CMD
+                cmd:
               </Text>
               <Text dimColor>{item.hook_command}</Text>
             </Box>
           )}
-        </Container>
+        </Box>
       );
     default:
       return (
-        <Container width={boxWidth}>
+        <Box flexDirection="column" paddingLeft={4}>
           <Text wrap="truncate">{clamp(item.text)}</Text>
-        </Container>
+        </Box>
       );
   }
 }
