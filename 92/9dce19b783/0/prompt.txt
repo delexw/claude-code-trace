@@ -1,0 +1,17 @@
+/autoresearch review ascii and icon usage.
+
+---
+
+/autoresearch review layout in deep detailed message right panel
+
+---
+
+/autoresearch review text alignment, margin, padding
+
+---
+
+/autoresearch review invalid icon, ascii etc in ink tui
+
+---
+
+/autoresearch review invalid icon, ascii etc in ink tui
