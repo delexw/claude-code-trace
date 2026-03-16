@@ -1,0 +1,25 @@
+{
+  "cli_version": "0.5.0",
+  "checkpoint_id": "0671e1e00d89",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "tui/src/components/OngoingDots.tsx"
+  ],
+  "sessions": [
+    {
+      "metadata": "/06/71e1e00d89/0/metadata.json",
+      "transcript": "/06/71e1e00d89/0/full.jsonl",
+      "content_hash": "/06/71e1e00d89/0/content_hash.txt",
+      "prompt": "/06/71e1e00d89/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 1843,
+    "cache_creation_tokens": 1104685,
+    "cache_read_tokens": 133198914,
+    "output_tokens": 157019,
+    "api_call_count": 504
+  }
+}
