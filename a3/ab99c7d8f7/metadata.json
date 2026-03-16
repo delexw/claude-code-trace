@@ -5,7 +5,8 @@
   "branch": "main",
   "checkpoints_count": 0,
   "files_touched": [
-    "src-tauri/src/parser/subagent.rs"
+    "src-tauri/src/parser/subagent.rs",
+    "src/styles/global.css"
   ],
   "sessions": [
     {
@@ -13,13 +14,19 @@
       "transcript": "/a3/ab99c7d8f7/0/full.jsonl",
       "content_hash": "/a3/ab99c7d8f7/0/content_hash.txt",
       "prompt": "/a3/ab99c7d8f7/0/prompt.txt"
+    },
+    {
+      "metadata": "/a3/ab99c7d8f7/1/metadata.json",
+      "transcript": "/a3/ab99c7d8f7/1/full.jsonl",
+      "content_hash": "/a3/ab99c7d8f7/1/content_hash.txt",
+      "prompt": ""
     }
   ],
   "token_usage": {
-    "input_tokens": 9,
-    "cache_creation_tokens": 2655,
-    "cache_read_tokens": 820079,
-    "output_tokens": 1303,
-    "api_call_count": 7
+    "input_tokens": 22,
+    "cache_creation_tokens": 7494,
+    "cache_read_tokens": 1872741,
+    "output_tokens": 4279,
+    "api_call_count": 20
   }
 }
