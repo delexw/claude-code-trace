@@ -91,7 +91,7 @@ export function TeamBoard({ teams }: TeamBoardProps) {
                   const isOngoing = team.member_ongoing[m] ?? false;
                   return (
                     <Box key={m}>
-                      {idx > 0 ? <Text> </Text> : null}
+                      {idx > 0 ? <Text>{"  "}</Text> : null}
                       <Text color={memberColor(clr)}>{m}</Text>
                       {isOngoing ? <OngoingDot /> : null}
                     </Box>
