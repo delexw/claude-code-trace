@@ -1,0 +1,5 @@
+/autoresearch review the layout issue in image
+
+---
+
+/autoresearch review the left margin, more top and bottom margin etc... for modern layout
