@@ -1,0 +1,25 @@
+{
+  "cli_version": "0.5.0",
+  "checkpoint_id": "a60e80b872a1",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "tui/src/components/KeybindBar.tsx"
+  ],
+  "sessions": [
+    {
+      "metadata": "/a6/0e80b872a1/0/metadata.json",
+      "transcript": "/a6/0e80b872a1/0/full.jsonl",
+      "content_hash": "/a6/0e80b872a1/0/content_hash.txt",
+      "prompt": ""
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 2,
+    "cache_creation_tokens": 962,
+    "cache_read_tokens": 145326,
+    "output_tokens": 768,
+    "api_call_count": 2
+  }
+}
