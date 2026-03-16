@@ -97,10 +97,7 @@ export function SessionPicker({ sessions, loading, error, selectedIndex }: Sessi
       <Box
         paddingX={1}
         gap={2}
-        borderStyle="single"
-        borderLeft={false}
-        borderRight={false}
-        borderTop={false}
+        borderStyle="round"
         borderColor={colors.border}
       >
         <Text bold>Sessions ({sessions.length})</Text>

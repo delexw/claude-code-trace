@@ -39,7 +39,7 @@ export function ProjectTree({
   return (
     <Box
       flexDirection="column"
-      borderStyle="single"
+      borderStyle="round"
       borderColor={isFocused ? colors.accent : colors.border}
       width={sidebarWidth}
     >
