@@ -20,8 +20,9 @@ export function MessageList({ messages, selectedIndex, expandedSet, ongoing }: M
   const cols = process.stdout.columns || 80;
   const contentWidth = Math.min(cols, MAX_CONTENT_WIDTH);
   // Each message card: border top(1) + header(1) + body(1) + stats(1) + border bottom(1) = 5 lines
+  // Account for InfoBar(3) + KeybindBar(3) = 6 lines of chrome
   const rows = process.stdout.rows || 24;
-  const windowSize = Math.max(3, Math.floor((rows - 4) / 5));
+  const windowSize = Math.max(3, Math.floor((rows - 6) / 5));
   const { start, end } = stableWindow("messages", selectedIndex, messages.length, windowSize);
   const visible = messages.slice(start, end);
 

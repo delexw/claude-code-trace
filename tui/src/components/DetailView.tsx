@@ -62,7 +62,8 @@ export function DetailView({
   const stats = statsFromMessage(message);
   const items = message.items;
 
-  const windowSize = (process.stdout.rows || 24) - 8;
+  // InfoBar(3) + KeybindBar(3) + header box(3) + padding = ~10 lines of chrome
+  const windowSize = Math.max(3, (process.stdout.rows || 24) - 10);
   const { start, end } = stableWindow("detail", selectedItem, items.length, windowSize);
   const visible = items.slice(start, end);
 
