@@ -8,28 +8,25 @@ A desktop + web viewer for Claude Code session JSONL files. Built with [Tauri v2
 
 Reads session logs from `~/.claude/` and renders them as a scrollable conversation with expandable tool calls, token counts, and live tailing. Works as a **native desktop app** (macOS, Linux, Windows) or as a **web app** in any browser. Inspired by [tail-claude](https://github.com/kylesnowschwartz/tail-claude).
 
-> **Web mode:** Run with `--web` to start the backend without opening a desktop window, then open `http://localhost:1420` in any browser. The frontend communicates with the Rust backend via HTTP (port 11423) + Server-Sent Events.
-
 <p align="center">
   <img src="demo.gif" alt="Demo" />
 </p>
 
-## Requirements
+## Quick Start (Web — no install needed)
 
-- [Rust](https://rustup.rs/) 1.77+
-- Node.js 18+
-- macOS: Xcode Command Line Tools (`xcode-select --install`)
-- Linux: `libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev`
-- Windows: [WebView2](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) (pre-installed on Windows 10/11)
+Run from source in your browser — no `.dmg` or installer required:
 
-## Install
+```bash
+git clone git@github.com:delexw/claude-code-trace.git
+cd claude-code-trace
+npm install
+npm run tauri dev -- -- --web
+# Open http://localhost:1420 in your browser
+```
 
-> [!IMPORTANT]
-> **macOS:** The app is unsigned. After installing, remove the quarantine attribute:
->
-> ```bash
-> xattr -cr /Applications/Claude\ Code\ Trace.app
-> ```
+This starts the Rust backend (HTTP API on port 11423) + Vite dev server (frontend on port 1420) without opening a desktop window.
+
+## Install (Desktop App)
 
 ### Download
 
@@ -40,6 +37,13 @@ Grab the latest release from [Releases](https://github.com/delexw/claude-code-tr
 | macOS    | `.dmg`                          |
 | Linux    | `.deb`, `.rpm`, `.AppImage`     |
 | Windows  | `.msi`, `.exe` (NSIS installer) |
+
+> [!IMPORTANT]
+> **macOS:** The app is unsigned. After installing, remove the quarantine attribute:
+>
+> ```bash
+> xattr -cr /Applications/Claude\ Code\ Trace.app
+> ```
 
 ### Build from source
 
@@ -52,22 +56,42 @@ npm run tauri build
 
 The built app will be in `src-tauri/target/release/bundle/`.
 
+## Requirements
+
+- [Rust](https://rustup.rs/) 1.77+
+- Node.js 18+
+- macOS: Xcode Command Line Tools (`xcode-select --install`)
+- Linux: `libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev`
+- Windows: [WebView2](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) (pre-installed on Windows 10/11)
+
 ## Usage
 
 ### Desktop
 
 Launch the app to open the session picker. It auto-discovers all sessions from `~/.claude/projects/`.
 
-### Web
+Click **Open in Browser** in the toolbar to switch to browser mode — this opens `http://localhost:1420` in your default browser and hides the desktop window.
 
-Launch in web-only mode (no desktop window):
+### Web (standalone)
+
+If you installed the desktop app:
 
 ```bash
-claude-code-trace --web
-# then open http://localhost:1420
+# macOS
+/Applications/Claude\ Code\ Trace.app/Contents/MacOS/Claude\ Code\ Trace --web
+
+# Or add a shell alias:
+alias cctrace='/Applications/Claude\ Code\ Trace.app/Contents/MacOS/Claude\ Code\ Trace --web'
+cctrace
 ```
 
-Or simply open **http://localhost:1420** in any browser while the desktop app is running.
+If running from source:
+
+```bash
+npm run tauri dev -- -- --web
+```
+
+Then open **http://localhost:1420** in any browser.
 
 Select a session to view the conversation. Click messages to expand tool calls, or open the detail view for full inspection.
 
@@ -136,8 +160,8 @@ cargo fmt --manifest-path src-tauri/Cargo.toml     # Rust format
 Push a version tag to trigger a GitHub Actions build:
 
 ```bash
-git tag v0.2.0
-git push origin v0.2.0
+git tag v0.4.0
+git push origin v0.4.0
 ```
 
 This creates a draft release with macOS, Linux, and Windows artifacts attached. Review and publish it from the [Releases](https://github.com/delexw/claude-code-trace/releases) page.
