@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { useRef } from "react";
 import { useAutoScroll } from "./useAutoScroll";
@@ -8,6 +8,16 @@ function mockScrollableElement(scrollTop: number, scrollHeight: number, clientHe
   Object.defineProperty(el, "scrollHeight", { value: scrollHeight, configurable: true });
   Object.defineProperty(el, "scrollTop", { value: scrollTop, writable: true, configurable: true });
   Object.defineProperty(el, "clientHeight", { value: clientHeight, configurable: true });
+  // Mock scrollTo — jsdom doesn't implement it properly
+  el.scrollTo = vi.fn((...args: unknown[]) => {
+    const opts =
+      typeof args[0] === "object" ? (args[0] as ScrollToOptions) : { top: args[1] as number };
+    Object.defineProperty(el, "scrollTop", {
+      value: opts.top ?? 0,
+      writable: true,
+      configurable: true,
+    });
+  }) as unknown as typeof el.scrollTo;
   return el;
 }
 
@@ -20,7 +30,6 @@ function setup(el: HTMLElement, initialCount: number) {
   const { rerender } = renderHook(
     ({ count }) => {
       const ref = useRef<HTMLDivElement>(el as HTMLDivElement);
-      // Keep the ref in sync with our mock element
       ref.current = refObj.current as HTMLDivElement;
       useAutoScroll(count, ref);
       return ref;
@@ -42,7 +51,7 @@ describe("useAutoScroll", () => {
     const { rerender } = setup(el, 1);
 
     rerender({ count: 2 });
-    expect(el.scrollTop).toBe(500);
+    expect(el.scrollTo).toHaveBeenCalledWith({ top: 500, behavior: "smooth" });
   });
 
   it("does not auto-scroll when user has scrolled up", () => {
@@ -50,8 +59,8 @@ describe("useAutoScroll", () => {
     const el = mockScrollableElement(200, 1000, 100);
     const { rerender } = setup(el, 1);
 
-    // The useEffect runs checkNearBottom() on mount → isNearBottom = false
     rerender({ count: 2 });
+    // scrollTo should not be called (or only from MutationObserver which we don't trigger here)
     expect(el.scrollTop).toBe(200);
   });
 
@@ -59,8 +68,11 @@ describe("useAutoScroll", () => {
     const el = mockScrollableElement(400, 500, 100);
     const { rerender } = setup(el, 3);
 
+    const callsBefore = (el.scrollTo as ReturnType<typeof vi.fn>).mock.calls.length;
     rerender({ count: 3 });
-    expect(el.scrollTop).toBe(400);
+    const callsAfter = (el.scrollTo as ReturnType<typeof vi.fn>).mock.calls.length;
+    // No new scrollTo call from the count-based effect
+    expect(callsAfter).toBe(callsBefore);
   });
 
   it("works with an existing ref passed in", () => {
@@ -77,7 +89,7 @@ describe("useAutoScroll", () => {
     );
 
     rerender({ count: 2 });
-    expect(el.scrollTop).toBe(500);
+    expect(el.scrollTo).toHaveBeenCalledWith({ top: 500, behavior: "smooth" });
   });
 
   it("defaults to near-bottom on initial render (no scroll event yet)", () => {
@@ -88,27 +100,21 @@ describe("useAutoScroll", () => {
     const el = mockScrollableElement(0, 500, 500);
     Object.defineProperty(result.current, "current", { value: el, writable: true });
 
-    // No scroll listener attached yet — defaults to "near bottom"
     rerender({ count: 2 });
-    expect(el.scrollTop).toBe(500);
+    expect(el.scrollTo).toHaveBeenCalledWith({ top: 500, behavior: "smooth" });
   });
 
   it("auto-scrolls even when new content adds significant height", () => {
-    // Start at bottom: distance = 500 - 400 - 100 = 0
     const el = mockScrollableElement(400, 500, 100);
     const { rerender } = setup(el, 1);
 
-    // Simulate new content pushing scrollHeight to 2000.
-    // Old approach: distance = 2000-400-100 = 1500 > 150 → would NOT scroll.
-    // New approach: near-bottom was captured before content grew → DOES scroll.
     Object.defineProperty(el, "scrollHeight", { value: 2000, configurable: true });
 
     rerender({ count: 2 });
-    expect(el.scrollTop).toBe(2000);
+    expect(el.scrollTo).toHaveBeenCalledWith({ top: 2000, behavior: "smooth" });
   });
 
   it("resumes auto-scroll when user scrolls back to bottom", () => {
-    // Start far from bottom
     const el = mockScrollableElement(200, 1000, 100);
     const { rerender } = setup(el, 1);
 
@@ -122,6 +128,6 @@ describe("useAutoScroll", () => {
     act(() => el.dispatchEvent(new Event("scroll")));
 
     rerender({ count: 3 });
-    expect(el.scrollTop).toBe(1000);
+    expect(el.scrollTo).toHaveBeenCalledWith({ top: 1000, behavior: "smooth" });
   });
 });

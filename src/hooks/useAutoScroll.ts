@@ -1,12 +1,11 @@
 import { useRef, useEffect, useLayoutEffect, type RefObject } from "react";
 
 /**
- * Auto-scrolls a container to the bottom when `itemCount` increases,
+ * Auto-scrolls a container to the bottom when content changes,
  * but only if the user was already near the bottom before the update.
  *
- * Near-bottom state is tracked via scroll events (which fire before new
- * content is rendered), so the check isn't thrown off by new items
- * pushing scrollHeight up.
+ * Triggers on both new items (count increase) and content updates
+ * (changeSignal). Uses smooth scrolling for a polished experience.
  */
 export function useAutoScroll<T extends HTMLElement>(
   itemCount: number,
@@ -18,8 +17,7 @@ export function useAutoScroll<T extends HTMLElement>(
   const prevCountRef = useRef(itemCount);
   const isNearBottomRef = useRef(true);
 
-  // Track near-bottom state via scroll events. Attached once when
-  // the element is available — scroll events keep the ref up to date.
+  // Track near-bottom state via scroll events.
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -28,21 +26,36 @@ export function useAutoScroll<T extends HTMLElement>(
       isNearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
     };
 
-    // Capture initial state.
     checkNearBottom();
 
     el.addEventListener("scroll", checkNearBottom, { passive: true });
     return () => el.removeEventListener("scroll", checkNearBottom);
   }, [ref, threshold]);
 
-  // When items increase, scroll before paint if user was near bottom.
+  // When item count increases → smooth scroll if near bottom.
   useLayoutEffect(() => {
     const el = ref.current;
     if (el && itemCount > prevCountRef.current && isNearBottomRef.current) {
-      el.scrollTop = el.scrollHeight;
+      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
     }
     prevCountRef.current = itemCount;
   }, [itemCount, ref]);
+
+  // Also scroll when content changes (same count but content grew).
+  // Use a MutationObserver to detect DOM changes within the container.
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+
+    const observer = new MutationObserver(() => {
+      if (isNearBottomRef.current) {
+        el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+      }
+    });
+
+    observer.observe(el, { childList: true, subtree: true, characterData: true });
+    return () => observer.disconnect();
+  }, [ref]);
 
   return ref;
 }
