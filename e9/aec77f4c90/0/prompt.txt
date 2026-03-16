@@ -1,0 +1,41 @@
+/autoresearch review ascii and icon usage.
+
+---
+
+/autoresearch review layout in deep detailed message right panel
+
+---
+
+/autoresearch review text alignment, margin, padding
+
+---
+
+/autoresearch review invalid icon, ascii etc in ink tui
+
+---
+
+/autoresearch review invalid icon, ascii etc in ink tui
+
+---
+
+createTextInstance(text, _root, hostContext) {
+ 127:         if (!hostContext.isInsideText) {
+ 128:             throw new Error(`Text string "${text}" must be rendered inside <Text> component`);
+ 129:         }
+ 130:         return createTextNode(text);
+ 131:     },
+
+ - createTextInstance (node_modules/ink/build/reconciler.js:128:19)
+ - completeWork (node_modules/react-reconciler/cjs/react-reconciler.development.js:13692:40)
+ - completeUnitOfWork (node_modules/react-reconciler/cjs/react-reconciler.development.js:18775:16)
+ - performUnitOfWork (node_modules/react-reconciler/cjs/react-reconciler.development.js:18750:5)
+ - workLoopSync (node_modules/react-reconciler/cjs/react-reconciler.development.js:18648:5)
+ - renderRootSync (node_modules/react-reconciler/cjs/react-reconciler.development.js:18616:7)
+ - performSyncWorkOnRoot (node_modules/react-reconciler/cjs/react-reconciler.development.js:18232:20)
+ - flushSyncCallbacks (node_modules/react-reconciler/cjs/react-reconciler.development.js:2936:22)
+ - flushSyncCallbacksOnlyInLegacyMode (node_modules/react-reconciler/cjs/react-reconciler.development.js:2915:5)
+ - scheduleUpdateOnFiber (node_modules/react-reconciler/cjs/react-reconciler.development.js:17685:7)
+
+---
+
+/autoresearch review invalid icon and ascii again
