@@ -64,23 +64,34 @@ export function SessionPicker({ onSelect, onQuit }: SessionPickerProps) {
   const [searchActive, setSearchActive] = useState(false);
 
   useEffect(() => {
-    (async () => {
+    let cancelled = false;
+    const attempt = async (retries: number): Promise<void> => {
       try {
         const d = await api.getProjectDirs();
+        if (cancelled) return;
         if (d.length === 0) {
           setError("No project directories found. Run the desktop app first to configure.");
           setLoading(false);
           return;
         }
         const list = await api.discoverSessions(d);
+        if (cancelled) return;
         setSessions(list);
+        setLoading(false);
         await api.watchPicker(d);
       } catch (e) {
+        if (cancelled) return;
+        if (retries > 0) {
+          await new Promise((r) => setTimeout(r, 1000));
+          if (!cancelled) return attempt(retries - 1);
+        }
         setError(`Cannot connect to backend. Is the app running?\n${e}`);
+        setLoading(false);
       }
-      setLoading(false);
-    })();
+    };
+    attempt(10); // retry up to 10 times (10s)
     return () => {
+      cancelled = true;
       api.unwatchPicker().catch(() => {});
     };
   }, []);

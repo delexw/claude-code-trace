@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "dev:web": "tauri dev -- -- --web",
-    "dev:tui": "tauri dev -- -- --headless & sleep 5 && cd tui && npm run build && node dist/tui/src/cli.js",
+    "dev:tui": "tauri dev -- -- --headless & cd tui && npm run build && node wait-for-backend.mjs && node dist/tui/src/cli.js",
     "lint": "oxlint && cargo clippy --manifest-path src-tauri/Cargo.toml",
     "fmt": "oxfmt && cargo fmt --manifest-path src-tauri/Cargo.toml",
     "fmt:check": "oxfmt --check && cargo fmt --manifest-path src-tauri/Cargo.toml --check",
