@@ -21,6 +21,7 @@ import {
   IconClock,
   IconToken,
   IconSession,
+  IconHRule,
 } from "../lib/icons.js";
 
 interface SessionPickerProps {
@@ -194,7 +195,7 @@ export function SessionPicker({ sessions, loading, error, selectedIndex }: Sessi
                       Use truncate so it doesn't wrap if flex container is narrower than cols. */}
                   <Box paddingX={1}>
                     <Text color={colors.textMuted} wrap="truncate">
-                      {"─".repeat(200)}
+                      {IconHRule.repeat(200)}
                     </Text>
                   </Box>
                 </Box>

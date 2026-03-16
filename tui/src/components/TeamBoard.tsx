@@ -2,7 +2,13 @@ import { Box, Text } from "ink";
 import type { TeamSnapshot } from "../api.js";
 import { colors, getTeamColor } from "../lib/theme.js";
 import { OngoingDot } from "./OngoingDots.js";
-import { IconTaskDone, IconTaskActive, IconTaskPending, IconTaskCancelled } from "../lib/icons.js";
+import {
+  IconTaskDone,
+  IconTaskActive,
+  IconTaskPending,
+  IconTaskCancelled,
+  IconHRule,
+} from "../lib/icons.js";
 
 interface TeamBoardProps {
   teams: TeamSnapshot[];
@@ -61,9 +67,9 @@ export function TeamBoard({ teams }: TeamBoardProps) {
         .map((team) => {
           // Section divider: "── team-name ──────" (matches Go TUI)
           const nameLen = team.name.length + 2; // " name "
-          const leftDash = "── ";
+          const leftDash = `${IconHRule}${IconHRule} `;
           const rightDash =
-            " " + "─".repeat(Math.max(4, ruleWidth - nameLen - leftDash.length - 1));
+            " " + IconHRule.repeat(Math.max(4, ruleWidth - nameLen - leftDash.length - 1));
 
           // Summary: "N members · M/T done"
           const doneCount = team.tasks.filter((t) => t.status === "completed").length;

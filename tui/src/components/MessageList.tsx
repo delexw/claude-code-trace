@@ -6,7 +6,14 @@ import { getItemIcon, getItemName } from "../lib/items.js";
 import { StatsBar, statsFromMessage } from "./StatsBar.js";
 import { BrailleSpinner } from "./OngoingDots.js";
 import { stableWindow } from "../lib/window.js";
-import { IconSelected2, IconBarSingle, IconBarDouble, IconOngoingDot } from "../lib/icons.js";
+import {
+  IconSelected2,
+  IconBarSingle,
+  IconBarDouble,
+  IconOngoingDot,
+  IconHRule,
+  IconDot,
+} from "../lib/icons.js";
 
 /** Max content width — matches Go TUI's maxContentWidth. */
 const MAX_CONTENT_WIDTH = 160;
@@ -50,7 +57,9 @@ export function MessageList({ messages, selectedIndex, expandedSet, ongoing }: M
         if (msg.role === "compact") {
           return (
             <Box key={`compact-${idx}`} paddingX={1} justifyContent="center">
-              <Text dimColor>────── {msg.content} ──────</Text>
+              <Text dimColor>
+                {IconHRule.repeat(6)} {msg.content} {IconHRule.repeat(6)}
+              </Text>
             </Box>
           );
         }
@@ -59,7 +68,10 @@ export function MessageList({ messages, selectedIndex, expandedSet, ongoing }: M
           return (
             <Box key={`sys-${idx}`} justifyContent="center" paddingX={2}>
               <Text color={colors.textMuted}>
-                ── {roleIcon("system")} System · {truncate(msg.content, contentWidth - 20)} ──
+                {IconHRule}
+                {IconHRule} {roleIcon("system")} System {IconDot}{" "}
+                {truncate(msg.content, contentWidth - 20)} {IconHRule}
+                {IconHRule}
               </Text>
             </Box>
           );
