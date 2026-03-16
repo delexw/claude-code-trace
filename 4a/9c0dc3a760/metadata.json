@@ -3,7 +3,7 @@
   "checkpoint_id": "4a9c0dc3a760",
   "strategy": "manual-commit",
   "branch": "main",
-  "checkpoints_count": 0,
+  "checkpoints_count": 1,
   "files_touched": [
     "package.json",
     "src-tauri/Cargo.lock",
@@ -17,13 +17,19 @@
       "transcript": "/4a/9c0dc3a760/0/full.jsonl",
       "content_hash": "/4a/9c0dc3a760/0/content_hash.txt",
       "prompt": ""
+    },
+    {
+      "metadata": "/4a/9c0dc3a760/1/metadata.json",
+      "transcript": "/4a/9c0dc3a760/1/full.jsonl",
+      "content_hash": "/4a/9c0dc3a760/1/content_hash.txt",
+      "prompt": "/4a/9c0dc3a760/1/prompt.txt"
     }
   ],
   "token_usage": {
-    "input_tokens": 10,
-    "cache_creation_tokens": 5966,
-    "cache_read_tokens": 723708,
-    "output_tokens": 1420,
-    "api_call_count": 10
+    "input_tokens": 2077,
+    "cache_creation_tokens": 2703129,
+    "cache_read_tokens": 216904590,
+    "output_tokens": 211224,
+    "api_call_count": 694
   }
 }
