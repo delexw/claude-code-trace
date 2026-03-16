@@ -176,11 +176,11 @@ export function DetailView({
  * ToolCall Input/Result separated by dashed line. Section headers are bold+dim labels.
  */
 const MAX_BODY_LINES = 40;
-// Left accent bar(1) + paddingLeft(1) + body indent(4) = 6
-const BODY_INDENT_OVERHEAD = 6;
+// Left accent bar(1) + paddingLeft(1) + body paddingLeft(4) + safety margin(4) = 10
+const BODY_INDENT_OVERHEAD = 10;
 
 function DetailItemBody({ item, cols }: { item: DisplayItem; cols: number }) {
-  const wrapWidth = Math.max(cols - BODY_INDENT_OVERHEAD - 4, 20); // matches Go: max(width-8, 20)
+  const wrapWidth = Math.max(cols - BODY_INDENT_OVERHEAD, 20);
   const clamp = (text: string) => clampLines(limitLines(text, MAX_BODY_LINES), wrapWidth);
   const hrule = IconHRule.repeat(Math.min(wrapWidth, 40));
 
