@@ -1,0 +1,25 @@
+{
+  "cli_version": "0.5.0",
+  "checkpoint_id": "fedda1791ebf",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "tui/src/components/SessionPicker.tsx"
+  ],
+  "sessions": [
+    {
+      "metadata": "/fe/dda1791ebf/0/metadata.json",
+      "transcript": "/fe/dda1791ebf/0/full.jsonl",
+      "content_hash": "/fe/dda1791ebf/0/content_hash.txt",
+      "prompt": "/fe/dda1791ebf/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 4846,
+    "cache_creation_tokens": 323835,
+    "cache_read_tokens": 26458954,
+    "output_tokens": 70010,
+    "api_call_count": 194
+  }
+}
