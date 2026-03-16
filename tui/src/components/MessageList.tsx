@@ -140,6 +140,7 @@ export function MessageList({ messages, selectedIndex, expandedSet, ongoing }: M
                     </Text>
                     <Box paddingLeft={1}>
                       <Text
+                        wrap="truncate"
                         color={
                           item.team_color
                             ? getTeamColor(item.team_color)
