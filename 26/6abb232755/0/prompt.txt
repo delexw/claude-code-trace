@@ -1,0 +1,28 @@
+If cctrace --web  can ask if install a server running inbackground should be awesome
+
+---
+
+yes, how about Windows
+
+---
+
+If cctrace --web  can ask mr if install a server running inbackground should be awesome
+
+---
+
+Hold on If I don't pass no-open it will open broasewr twice?
+
+---
+
+} else if web_only {
+                if no_open {
+                    eprintln!("Web mode: http://localhost:1420 (background, no browser)");
+                } else {
+                    eprintln!("Web mode: opening http://localhost:1420 in your browser...");
+                    let _ = tauri_plugin_opener::open_url("http://localhost:1420", None::<&str>);
+                }
+It doesn't open 2 twice?
+
+---
+
+wrong... I don;t want to install the background by install.sh but by cctrace --web commned to ask
