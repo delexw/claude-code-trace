@@ -1,10 +1,9 @@
 #!/usr/bin/env node
 /**
- * Offer to install cctrace --web as a background service on login.
- * Called interactively from `cctrace --web` (not from --no-open).
- *
- * Checks whether the service is already installed and skips the prompt if so.
+ * Install cctrace --web as a background service on login.
  * Supports macOS (launchd), Linux (systemd), and Windows (Startup folder).
+ *
+ * Captures the current shell PATH so the service can find node, npx, cargo, etc.
  */
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { homedir, platform } from "node:os";
@@ -49,6 +48,7 @@ function installDarwin(bin) {
   mkdirSync(dir, { recursive: true });
   const plist = join(dir, `${LABEL}.plist`);
   const logPath = join(homedir(), ".claude", "cctrace-web.log");
+  const currentPath = process.env.PATH || "/usr/local/bin:/usr/bin:/bin";
   writeFileSync(
     plist,
     `<?xml version="1.0" encoding="UTF-8"?>
@@ -64,6 +64,11 @@ function installDarwin(bin) {
     <string>--web</string>
     <string>--no-open</string>
   </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>${currentPath}</string>
+  </dict>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
@@ -90,6 +95,7 @@ function installLinux(bin) {
   const dir = join(homedir(), ".config", "systemd", "user");
   mkdirSync(dir, { recursive: true });
   const unit = join(dir, "cctrace-web.service");
+  const currentPath = process.env.PATH || "/usr/local/bin:/usr/bin:/bin";
   writeFileSync(
     unit,
     `[Unit]
@@ -97,6 +103,7 @@ Description=cctrace web server
 After=network.target
 
 [Service]
+Environment=PATH=${currentPath}
 ExecStart=${bin} --web --no-open
 Restart=on-failure
 RestartSec=5
