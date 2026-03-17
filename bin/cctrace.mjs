@@ -8,6 +8,7 @@ const root = resolve(__dirname, "..");
 
 const args = process.argv.slice(2);
 const mode = args.find((a) => ["--app", "--web", "--tui"].includes(a)) ?? "--app";
+const noOpen = args.includes("--no-open");
 
 function run(cmd, cmdArgs, opts = {}) {
   const child = spawn(cmd, cmdArgs, {
@@ -24,9 +25,12 @@ switch (mode) {
     run("npx", ["tauri", "dev"]);
     break;
 
-  case "--web":
-    run("npx", ["tauri", "dev", "--", "--", "--web"]);
+  case "--web": {
+    const webArgs = ["tauri", "dev", "--", "--", "--web"];
+    if (noOpen) webArgs.push("--no-open");
+    run("npx", webArgs);
     break;
+  }
 
   case "--tui": {
     // Start backend headless, then launch TUI once API is ready
