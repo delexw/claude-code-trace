@@ -1,0 +1,1 @@
+open browser when in backgound should be wait backend launch then open
