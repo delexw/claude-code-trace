@@ -44,7 +44,7 @@ function waitForServer(url, timeoutMs = 120000) {
         return;
       }
       try {
-        const resp = await fetch(url, { signal: AbortSignal.timeout(2000) });
+        const resp = await fetch(url, { signal: AbortSignal.timeout(10000) });
         if (resp.ok) {
           res();
           return;
