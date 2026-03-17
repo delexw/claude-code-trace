@@ -1,0 +1,9 @@
+can you see any running if yes kill
+
+---
+
+Can you check the log? I think he background agetn shoudl be interactive
+
+---
+
+Why can not keep running?
