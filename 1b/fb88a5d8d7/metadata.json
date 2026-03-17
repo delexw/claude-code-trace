@@ -1,0 +1,27 @@
+{
+  "cli_version": "0.5.0",
+  "checkpoint_id": "1bfb88a5d8d7",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "bin/cctrace.mjs",
+    "bin/wait-for-backend.mjs",
+    "tui/wait-for-backend.mjs"
+  ],
+  "sessions": [
+    {
+      "metadata": "/1b/fb88a5d8d7/0/metadata.json",
+      "transcript": "/1b/fb88a5d8d7/0/full.jsonl",
+      "content_hash": "/1b/fb88a5d8d7/0/content_hash.txt",
+      "prompt": "/1b/fb88a5d8d7/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 17,
+    "cache_creation_tokens": 4085,
+    "cache_read_tokens": 3573738,
+    "output_tokens": 2948,
+    "api_call_count": 11
+  }
+}
