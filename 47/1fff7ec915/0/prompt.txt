@@ -1,0 +1,5 @@
+remvoe the cctrace bacground agetn
+
+---
+
+Would you like to run cctrace --web as a background service on login? [y/N]" ask at 1 step then I can choose jsut start inline or start in background
