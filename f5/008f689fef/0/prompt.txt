@@ -1,0 +1,11 @@
+> claude-code-trace@0.4.1 dev
+> vite
+
+error when starting dev server:
+Error: Port 1420 is already in use
+    at Server.onError$1 (file:///Users/yang.liu/Envato/others/tail-claude-gui/node_modules/vite/dist/node/chunks/config.js:14933:28)
+    at Server.emit (node:events:519:28)
+    at emitErrorNT (node:net:1976:8)
+    at process.processTicksAndRejections (node:internal/process/task_queues:90:21)
+       Error The "beforeDevCommand" terminated with a non-zero status code.
+Does the background server keep launching?
