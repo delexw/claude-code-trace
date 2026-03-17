@@ -1,0 +1,25 @@
+{
+  "cli_version": "0.5.0",
+  "checkpoint_id": "b69f1c05eda4",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "bin/install-service.mjs"
+  ],
+  "sessions": [
+    {
+      "metadata": "/b6/9f1c05eda4/0/metadata.json",
+      "transcript": "/b6/9f1c05eda4/0/full.jsonl",
+      "content_hash": "/b6/9f1c05eda4/0/content_hash.txt",
+      "prompt": "/b6/9f1c05eda4/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 12,
+    "cache_creation_tokens": 3183,
+    "cache_read_tokens": 2845904,
+    "output_tokens": 1451,
+    "api_call_count": 10
+  }
+}
