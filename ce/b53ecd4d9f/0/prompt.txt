@@ -1,0 +1,17 @@
+Installed! cctrace --web will start on login.
+  Logs:   /Users/yang.liu/.claude/claude-code-trace-web.log
+  Stop:   launchctl unload "/Users/yang.liu/Library/LaunchAgents/com.claude-code-trace.web-server.plist"
+  Remove: rm "/Users/yang.liu/Library/LaunchAgents/com.claude-code-trace.web-server.plist"
+Waiting for server to start...
+file:///Users/yang.liu/Envato/others/tail-claude-gui/bin/cctrace.mjs:42
+        rej(new Error(`Timed out waiting for port ${port}`));
+            ^
+
+Error: Timed out waiting for port 1420
+    at Timeout.check [as _onTimeout] (file:///Users/yang.liu/Envato/others/tail-claude-gui/bin/cctrace.mjs:42:13)
+    at listOnTimeout (node:internal/timers:588:17)
+    at process.processTimers (node:internal/timers:523:7).. it timeout.... backedn is already launched
+
+---
+
+waitForPort is not working well
