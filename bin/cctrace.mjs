@@ -61,12 +61,18 @@ switch (mode) {
     break;
 
   case "--web": {
+    // Check if the server is already running on port 1420.
+    const alreadyRunning = await isPortInUse(1420);
+
     if (noOpen) {
-      // Background service mode — just start, no prompt.
+      if (alreadyRunning) {
+        // Another instance owns the port — exit cleanly so launchd
+        // doesn't keep respawning us in a crash loop.
+        console.error("Port 1420 already in use, exiting.");
+        process.exit(0);
+      }
       run("npx", ["tauri", "dev", "--", "--", "--web", "--no-open"]);
     } else {
-      // Check if the server is already running (e.g. from background service).
-      const alreadyRunning = await isPortInUse(1420);
       if (alreadyRunning) {
         console.log("cctrace web server is already running on http://localhost:1420");
         openBrowser("http://localhost:1420");
