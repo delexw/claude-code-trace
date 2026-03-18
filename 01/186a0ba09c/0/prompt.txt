@@ -1,0 +1,21 @@
+Gitnexus analyze codebase
+
+---
+
+oh... should set up symlink for agetns.md not agetn.md
+
+---
+
+remove agent.md
+
+---
+
+replace
+
+---
+
+remove agent but keep agents... Claude.nd symlink to agetns
+
+---
+
+do a oxlint and oxformat
