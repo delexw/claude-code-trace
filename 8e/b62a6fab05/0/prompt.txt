@@ -1,0 +1,10 @@
+The session output include json but not format on final message 3bc77a12-27d6-4fea-bf82-0a9754d07528
+
+---
+
+Why not use native JSON?
+
+---
+
+"We could instead use ReactMarkdown's components prop to override the code renderer and apply
+  react-syntax-highlighter (already a dependency)" good idea
