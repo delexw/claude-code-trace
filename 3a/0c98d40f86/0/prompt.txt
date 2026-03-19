@@ -1,0 +1,2 @@
+https://github.com/delexw/claude-code-trace/issues
+Fix issues
