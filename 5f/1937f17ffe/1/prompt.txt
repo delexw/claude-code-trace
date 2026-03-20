@@ -75,3 +75,7 @@ hahahahha.... move up it doesn't highligh now
 ---
 
 Are you sure?  I don't trust you know
+
+---
+
+/git-commit
