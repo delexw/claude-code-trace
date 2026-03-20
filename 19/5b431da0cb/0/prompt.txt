@@ -67,3 +67,26 @@ yes
 <summary>Background command "npx gitnexus analyze 2&gt;&amp;1 | tail -3" completed (exit code 0)</summary>
 </task-notification>
 Read the output file to retrieve the result: /private/tmp/claude-502/-Users-yang-liu-Envato-others-tail-claude-gui/e93d176b-cf66-4826-bb62-dc08a91e509f/tasks/b79fttdnm.output
+
+---
+
+found 0 vulnerabilities
+
+> claude-code-trace-tui@0.4.1 build
+> tsc
+
+src/lib/format.ts:93:3 - error TS2559: Type 'TerminalRenderer' has no properties in common with type 'MarkedExtension'.
+
+ 93   markedTerminal({
+      ~~~~~~~~~~~~~~~~
+ 94     // Keep reflowed text — do not hard-wrap at 80 chars.
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+... 
+ 97     paragraph: (text: string) => text + "\n",
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ 98   }),
+    ~~~~
+
+---
+
+whey 0.4.1?
