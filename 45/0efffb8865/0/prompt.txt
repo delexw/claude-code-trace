@@ -10,3 +10,7 @@ Read the output file to retrieve the result: /private/tmp/claude-502/-Users-yang
 ---
 
 lint/formt do not fuck forget
+
+---
+
+https://github.com/delexw/claude-code-trace/actions/runs/23325111301/job/67844559855
