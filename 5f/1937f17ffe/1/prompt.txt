@@ -1,0 +1,77 @@
+Run npx oxfmt --check
+  
+Checking formatting...
+AGENTS.md (55ms)
+CLAUDE.md (97ms)
+Format issues found in above 2 files. Run without `--check` to fix.
+Finished in 281ms on 113 files using 3 threads.
+Error: Process completed with exit code 1.
+
+---
+
+-> % cctrace -tui     
+     Running BeforeDevCommand (`npm run dev`)
+     Running DevCommand (`cargo  run --no-default-features --color always --`)
+        Info Watching /Users/yang.liu/Envato/others/tail-claude-gui/src-tauri for changes...
+
+> claude-code-trace@0.4.6 dev
+> vite
+
+3:38:09 PM [vite] (client) Re-optimizing dependencies because lockfile has changed
+error when starting dev server:
+Error: Port 1420 is already in use
+    at httpServerStart (file:///Users/yang.liu/Envato/others/tail-claude-gui/node_modules/vite/dist/node/chunks/node.js:10634:25)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async startServer (file:///Users/yang.liu/Envato/others/tail-claude-gui/node_modules/vite/dist/node/chunks/node.js:26194:30)
+    at async Object.listen (file:///Users/yang.liu/Envato/others/tail-claude-gui/node_modules/vite/dist/node/chunks/node.js:26015:4)
+    at async CAC.<anonymous> (file:///Users/yang.liu/Envato/others/tail-claude-gui/node_modules/vite/dist/node/cli.js:722:3)
+       Error The "beforeDevCommand" terminated with a non-zero status code.
+(base) yang.liu@Yang-Liu [15:38:09] [~/Envato/others/tail-claude-gui] [main *]
+
+---
+
+The code for tui should reuse the eixsing bakcend
+
+---
+
+The TUI output  is not formated at all.... The layout has some issues
+
+---
+
+but the message is truncated?
+
+---
+
+Never truncate in TUI
+
+---
+
+tui... The window doesn't have a scrollbar at all.. Context overlap each other
+
+---
+
+I really think you fixed nother
+
+---
+
+The scroll doesn't focus on current active window.. u/d scrolll everything... oh my gosh
+
+---
+
+Too small and u/d the width not fixed
+
+---
+
+No selection hightlight on the top window
+
+---
+
+ah.,.... when I move down seelction.. The highligh doesn't dispear... do not kidding me ok?
+
+---
+
+hahahahha.... move up it doesn't highligh now
+
+---
+
+Are you sure?  I don't trust you know
