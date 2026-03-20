@@ -1,0 +1,25 @@
+{
+  "cli_version": "0.5.0",
+  "checkpoint_id": "cbfd58c2f6f7",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 2,
+  "files_touched": [
+    "tui/package-lock.json"
+  ],
+  "sessions": [
+    {
+      "metadata": "/cb/fd58c2f6f7/0/metadata.json",
+      "transcript": "/cb/fd58c2f6f7/0/full.jsonl",
+      "content_hash": "/cb/fd58c2f6f7/0/content_hash.txt",
+      "prompt": "/cb/fd58c2f6f7/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 23,
+    "cache_creation_tokens": 21063,
+    "cache_read_tokens": 5762862,
+    "output_tokens": 9749,
+    "api_call_count": 14
+  }
+}
