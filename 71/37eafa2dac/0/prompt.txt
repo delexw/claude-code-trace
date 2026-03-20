@@ -33,3 +33,7 @@ lightweight and also actively maintained
 ---
 
 nvm.. stop here...
+
+---
+
+make some change.. when stat cctract --web or gui if the backedn is already running.. do not error just connect to the backedn... when cctract desktop.. if the it is hidden and show up
