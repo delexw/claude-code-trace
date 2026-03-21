@@ -585,7 +585,13 @@ mod tests {
         let color_map = std::collections::HashMap::new();
         let mut pool_idx = 0;
 
-        let result = convert_display_items(&items, &subagents, &color_map, &mut pool_idx, &HashSet::new());
+        let result = convert_display_items(
+            &items,
+            &subagents,
+            &color_map,
+            &mut pool_idx,
+            &HashSet::new(),
+        );
 
         assert_eq!(result.len(), 1);
         assert_eq!(
@@ -682,7 +688,10 @@ mod tests {
         let b_items = &b_msgs[0].items;
         assert_eq!(b_items.len(), 1);
         assert_eq!(b_items[0].agent_id, "agent-a");
-        assert!(b_items[0].subagent_messages.is_empty(), "cycle must be cut here");
+        assert!(
+            b_items[0].subagent_messages.is_empty(),
+            "cycle must be cut here"
+        );
     }
 
     #[test]
@@ -700,7 +709,13 @@ mod tests {
         let color_map = std::collections::HashMap::new();
         let mut pool_idx = 0;
 
-        let result = convert_display_items(&items, &subagents, &color_map, &mut pool_idx, &HashSet::new());
+        let result = convert_display_items(
+            &items,
+            &subagents,
+            &color_map,
+            &mut pool_idx,
+            &HashSet::new(),
+        );
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].subagent_prompt, "");
