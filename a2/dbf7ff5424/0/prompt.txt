@@ -33,3 +33,8 @@ format
 ---
 
 /git-commit
+
+---
+
+still not working... same: thread 'tokio-rt-worker' has overflowed its stack
+fatal runtime error: stack overflow, aborting
