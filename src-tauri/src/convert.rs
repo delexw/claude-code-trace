@@ -207,6 +207,7 @@ fn convert_display_items(
     subagents: &[SubagentProcess],
     color_by_tool_id: &HashMap<String, String>,
     pool_idx: &mut usize,
+    visited: &HashSet<String>,
 ) -> Vec<FrontendDisplayItem> {
     if items.is_empty() {
         return Vec::new();
@@ -260,8 +261,17 @@ fn convert_display_items(
                     }
                     // Convert subagent's chunks into nested messages,
                     // passing all processes so nested agents (e.g. Skill forked execution) can link.
-                    fdi.subagent_messages =
-                        chunks_to_messages(&proc.chunks, subagents, color_by_tool_id);
+                    // Skip agents already on the current path to break circular references.
+                    if !visited.contains(&proc.id) {
+                        let mut child_visited = visited.clone();
+                        child_visited.insert(proc.id.clone());
+                        fdi.subagent_messages = chunks_to_messages_inner(
+                            &proc.chunks,
+                            subagents,
+                            color_by_tool_id,
+                            &child_visited,
+                        );
+                    }
                 }
                 // Fallback: apply team color from toolUseResult data.
                 if fdi.team_color.is_empty() {
@@ -293,6 +303,15 @@ pub fn chunks_to_messages(
     chunks: &[Chunk],
     subagents: &[SubagentProcess],
     color_by_tool_id: &HashMap<String, String>,
+) -> Vec<DisplayMessage> {
+    chunks_to_messages_inner(chunks, subagents, color_by_tool_id, &HashSet::new())
+}
+
+fn chunks_to_messages_inner(
+    chunks: &[Chunk],
+    subagents: &[SubagentProcess],
+    color_by_tool_id: &HashMap<String, String>,
+    visited: &HashSet<String>,
 ) -> Vec<DisplayMessage> {
     let mut msgs = Vec::new();
     let mut pool_idx: usize = 0;
@@ -362,6 +381,7 @@ pub fn chunks_to_messages(
                         subagents,
                         color_by_tool_id,
                         &mut pool_idx,
+                        visited,
                     ),
                     last_output: frontend_lo,
                     is_error: false,
@@ -565,7 +585,7 @@ mod tests {
         let color_map = std::collections::HashMap::new();
         let mut pool_idx = 0;
 
-        let result = convert_display_items(&items, &subagents, &color_map, &mut pool_idx);
+        let result = convert_display_items(&items, &subagents, &color_map, &mut pool_idx, &HashSet::new());
 
         assert_eq!(result.len(), 1);
         assert_eq!(
@@ -573,6 +593,96 @@ mod tests {
             "Base directory for this skill: /path/to/skill\n\n# My Skill"
         );
         assert_eq!(result[0].agent_id, "agent-abc");
+    }
+
+    // ---- cycle detection test ----
+
+    #[test]
+    fn circular_subagent_references_do_not_overflow() {
+        use crate::parser::chunk::{Chunk, ChunkType, DisplayItem, DisplayItemType};
+        use crate::parser::subagent::SubagentProcess;
+        use chrono::Utc;
+
+        // agent-a spawns agent-b, and agent-b's chunks also reference agent-a's tool ID —
+        // a mutual cycle that previously caused infinite recursion and stack overflow.
+        let tool_a = "toolu_aaa".to_string();
+        let tool_b = "toolu_bbb".to_string();
+
+        let chunk_a = Chunk {
+            chunk_type: ChunkType::AI,
+            items: vec![DisplayItem {
+                item_type: DisplayItemType::Subagent,
+                tool_id: tool_b.clone(),
+                tool_name: "Agent".to_string(),
+                ..Default::default()
+            }],
+            timestamp: Utc::now(),
+            ..Default::default()
+        };
+        let chunk_b = Chunk {
+            chunk_type: ChunkType::AI,
+            items: vec![DisplayItem {
+                item_type: DisplayItemType::Subagent,
+                tool_id: tool_a.clone(),
+                tool_name: "Agent".to_string(),
+                ..Default::default()
+            }],
+            timestamp: Utc::now(),
+            ..Default::default()
+        };
+
+        let proc_a = SubagentProcess {
+            id: "agent-a".to_string(),
+            parent_task_id: tool_a.clone(),
+            chunks: vec![chunk_a],
+            ..Default::default()
+        };
+        let proc_b = SubagentProcess {
+            id: "agent-b".to_string(),
+            parent_task_id: tool_b.clone(),
+            chunks: vec![chunk_b],
+            ..Default::default()
+        };
+
+        let subagents = vec![proc_a, proc_b];
+        let color_map = std::collections::HashMap::new();
+
+        // Main session chunk referencing agent-a — triggers the cycle.
+        let main_chunk = Chunk {
+            chunk_type: ChunkType::AI,
+            items: vec![DisplayItem {
+                item_type: DisplayItemType::Subagent,
+                tool_id: tool_a.clone(),
+                tool_name: "Agent".to_string(),
+                ..Default::default()
+            }],
+            timestamp: Utc::now(),
+            ..Default::default()
+        };
+
+        // Must not overflow the stack.
+        let msgs = chunks_to_messages(&[main_chunk], &subagents, &color_map);
+
+        // main → agent-a (expanded)
+        assert_eq!(msgs.len(), 1);
+        let main_items = &msgs[0].items;
+        assert_eq!(main_items.len(), 1);
+        assert_eq!(main_items[0].agent_id, "agent-a");
+
+        // agent-a → agent-b (expanded, first visit)
+        let a_msgs = &main_items[0].subagent_messages;
+        assert_eq!(a_msgs.len(), 1);
+        let a_items = &a_msgs[0].items;
+        assert_eq!(a_items.len(), 1);
+        assert_eq!(a_items[0].agent_id, "agent-b");
+
+        // agent-b → agent-a: the link item exists but subagent_messages is empty (cycle cut)
+        let b_msgs = &a_items[0].subagent_messages;
+        assert_eq!(b_msgs.len(), 1);
+        let b_items = &b_msgs[0].items;
+        assert_eq!(b_items.len(), 1);
+        assert_eq!(b_items[0].agent_id, "agent-a");
+        assert!(b_items[0].subagent_messages.is_empty(), "cycle must be cut here");
     }
 
     #[test]
@@ -590,7 +700,7 @@ mod tests {
         let color_map = std::collections::HashMap::new();
         let mut pool_idx = 0;
 
-        let result = convert_display_items(&items, &subagents, &color_map, &mut pool_idx);
+        let result = convert_display_items(&items, &subagents, &color_map, &mut pool_idx, &HashSet::new());
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].subagent_prompt, "");
