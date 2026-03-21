@@ -1,0 +1,35 @@
+thread 'tokio-rt-worker' has overflowed its stack
+fatal runtime error: stack overflow, aborting
+
+When open session b2f3b1c6-51b2-4737-b6ba-09d67d762bc4
+
+---
+
+A session with many deeply nested agents (like b2f3b1c6).. how many
+
+---
+
+How to fix it
+
+---
+
+/git-commit
+
+---
+
+<task-notification>
+<task-id>b2vm1ny1f</task-id>
+<tool-use-id>toolu_01G5eE3XA9hhMr9GohQGcZyo</tool-use-id>
+<output-file>/private/tmp/claude-502/-Users-yang-liu-Envato-others-tail-claude-gui/e26f5f9f-c54c-4cde-b68a-cd900d3e6ff9/tasks/b2vm1ny1f.output</output-file>
+<status>completed</status>
+<summary>Background command "Update GitNexus index after commit" completed (exit code 0)</summary>
+</task-notification>
+Read the output file to retrieve the result: /private/tmp/claude-502/-Users-yang-liu-Envato-others-tail-claude-gui/e26f5f9f-c54c-4cde-b68a-cd900d3e6ff9/tasks/b2vm1ny1f.output
+
+---
+
+format
+
+---
+
+/git-commit
