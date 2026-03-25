@@ -306,7 +306,13 @@ pub fn classify(e: Entry) -> Option<ClassifiedMsg> {
         }));
     }
 
-    // Fallback: remaining user messages -> AI message (meta).
+    // Unknown entry types with no message role (e.g. rate_limit_event, CwdChanged,
+    // FileChanged, --channels injected entries) are structural metadata — drop them.
+    if e.message.role.is_empty() {
+        return None;
+    }
+
+    // Fallback: entries with an unrecognised type but a message role -> meta AI message.
     let blocks = extract_meta_blocks(&e.message.content, &content_str);
     Some(ClassifiedMsg::AI(AIMsg {
         timestamp: ts,
@@ -745,6 +751,64 @@ mod tests {
                 assert!(s.is_error, "failed status should be an error");
             }
             other => panic!("Expected System with is_error, got {:?}", other),
+        }
+    }
+
+    // --- Unknown / structural entry type tests (compat: v2.1.79-v2.1.83) ---
+
+    #[test]
+    fn classify_drops_rate_limit_event_silently() {
+        // rate_limit_event has a uuid but no message role — must be dropped, not shown as AI.
+        let mut e = Entry {
+            entry_type: "rate_limit_event".to_string(),
+            uuid: "uuid-rate".to_string(),
+            timestamp: "2025-01-15T10:30:00Z".to_string(),
+            ..Default::default()
+        };
+        // No message.role set (default empty string)
+        assert!(
+            classify(e).is_none(),
+            "rate_limit_event must be dropped silently"
+        );
+    }
+
+    #[test]
+    fn classify_drops_unknown_structural_entry_with_no_role() {
+        // CwdChanged / FileChanged / --channels structural entries: unknown type, no message.role
+        let e = Entry {
+            entry_type: "CwdChanged".to_string(),
+            uuid: "uuid-cwd".to_string(),
+            timestamp: "2025-01-15T10:30:00Z".to_string(),
+            ..Default::default()
+        };
+        assert!(
+            classify(e).is_none(),
+            "Unknown structural entry with no message role must be dropped"
+        );
+    }
+
+    #[test]
+    fn classify_keeps_unknown_entry_with_message_role_as_meta() {
+        // An unknown entry type that carries actual message content should still be shown.
+        let mut e = Entry {
+            entry_type: "channel_message".to_string(),
+            uuid: "uuid-chan".to_string(),
+            timestamp: "2025-01-15T10:30:00Z".to_string(),
+            message: super::super::entry::EntryMessage {
+                role: "user".to_string(),
+                content: Some(json!("hello from channel")),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::AI(ai)) => {
+                assert!(ai.is_meta, "Unknown entry with role should be meta AI");
+            }
+            other => panic!(
+                "Expected meta AI for unknown entry with role, got {:?}",
+                other
+            ),
         }
     }
 }
