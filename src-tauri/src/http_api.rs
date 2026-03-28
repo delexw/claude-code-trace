@@ -1,6 +1,8 @@
 use std::convert::Infallible;
 use std::sync::Arc;
 
+use chrono::{DateTime, Utc};
+
 use axum::extract::{Query, State};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Json, Response};
@@ -37,6 +39,7 @@ pub async fn start_http_server(app: AppHandle) {
         .route("/api/settings/dir", post(api_set_projects_dir))
         .route("/api/project-dirs", get(api_get_project_dirs))
         .route("/api/sessions", get(api_discover_sessions))
+        .route("/api/session", get(api_get_session_by_id))
         .route("/api/session/load", post(api_load_session))
         .route("/api/session/meta", get(api_get_session_meta))
         .route("/api/session/watch", post(api_watch_session))
@@ -209,35 +212,34 @@ struct PathBody {
     path: String,
 }
 
-async fn api_load_session(
-    State(state): State<Arc<HttpState>>,
-    Json(body): Json<PathBody>,
+fn load_session_by_path(
+    app_state: &AppState,
+    path: String,
+    since: Option<DateTime<Utc>>,
+    before: Option<DateTime<Utc>>,
 ) -> Response {
-    let app_state = app_state(&state);
-
-    if body.path.is_empty() {
-        return err_response(
-            axum::http::StatusCode::BAD_REQUEST,
-            "no session path provided".to_string(),
-        );
-    }
-
-    let (classified, _new_offset, _) = match read_session_incremental(&body.path, 0) {
+    let (classified, _new_offset, _) = match read_session_incremental(&path, 0) {
         Ok(v) => v,
         Err(e) => return err_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e),
     };
     let mut chunks = build_chunks(&classified);
-    let (mut all_procs, color_map) = discover_and_link_all(&body.path, &chunks);
+    let (mut all_procs, color_map) = discover_and_link_all(&path, &chunks);
     inject_orphan_subagents(&mut chunks, &mut all_procs);
+    if since.is_some() || before.is_some() {
+        chunks.retain(|c| {
+            since.map_or(true, |s| c.timestamp >= s)
+                && before.map_or(true, |b| c.timestamp < b)
+        });
+    }
 
-    let ongoing = OngoingChecker::new(&chunks, &all_procs, &body.path).is_ongoing();
-    app_state.set_watched_ongoing(body.path.clone(), ongoing);
+    let ongoing = OngoingChecker::new(&chunks, &all_procs, &path).is_ongoing();
+    app_state.set_watched_ongoing(path.clone(), ongoing);
 
     let teams = reconstruct_teams(&chunks, &all_procs);
     let messages = chunks_to_messages(&chunks, &all_procs, &color_map);
-    let meta = extract_session_meta(&body.path);
+    let meta = extract_session_meta(&path);
 
-    let scanned = crate::parser::session::scan_session_metadata(&body.path);
+    let scanned = crate::parser::session::scan_session_metadata(&path);
     let session_totals = SessionTotals {
         total_tokens: scanned.total_tokens,
         input_tokens: scanned.input_tokens,
@@ -251,11 +253,104 @@ async fn api_load_session(
     ok_json(&LoadResult {
         messages,
         teams,
-        path: body.path,
+        path,
         ongoing,
         meta,
         session_totals,
     })
+}
+
+async fn api_load_session(
+    State(state): State<Arc<HttpState>>,
+    Json(body): Json<PathBody>,
+) -> Response {
+    if body.path.is_empty() {
+        return err_response(
+            axum::http::StatusCode::BAD_REQUEST,
+            "no session path provided".to_string(),
+        );
+    }
+    load_session_by_path(app_state(&state), body.path, None, None)
+}
+
+#[derive(Deserialize)]
+struct SessionIdQuery {
+    id: String,
+    since: Option<String>,
+    before: Option<String>,
+}
+
+async fn api_get_session_by_id(
+    State(state): State<Arc<HttpState>>,
+    Query(q): Query<SessionIdQuery>,
+) -> Response {
+    if q.id.is_empty() {
+        return err_response(
+            axum::http::StatusCode::BAD_REQUEST,
+            "no session id provided".to_string(),
+        );
+    }
+
+    let app_state = app_state(&state);
+    let configured = match app_state.settings.lock() {
+        Ok(g) => g.projects_dir.clone(),
+        Err(e) => return err_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    };
+    let projects_dir = match crate::parser::session::claude_projects_dir(configured.as_deref()) {
+        Ok(d) => d,
+        Err(e) => return err_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e),
+    };
+
+    // Search all project subdirs for <id>.jsonl
+    let filename = format!("{}.jsonl", q.id);
+    let found_path = std::fs::read_dir(&projects_dir)
+        .ok()
+        .and_then(|entries| {
+            entries.flatten().find_map(|entry| {
+                if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                    return None;
+                }
+                let candidate = entry.path().join(&filename);
+                if candidate.exists() {
+                    Some(candidate.to_string_lossy().to_string())
+                } else {
+                    None
+                }
+            })
+        });
+
+    let path = match found_path {
+        Some(p) => p,
+        None => {
+            return err_response(
+                axum::http::StatusCode::NOT_FOUND,
+                format!("session not found: {}", q.id),
+            )
+        }
+    };
+
+    let since = match q.since.as_deref().map(|s| s.parse::<DateTime<Utc>>()) {
+        Some(Err(_)) => {
+            return err_response(
+                axum::http::StatusCode::BAD_REQUEST,
+                "invalid `since` timestamp — expected ISO 8601 UTC (e.g. 2025-01-15T10:00:00Z)".to_string(),
+            )
+        }
+        Some(Ok(dt)) => Some(dt),
+        None => None,
+    };
+    let before = match q.before.as_deref().map(|s| s.parse::<DateTime<Utc>>()) {
+        Some(Err(_)) => {
+            return err_response(
+                axum::http::StatusCode::BAD_REQUEST,
+                "invalid `before` timestamp — expected ISO 8601 UTC (e.g. 2025-01-15T10:00:00Z)".to_string(),
+            )
+        }
+        Some(Ok(dt)) => Some(dt),
+        None => None,
+    };
+
+    load_session_by_path(app_state, path, since, before)
 }
 
 #[derive(Deserialize)]
@@ -393,4 +488,96 @@ async fn api_events(
     });
 
     Sse::new(stream).keep_alive(KeepAlive::default())
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parser::chunk::{Chunk, ChunkType};
+    use chrono::TimeZone;
+
+    fn chunk_at(year: i32, month: u32, day: u32) -> Chunk {
+        Chunk {
+            chunk_type: ChunkType::User,
+            timestamp: Utc.with_ymd_and_hms(year, month, day, 0, 0, 0).unwrap(),
+            ..Chunk::default()
+        }
+    }
+
+    fn apply_filter(
+        chunks: &mut Vec<Chunk>,
+        since: Option<DateTime<Utc>>,
+        before: Option<DateTime<Utc>>,
+    ) {
+        if since.is_some() || before.is_some() {
+            chunks.retain(|c| {
+                since.map_or(true, |s| c.timestamp >= s)
+                    && before.map_or(true, |b| c.timestamp < b)
+            });
+        }
+    }
+
+    #[test]
+    fn since_future_excludes_all() {
+        let mut chunks = vec![chunk_at(2025, 1, 1), chunk_at(2025, 6, 1)];
+        let since = Utc.with_ymd_and_hms(2099, 1, 1, 0, 0, 0).unwrap();
+        apply_filter(&mut chunks, Some(since), None);
+        assert!(chunks.is_empty());
+    }
+
+    #[test]
+    fn before_ancient_excludes_all() {
+        let mut chunks = vec![chunk_at(2025, 1, 1), chunk_at(2025, 6, 1)];
+        let before = Utc.with_ymd_and_hms(2000, 1, 1, 0, 0, 0).unwrap();
+        apply_filter(&mut chunks, None, Some(before));
+        assert!(chunks.is_empty());
+    }
+
+    #[test]
+    fn since_filters_older_keeps_newer() {
+        let mut chunks = vec![chunk_at(2025, 1, 1), chunk_at(2025, 6, 1), chunk_at(2026, 1, 1)];
+        let since = Utc.with_ymd_and_hms(2025, 6, 1, 0, 0, 0).unwrap();
+        apply_filter(&mut chunks, Some(since), None);
+        assert_eq!(chunks.len(), 2);
+        assert!(chunks.iter().all(|c| c.timestamp >= since));
+    }
+
+    #[test]
+    fn before_filters_newer_keeps_older() {
+        let mut chunks = vec![chunk_at(2025, 1, 1), chunk_at(2025, 6, 1), chunk_at(2026, 1, 1)];
+        let before = Utc.with_ymd_and_hms(2025, 6, 1, 0, 0, 0).unwrap();
+        apply_filter(&mut chunks, None, Some(before));
+        assert_eq!(chunks.len(), 1);
+        assert!(chunks.iter().all(|c| c.timestamp < before));
+    }
+
+    #[test]
+    fn since_and_before_window() {
+        let mut chunks = vec![
+            chunk_at(2025, 1, 1),
+            chunk_at(2025, 6, 1),
+            chunk_at(2025, 9, 1),
+            chunk_at(2026, 1, 1),
+        ];
+        let since = Utc.with_ymd_and_hms(2025, 6, 1, 0, 0, 0).unwrap();
+        let before = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+        apply_filter(&mut chunks, Some(since), Some(before));
+        assert_eq!(chunks.len(), 2);
+    }
+
+    #[test]
+    fn no_filter_keeps_all() {
+        let mut chunks = vec![chunk_at(2025, 1, 1), chunk_at(2025, 6, 1)];
+        apply_filter(&mut chunks, None, None);
+        assert_eq!(chunks.len(), 2);
+    }
+
+    #[test]
+    fn invalid_since_parse_fails() {
+        assert!("notadate".parse::<DateTime<Utc>>().is_err());
+    }
 }
