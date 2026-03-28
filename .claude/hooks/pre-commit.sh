@@ -12,7 +12,8 @@ if [ -z "$STAGED" ]; then
   exit 0
 fi
 
-FLAG_FILE="/tmp/claude-tests-confirmed"
+SESSION_ID="${CLAUDE_CODE_SESSION_ID:-${CLAUDE_SESSION_ID:-}}"
+FLAG_FILE="/tmp/claude-tests-confirmed${SESSION_ID:+-$SESSION_ID}"
 
 ERRORS=""
 
