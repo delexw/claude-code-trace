@@ -13,7 +13,7 @@ import {
 } from "../lib/format";
 import { getModelColor } from "../lib/theme";
 import { BsClaude } from "react-icons/bs";
-import { TokensIcon, CostIcon } from "./Icons";
+import { TokensIcon, CostIcon, ForwardIcon } from "./Icons";
 
 interface SessionPickerProps {
   sessions: SessionInfo[];
@@ -124,6 +124,15 @@ export function SessionPicker({
                         ACTIVE
                       </span>
                     )}
+                    <button
+                      className="message__detail-btn"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onSelect(session);
+                      }}
+                    >
+                      Detail <ForwardIcon />
+                    </button>
                   </div>
                   <div className="picker__session-meta">
                     <span className="picker__session-model" style={{ color: modelClr }}>
