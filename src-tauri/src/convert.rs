@@ -17,6 +17,7 @@ const TEAM_COLOR_POOL: &[&str] = &[
 /// Frontend display item.
 #[derive(Debug, Clone, Serialize)]
 pub struct FrontendDisplayItem {
+    pub id: String,
     pub item_type: String,
     pub text: String,
     pub tool_name: String,
@@ -215,8 +216,15 @@ fn convert_display_items(
 
     let mut out: Vec<FrontendDisplayItem> = items
         .iter()
-        .map(|it| {
+        .enumerate()
+        .map(|(idx, it)| {
+            let id = if !it.tool_id.is_empty() {
+                it.tool_id.clone()
+            } else {
+                format!("{}-{idx}", display_item_type_str(&it.item_type))
+            };
             let mut fdi = FrontendDisplayItem {
+                id,
                 item_type: display_item_type_str(&it.item_type).to_string(),
                 text: it.text.clone(),
                 tool_name: it.tool_name.clone(),

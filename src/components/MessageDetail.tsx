@@ -389,7 +389,7 @@ export function MessageDetail({
                 {msg.items.map((item, idx) => {
                   return (
                     <DetailItem
-                      key={`${idx}-${item.item_type}-${item.agent_id || item.tool_name}`} // eslint-disable-line react/no-array-index-key -- DisplayItem has no stable unique ID
+                      key={item.id}
                       ref={idx === selectedItem ? scrollRef : undefined}
                       item={item}
                       index={idx}
@@ -764,7 +764,7 @@ function AgentDetailColumn({
                 {msg.items.map((di, idx) => {
                   return (
                     <DetailItem
-                      key={`${idx}-${di.item_type}-${di.agent_id || di.tool_name}`} // eslint-disable-line react/no-array-index-key -- DisplayItem has no stable unique ID
+                      key={di.id}
                       ref={idx === selectedItem ? scrollRef : undefined}
                       item={di}
                       index={idx}

@@ -5,6 +5,7 @@ import type { DisplayItem } from "../types";
 
 function makeItem(overrides: Partial<DisplayItem> = {}): DisplayItem {
   return {
+    id: "ToolCall-0",
     item_type: "ToolCall",
     text: "",
     tool_name: "Read",

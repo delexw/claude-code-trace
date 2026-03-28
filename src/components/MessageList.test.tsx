@@ -160,6 +160,7 @@ describe("MessageList", () => {
         model: "claude-sonnet-4-20250514",
         items: [
           {
+            id: "a1",
             item_type: "Subagent",
             text: "",
             tool_name: "",

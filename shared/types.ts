@@ -32,6 +32,7 @@ export type DisplayItemType =
   | "HookEvent";
 
 export interface DisplayItem {
+  id: string;
   item_type: DisplayItemType;
   text: string;
   tool_name: string;
