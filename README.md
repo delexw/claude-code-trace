@@ -161,7 +161,6 @@ git push origin v0.4.0
 
 This creates a draft release with macOS, Linux, and Windows artifacts attached. Review and publish it from the [Releases](https://github.com/delexw/claude-code-trace/releases) page.
 
-
 ## License
 
 [MIT](LICENSE)

@@ -227,8 +227,7 @@ fn load_session_by_path(
     inject_orphan_subagents(&mut chunks, &mut all_procs);
     if since.is_some() || before.is_some() {
         chunks.retain(|c| {
-            since.map_or(true, |s| c.timestamp >= s)
-                && before.map_or(true, |b| c.timestamp < b)
+            since.map_or(true, |s| c.timestamp >= s) && before.map_or(true, |b| c.timestamp < b)
         });
     }
 
@@ -294,7 +293,9 @@ async fn api_get_session_by_id(
     let app_state = app_state(&state);
     let configured = match app_state.settings.lock() {
         Ok(g) => g.projects_dir.clone(),
-        Err(e) => return err_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+        Err(e) => {
+            return err_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+        }
     };
     let projects_dir = match crate::parser::session::claude_projects_dir(configured.as_deref()) {
         Ok(d) => d,
@@ -303,21 +304,19 @@ async fn api_get_session_by_id(
 
     // Search all project subdirs for <id>.jsonl
     let filename = format!("{}.jsonl", q.id);
-    let found_path = std::fs::read_dir(&projects_dir)
-        .ok()
-        .and_then(|entries| {
-            entries.flatten().find_map(|entry| {
-                if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-                    return None;
-                }
-                let candidate = entry.path().join(&filename);
-                if candidate.exists() {
-                    Some(candidate.to_string_lossy().to_string())
-                } else {
-                    None
-                }
-            })
-        });
+    let found_path = std::fs::read_dir(&projects_dir).ok().and_then(|entries| {
+        entries.flatten().find_map(|entry| {
+            if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                return None;
+            }
+            let candidate = entry.path().join(&filename);
+            if candidate.exists() {
+                Some(candidate.to_string_lossy().to_string())
+            } else {
+                None
+            }
+        })
+    });
 
     let path = match found_path {
         Some(p) => p,
@@ -333,22 +332,23 @@ async fn api_get_session_by_id(
         Some(Err(_)) => {
             return err_response(
                 axum::http::StatusCode::BAD_REQUEST,
-                "invalid `since` timestamp — expected ISO 8601 UTC (e.g. 2025-01-15T10:00:00Z)".to_string(),
+                "invalid `since` timestamp — expected ISO 8601 UTC (e.g. 2025-01-15T10:00:00Z)"
+                    .to_string(),
             )
         }
         Some(Ok(dt)) => Some(dt),
         None => None,
     };
-    let before = match q.before.as_deref().map(|s| s.parse::<DateTime<Utc>>()) {
-        Some(Err(_)) => {
-            return err_response(
+    let before =
+        match q.before.as_deref().map(|s| s.parse::<DateTime<Utc>>()) {
+            Some(Err(_)) => return err_response(
                 axum::http::StatusCode::BAD_REQUEST,
-                "invalid `before` timestamp — expected ISO 8601 UTC (e.g. 2025-01-15T10:00:00Z)".to_string(),
-            )
-        }
-        Some(Ok(dt)) => Some(dt),
-        None => None,
-    };
+                "invalid `before` timestamp — expected ISO 8601 UTC (e.g. 2025-01-15T10:00:00Z)"
+                    .to_string(),
+            ),
+            Some(Ok(dt)) => Some(dt),
+            None => None,
+        };
 
     load_session_by_path(app_state, path, since, before)
 }
@@ -515,8 +515,7 @@ mod tests {
     ) {
         if since.is_some() || before.is_some() {
             chunks.retain(|c| {
-                since.map_or(true, |s| c.timestamp >= s)
-                    && before.map_or(true, |b| c.timestamp < b)
+                since.map_or(true, |s| c.timestamp >= s) && before.map_or(true, |b| c.timestamp < b)
             });
         }
     }
@@ -539,7 +538,11 @@ mod tests {
 
     #[test]
     fn since_filters_older_keeps_newer() {
-        let mut chunks = vec![chunk_at(2025, 1, 1), chunk_at(2025, 6, 1), chunk_at(2026, 1, 1)];
+        let mut chunks = vec![
+            chunk_at(2025, 1, 1),
+            chunk_at(2025, 6, 1),
+            chunk_at(2026, 1, 1),
+        ];
         let since = Utc.with_ymd_and_hms(2025, 6, 1, 0, 0, 0).unwrap();
         apply_filter(&mut chunks, Some(since), None);
         assert_eq!(chunks.len(), 2);
@@ -548,7 +551,11 @@ mod tests {
 
     #[test]
     fn before_filters_newer_keeps_older() {
-        let mut chunks = vec![chunk_at(2025, 1, 1), chunk_at(2025, 6, 1), chunk_at(2026, 1, 1)];
+        let mut chunks = vec![
+            chunk_at(2025, 1, 1),
+            chunk_at(2025, 6, 1),
+            chunk_at(2026, 1, 1),
+        ];
         let before = Utc.with_ymd_and_hms(2025, 6, 1, 0, 0, 0).unwrap();
         apply_filter(&mut chunks, None, Some(before));
         assert_eq!(chunks.len(), 1);

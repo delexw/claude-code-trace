@@ -24,7 +24,7 @@ LINT_OUTPUT=$(npm run lint 2>&1) || {
   if [ -n "$ERRORS" ]; then
     ERRORS="$ERRORS\n\nLint errors:\n$LINT_OUTPUT"
   else
-    ERRORS="Lint errors found. Fix all issues, then retry the commit.\n\n$LINT_OUTPUT"
+    ERRORS="Lint errors found. Fix all issues, stage fixed files, then retry the commit.\n\n$LINT_OUTPUT"
   fi
 }
 
