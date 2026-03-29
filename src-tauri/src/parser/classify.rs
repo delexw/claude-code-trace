@@ -144,10 +144,15 @@ pub fn classify(e: Entry) -> Option<ClassifiedMsg> {
 
     let ts = parse_timestamp(&e.timestamp);
 
-    // Rescue hook_progress from noise filter before discarding all "progress" entries.
+    // Rescue hook events from noise filter before discarding all "progress" entries.
+    // All existing hooks use data.type="hook_progress", but guard on hookEvent presence
+    // so that future hook types (e.g. TaskCreated added in v2.1.84) are also rescued
+    // without needing to enumerate data.type values.
     if e.entry_type == "progress" {
         if let Some(ref data) = e.data {
-            if data.get("type").and_then(|v| v.as_str()) == Some("hook_progress") {
+            let is_hook = data.get("type").and_then(|v| v.as_str()) == Some("hook_progress")
+                || data.get("hookEvent").is_some();
+            if is_hook {
                 let hook_event = data
                     .get("hookEvent")
                     .and_then(|v| v.as_str())
@@ -752,6 +757,76 @@ mod tests {
             }
             other => panic!("Expected System with is_error, got {:?}", other),
         }
+    }
+
+    // --- Hook event compat tests (v2.1.84+) ---
+
+    #[test]
+    fn classify_rescues_hook_progress_with_any_hook_event() {
+        // Existing behaviour: hook_progress entries are rescued regardless of hookEvent value.
+        let e = Entry {
+            entry_type: "progress".to_string(),
+            uuid: "uuid-hook".to_string(),
+            timestamp: "2025-01-15T10:30:00Z".to_string(),
+            data: Some(json!({
+                "type": "hook_progress",
+                "hookEvent": "PostToolUse",
+                "hookName": "my-hook",
+                "command": "echo done"
+            })),
+            ..Default::default()
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::Hook(h)) => {
+                assert_eq!(h.hook_event, "PostToolUse");
+                assert_eq!(h.hook_name, "my-hook");
+            }
+            other => panic!("Expected Hook, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn classify_rescues_progress_with_hook_event_field_regardless_of_data_type() {
+        // Forward-compat: a future hook type (e.g. TaskCreated, v2.1.84) may arrive with a
+        // data.type other than "hook_progress" but still carry a hookEvent field.
+        // The rescue must fire based on hookEvent presence, not data.type alone.
+        let e = Entry {
+            entry_type: "progress".to_string(),
+            uuid: "uuid-task-created".to_string(),
+            timestamp: "2025-01-15T10:30:00Z".to_string(),
+            data: Some(json!({
+                "type": "task_hook",
+                "hookEvent": "TaskCreated",
+                "hookName": "on-task",
+                "command": "echo task"
+            })),
+            ..Default::default()
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::Hook(h)) => {
+                assert_eq!(h.hook_event, "TaskCreated");
+            }
+            other => panic!(
+                "Expected Hook for hookEvent-bearing progress entry, got {:?}",
+                other
+            ),
+        }
+    }
+
+    #[test]
+    fn classify_drops_progress_entry_without_hook_event() {
+        // Non-hook progress entries (agent_progress, bash_progress, etc.) must remain noise.
+        let e = Entry {
+            entry_type: "progress".to_string(),
+            uuid: "uuid-agent-progress".to_string(),
+            timestamp: "2025-01-15T10:30:00Z".to_string(),
+            data: Some(json!({"type": "agent_progress", "message": "thinking..."})),
+            ..Default::default()
+        };
+        assert!(
+            classify(e).is_none(),
+            "Non-hook progress entry must be dropped"
+        );
     }
 
     // --- Unknown / structural entry type tests (compat: v2.1.79-v2.1.83) ---
