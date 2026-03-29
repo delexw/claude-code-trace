@@ -178,16 +178,80 @@ pub fn classify(e: Entry) -> Option<ClassifiedMsg> {
         }
     }
 
-    // Rescue hook_progress entries written as type:"system", subtype:"hook_progress"
-    // in verbose/stream-json mode (Claude Code v2.x). These must be rescued before the
-    // NOISE_ENTRY_TYPES filter discards all "system" entries.
-    if e.entry_type == "system" && (e.subtype == "hook_progress" || !e.hook_event.is_empty()) {
-        return Some(ClassifiedMsg::Hook(HookMsg {
-            timestamp: ts,
-            hook_event: e.hook_event.clone(),
-            hook_name: e.hook_name.clone(),
-            command: String::new(),
-        }));
+    // Rescue hook-related system entries before the NOISE_ENTRY_TYPES filter drops them.
+    if e.entry_type == "system" {
+        match e.subtype.as_str() {
+            // stop_hook_summary: written every time Stop hooks run (success or failure).
+            // hookInfos contains [{command, durationMs}, ...] for each hook that ran.
+            "stop_hook_summary" if e.hook_count > 0 => {
+                let hook_name = e
+                    .hook_infos
+                    .as_ref()
+                    .and_then(|v| v.as_array())
+                    .and_then(|arr| arr.first())
+                    .and_then(|info| info.get("command"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                return Some(ClassifiedMsg::Hook(HookMsg {
+                    timestamp: ts,
+                    hook_event: "Stop".to_string(),
+                    hook_name,
+                    command: String::new(),
+                }));
+            }
+            // hook_progress: written in verbose/stream-json mode for mid-session hooks.
+            "hook_progress" => {
+                return Some(ClassifiedMsg::Hook(HookMsg {
+                    timestamp: ts,
+                    hook_event: e.hook_event.clone(),
+                    hook_name: e.hook_name.clone(),
+                    command: String::new(),
+                }));
+            }
+            // hookEvent present on any system entry (forward-compat for future hook types).
+            _ if !e.hook_event.is_empty() => {
+                return Some(ClassifiedMsg::Hook(HookMsg {
+                    timestamp: ts,
+                    hook_event: e.hook_event.clone(),
+                    hook_name: e.hook_name.clone(),
+                    command: String::new(),
+                }));
+            }
+            _ => {}
+        }
+    }
+
+    // Rescue hook attachment entries for all non-Stop hook events (PreToolUse, PostToolUse,
+    // UserPromptSubmit, Notification, SessionStart, etc.).
+    // Claude Code writes these as: {type:"attachment", attachment:{type:"hook_success"|
+    // "hook_non_blocking_error"|"hook_blocking_error"|"hook_cancelled"|..., hookEvent, hookName}}
+    if e.entry_type == "attachment" {
+        if let Some(ref att) = e.attachment {
+            let hook_event = att.get("hookEvent").and_then(|v| v.as_str()).unwrap_or("");
+            if !hook_event.is_empty() {
+                let hook_name = att
+                    .get("hookName")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                // For blocking errors, extract the error message as the command context.
+                let command = att
+                    .get("blockingError")
+                    .and_then(|v| v.get("blockingError"))
+                    .and_then(|v| v.as_str())
+                    .or_else(|| att.get("stderr").and_then(|v| v.as_str()))
+                    .unwrap_or("")
+                    .trim()
+                    .to_string();
+                return Some(ClassifiedMsg::Hook(HookMsg {
+                    timestamp: ts,
+                    hook_event: hook_event.to_string(),
+                    hook_name,
+                    command,
+                }));
+            }
+        }
     }
 
     // Hard noise: structural metadata types.
@@ -213,6 +277,22 @@ pub fn classify(e: Entry) -> Option<ClassifiedMsg> {
     // Filter user-type noise.
     if e.entry_type == "user" && is_user_noise(&e.message.content, &content_str) {
         return None;
+    }
+
+    // "Stop hook feedback:" entries: isMeta user messages injected by Claude Code when
+    // a Stop hook exits non-zero.  Format: "Stop hook feedback:\n[command]: output\n"
+    // Classify as HookMsg so they appear with the other hook items, not as AI meta noise.
+    if e.entry_type == "user" && e.is_meta {
+        let trimmed = content_str.trim();
+        if trimmed.starts_with("Stop hook feedback:") {
+            let (hook_name, command) = parse_hook_feedback(trimmed);
+            return Some(ClassifiedMsg::Hook(HookMsg {
+                timestamp: ts,
+                hook_event: "Stop".to_string(),
+                hook_name,
+                command,
+            }));
+        }
     }
 
     // Teammate messages.
@@ -366,6 +446,26 @@ fn extract_teammate_content(s: &str) -> String {
         .and_then(|c| c.get(1))
         .map(|m| m.as_str().trim().to_string())
         .unwrap_or_else(|| s.to_string())
+}
+
+/// Parse a "Stop hook feedback:\n[command]: output\n" string into (hook_name, command).
+fn parse_hook_feedback(s: &str) -> (String, String) {
+    // Skip the first line ("Stop hook feedback:"), then parse "[command]: output" lines.
+    let body = s
+        .split_once('\n')
+        .map(|x| x.1)
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    // Format: "[~/.claude/script.sh]: error message"
+    if let Some(rest) = body.strip_prefix('[') {
+        if let Some(bracket_end) = rest.find("]: ") {
+            let hook_name = rest[..bracket_end].to_string();
+            let command = rest[bracket_end + 3..].trim().to_string();
+            return (hook_name, command);
+        }
+    }
+    (String::new(), body)
 }
 
 fn is_user_noise(raw: &Option<Value>, content_str: &str) -> bool {
@@ -901,6 +1001,155 @@ mod tests {
             classify(e).is_none(),
             "Plain system entry must remain noise"
         );
+    }
+
+    #[test]
+    fn classify_rescues_stop_hook_summary_as_hook() {
+        // stop_hook_summary is written every time Stop hooks run (even on success).
+        // It must be rescued and shown as a HookMsg so hooks always appear in the transcript.
+        let e = Entry {
+            entry_type: "system".to_string(),
+            uuid: "uuid-stop-hook-summary".to_string(),
+            timestamp: "2025-01-15T10:30:00Z".to_string(),
+            subtype: "stop_hook_summary".to_string(),
+            hook_count: 1,
+            hook_infos: Some(json!([{
+                "command": "~/.claude/stop-hook-git-check.sh",
+                "durationMs": 59
+            }])),
+            ..Default::default()
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::Hook(h)) => {
+                assert_eq!(h.hook_event, "Stop");
+                assert_eq!(h.hook_name, "~/.claude/stop-hook-git-check.sh");
+            }
+            other => panic!("Expected Hook for stop_hook_summary entry, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn classify_drops_stop_hook_summary_with_zero_hooks() {
+        // stop_hook_summary with hookCount=0 means no hooks ran; drop silently.
+        let e = Entry {
+            entry_type: "system".to_string(),
+            uuid: "uuid-stop-hook-empty".to_string(),
+            timestamp: "2025-01-15T10:30:00Z".to_string(),
+            subtype: "stop_hook_summary".to_string(),
+            hook_count: 0,
+            ..Default::default()
+        };
+        assert!(
+            classify(e).is_none(),
+            "stop_hook_summary with hookCount=0 must be dropped"
+        );
+    }
+
+    #[test]
+    fn classify_rescues_stop_hook_feedback_user_entry_as_hook() {
+        // "Stop hook feedback:" user entries (isMeta=true) are injected by Claude Code when
+        // a Stop hook exits non-zero.  Classify as HookMsg instead of fallthrough meta AI.
+        let e = Entry {
+            entry_type: "user".to_string(),
+            uuid: "uuid-hook-feedback".to_string(),
+            timestamp: "2025-01-15T10:30:00Z".to_string(),
+            is_meta: true,
+            message: super::super::entry::EntryMessage {
+                role: "user".to_string(),
+                content: Some(json!(
+                    "Stop hook feedback:\n[~/.claude/stop-hook-git-check.sh]: There are untracked files.\n"
+                )),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::Hook(h)) => {
+                assert_eq!(h.hook_event, "Stop");
+                assert_eq!(h.hook_name, "~/.claude/stop-hook-git-check.sh");
+                assert!(
+                    h.command.contains("untracked"),
+                    "command should contain hook output"
+                );
+            }
+            other => panic!(
+                "Expected Hook for stop hook feedback entry, got {:?}",
+                other
+            ),
+        }
+    }
+
+    #[test]
+    fn classify_rescues_attachment_hook_success() {
+        // PreToolUse/PostToolUse/UserPromptSubmit/etc. hooks are written as attachment entries.
+        let e = Entry {
+            entry_type: "attachment".to_string(),
+            uuid: "uuid-att-hook".to_string(),
+            timestamp: "2025-01-15T10:30:00Z".to_string(),
+            attachment: Some(json!({
+                "type": "hook_success",
+                "hookEvent": "PreToolUse",
+                "hookName": "my-pre-hook",
+                "toolUseID": "tool-123",
+                "content": "Success"
+            })),
+            ..Default::default()
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::Hook(h)) => {
+                assert_eq!(h.hook_event, "PreToolUse");
+                assert_eq!(h.hook_name, "my-pre-hook");
+            }
+            other => panic!(
+                "Expected Hook for attachment/hook_success entry, got {:?}",
+                other
+            ),
+        }
+    }
+
+    #[test]
+    fn classify_rescues_attachment_hook_blocking_error_with_message() {
+        // hook_blocking_error extracts the error message into command field.
+        let e = Entry {
+            entry_type: "attachment".to_string(),
+            uuid: "uuid-att-block".to_string(),
+            timestamp: "2025-01-15T10:30:00Z".to_string(),
+            attachment: Some(json!({
+                "type": "hook_blocking_error",
+                "hookEvent": "PostToolUse",
+                "hookName": "post-lint",
+                "blockingError": {"blockingError": "Lint failed: unused variable"}
+            })),
+            ..Default::default()
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::Hook(h)) => {
+                assert_eq!(h.hook_event, "PostToolUse");
+                assert_eq!(h.hook_name, "post-lint");
+                assert!(h.command.contains("Lint failed"));
+            }
+            other => panic!(
+                "Expected Hook for attachment/hook_blocking_error, got {:?}",
+                other
+            ),
+        }
+    }
+
+    #[test]
+    fn classify_drops_attachment_without_hook_event() {
+        // Non-hook attachments (file attachments, etc.) must not be shown as hooks.
+        let e = Entry {
+            entry_type: "attachment".to_string(),
+            uuid: "uuid-att-file".to_string(),
+            timestamp: "2025-01-15T10:30:00Z".to_string(),
+            attachment: Some(json!({
+                "type": "file",
+                "filename": "README.md",
+                "content": "# readme"
+            })),
+            ..Default::default()
+        };
+        assert!(classify(e).is_none(), "Non-hook attachment must be dropped");
     }
 
     // --- Unknown / structural entry type tests (compat: v2.1.79-v2.1.83) ---

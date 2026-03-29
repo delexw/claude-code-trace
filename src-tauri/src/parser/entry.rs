@@ -46,6 +46,18 @@ pub struct Entry {
     pub hook_event: String,
     #[serde(default, rename = "hookName")]
     pub hook_name: String,
+    // Top-level fields present in system/stop_hook_summary entries.
+    #[serde(default, rename = "hookCount")]
+    pub hook_count: u32,
+    #[serde(default, rename = "hookInfos")]
+    pub hook_infos: Option<Value>,
+    #[serde(default, rename = "preventedContinuation")]
+    pub prevented_continuation: bool,
+    // Present in type:"attachment" entries. Hook results for PreToolUse, PostToolUse, etc.
+    // are written as attachment entries: {type:"attachment", attachment:{type:"hook_success"|
+    // "hook_non_blocking_error"|"hook_blocking_error"|"hook_cancelled", hookEvent, hookName, ...}}
+    #[serde(default)]
+    pub attachment: Option<Value>,
 }
 
 #[derive(Debug, Deserialize, Default)]
