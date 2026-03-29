@@ -178,6 +178,18 @@ pub fn classify(e: Entry) -> Option<ClassifiedMsg> {
         }
     }
 
+    // Rescue hook_progress entries written as type:"system", subtype:"hook_progress"
+    // in verbose/stream-json mode (Claude Code v2.x). These must be rescued before the
+    // NOISE_ENTRY_TYPES filter discards all "system" entries.
+    if e.entry_type == "system" && (e.subtype == "hook_progress" || !e.hook_event.is_empty()) {
+        return Some(ClassifiedMsg::Hook(HookMsg {
+            timestamp: ts,
+            hook_event: e.hook_event.clone(),
+            hook_name: e.hook_name.clone(),
+            command: String::new(),
+        }));
+    }
+
     // Hard noise: structural metadata types.
     if NOISE_ENTRY_TYPES.contains(&e.entry_type.as_str()) {
         return None;
@@ -826,6 +838,68 @@ mod tests {
         assert!(
             classify(e).is_none(),
             "Non-hook progress entry must be dropped"
+        );
+    }
+
+    #[test]
+    fn classify_rescues_system_hook_progress_subtype() {
+        // Verbose/stream-json mode: hooks arrive as type:"system", subtype:"hook_progress".
+        // These must be rescued before the noise filter discards all "system" entries.
+        let e = Entry {
+            entry_type: "system".to_string(),
+            uuid: "uuid-sys-hook".to_string(),
+            timestamp: "2025-01-15T10:30:00Z".to_string(),
+            subtype: "hook_progress".to_string(),
+            hook_event: "PreToolUse".to_string(),
+            hook_name: "pre-commit".to_string(),
+            ..Default::default()
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::Hook(h)) => {
+                assert_eq!(h.hook_event, "PreToolUse");
+                assert_eq!(h.hook_name, "pre-commit");
+            }
+            other => panic!(
+                "Expected Hook for system/hook_progress entry, got {:?}",
+                other
+            ),
+        }
+    }
+
+    #[test]
+    fn classify_rescues_system_entry_with_hook_event_field() {
+        // Forward-compat: any system entry carrying a hookEvent field is treated as a hook.
+        let e = Entry {
+            entry_type: "system".to_string(),
+            uuid: "uuid-sys-hook2".to_string(),
+            timestamp: "2025-01-15T10:30:00Z".to_string(),
+            hook_event: "PostToolUse".to_string(),
+            hook_name: "post-hook".to_string(),
+            ..Default::default()
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::Hook(h)) => {
+                assert_eq!(h.hook_event, "PostToolUse");
+            }
+            other => panic!(
+                "Expected Hook for system entry with hookEvent, got {:?}",
+                other
+            ),
+        }
+    }
+
+    #[test]
+    fn classify_drops_plain_system_entry_without_hook_fields() {
+        // Regular system entries (no subtype/hookEvent) must still be dropped as noise.
+        let e = Entry {
+            entry_type: "system".to_string(),
+            uuid: "uuid-plain-sys".to_string(),
+            timestamp: "2025-01-15T10:30:00Z".to_string(),
+            ..Default::default()
+        };
+        assert!(
+            classify(e).is_none(),
+            "Plain system entry must remain noise"
         );
     }
 

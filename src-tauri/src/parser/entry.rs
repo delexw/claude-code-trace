@@ -39,6 +39,13 @@ pub struct Entry {
     pub agent_name: String,
     #[serde(default)]
     pub data: Option<Value>,
+    // Top-level fields present in system/hook_progress entries (verbose/stream-json mode).
+    #[serde(default)]
+    pub subtype: String,
+    #[serde(default, rename = "hookEvent")]
+    pub hook_event: String,
+    #[serde(default, rename = "hookName")]
+    pub hook_name: String,
 }
 
 #[derive(Debug, Deserialize, Default)]
