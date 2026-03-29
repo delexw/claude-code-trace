@@ -25,7 +25,7 @@ pub fn categorize_tool_name(name: &str) -> ToolCategory {
         "Read" => ToolCategory::Read,
         "Edit" => ToolCategory::Edit,
         "Write" | "NotebookEdit" => ToolCategory::Write,
-        "Bash" => ToolCategory::Bash,
+        "Bash" | "PowerShell" => ToolCategory::Bash,
         "Grep" => ToolCategory::Grep,
         "Glob" => ToolCategory::Glob,
         "Task" | "Agent" | "TaskCreate" | "TaskUpdate" | "TaskList" | "TaskGet" | "TaskStop"
@@ -80,6 +80,7 @@ mod tests {
         assert_eq!(categorize_tool_name("Write"), ToolCategory::Write);
         assert_eq!(categorize_tool_name("NotebookEdit"), ToolCategory::Write);
         assert_eq!(categorize_tool_name("Bash"), ToolCategory::Bash);
+        assert_eq!(categorize_tool_name("PowerShell"), ToolCategory::Bash);
         assert_eq!(categorize_tool_name("Grep"), ToolCategory::Grep);
         assert_eq!(categorize_tool_name("Glob"), ToolCategory::Glob);
         assert_eq!(categorize_tool_name("Task"), ToolCategory::Task);
