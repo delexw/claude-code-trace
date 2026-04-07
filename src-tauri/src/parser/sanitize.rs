@@ -169,6 +169,31 @@ pub fn stringify_content(raw: &Option<Value>) -> String {
     val.to_string()
 }
 
+/// Resolves a hook output field that may be either a plain string or a structured
+/// file-reference object introduced in Claude Code v2.1.89.
+///
+/// From v2.1.89, hook stdout over 50,000 characters is saved to a temporary file
+/// and the field contains `{"path": "/tmp/...", "preview": "...(truncated)"}` instead
+/// of a plain string. This function reads the full file when it is still on disk,
+/// otherwise falls back to the `preview` string from the object.
+pub fn resolve_hook_output(v: &Value) -> String {
+    match v {
+        Value::String(s) => s.clone(),
+        Value::Object(map) => {
+            if let Some(path) = map.get("path").and_then(|p| p.as_str()) {
+                if let Ok(content) = fs::read_to_string(path) {
+                    return content;
+                }
+            }
+            map.get("preview")
+                .and_then(|p| p.as_str())
+                .unwrap_or("")
+                .to_string()
+        }
+        _ => String::new(),
+    }
+}
+
 /// Detects `<persisted-output>` markers in tool result content and resolves
 /// the file reference by reading the persisted file from disk.
 /// Returns the full file content if found, otherwise the original string.
@@ -340,6 +365,45 @@ mod tests {
         let result = stringify_content(&v);
         assert!(result.contains("key"));
         assert!(result.contains("value"));
+    }
+
+    // ---- resolve_hook_output tests ----
+
+    #[test]
+    fn resolve_hook_output_plain_string_returned_as_is() {
+        let v = json!("hook output text");
+        assert_eq!(resolve_hook_output(&v), "hook output text");
+    }
+
+    #[test]
+    fn resolve_hook_output_object_returns_preview_when_file_missing() {
+        let v =
+            json!({"path": "/tmp/nonexistent_hook_file_xyz.txt", "preview": "preview text here"});
+        assert_eq!(resolve_hook_output(&v), "preview text here");
+    }
+
+    #[test]
+    fn resolve_hook_output_object_reads_file_when_exists() {
+        let dir = std::env::temp_dir();
+        let path = dir.join("test_hook_output_file.txt");
+        std::fs::write(&path, "full hook output content").unwrap();
+        let v = json!({"path": path.to_str().unwrap(), "preview": "truncated preview"});
+        let result = resolve_hook_output(&v);
+        assert_eq!(result, "full hook output content");
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn resolve_hook_output_non_string_non_object_returns_empty() {
+        assert_eq!(resolve_hook_output(&json!(42)), "");
+        assert_eq!(resolve_hook_output(&json!(null)), "");
+        assert_eq!(resolve_hook_output(&json!([1, 2])), "");
+    }
+
+    #[test]
+    fn resolve_hook_output_object_without_preview_returns_empty() {
+        let v = json!({"path": "/tmp/missing.txt"});
+        assert_eq!(resolve_hook_output(&v), "");
     }
 
     // ---- resolve_persisted_output tests ----
