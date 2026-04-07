@@ -41,6 +41,7 @@ pub struct FrontendDisplayItem {
     pub hook_command: String,
     pub is_orphan: bool,
     pub subagent_prompt: String,
+    pub is_deferred: bool,
 }
 
 /// Frontend last output.
@@ -248,6 +249,7 @@ fn convert_display_items(
                 hook_command: it.hook_command.clone(),
                 is_orphan: it.is_orphan,
                 subagent_prompt: String::new(),
+                is_deferred: it.is_deferred,
             };
 
             // Link subagent process if available (Subagent items and ToolCall items like Skill).
@@ -687,6 +689,58 @@ mod tests {
             b_items[0].subagent_messages.is_empty(),
             "cycle must be cut here"
         );
+    }
+
+    #[test]
+    fn deferred_flag_is_propagated_to_frontend_display_item() {
+        use crate::parser::chunk::{DisplayItem, DisplayItemType};
+
+        let items = vec![DisplayItem {
+            item_type: DisplayItemType::ToolCall,
+            tool_id: "toolu_defer".to_string(),
+            tool_name: "Read".to_string(),
+            is_deferred: true,
+            ..Default::default()
+        }];
+
+        let subagents = vec![];
+        let graph = ProcGraph::new(&subagents);
+        let color_map = std::collections::HashMap::new();
+        let mut pool_idx = 0;
+
+        let result =
+            convert_display_items(&items, &graph, &color_map, &mut pool_idx, &HashSet::new());
+
+        assert_eq!(result.len(), 1);
+        assert!(
+            result[0].is_deferred,
+            "is_deferred must be propagated to FrontendDisplayItem"
+        );
+    }
+
+    #[test]
+    fn non_deferred_flag_propagates_as_false() {
+        use crate::parser::chunk::{DisplayItem, DisplayItemType};
+
+        let items = vec![DisplayItem {
+            item_type: DisplayItemType::ToolCall,
+            tool_id: "toolu_normal".to_string(),
+            tool_name: "Bash".to_string(),
+            tool_result: "output".to_string(),
+            is_deferred: false,
+            ..Default::default()
+        }];
+
+        let subagents = vec![];
+        let graph = ProcGraph::new(&subagents);
+        let color_map = std::collections::HashMap::new();
+        let mut pool_idx = 0;
+
+        let result =
+            convert_display_items(&items, &graph, &color_map, &mut pool_idx, &HashSet::new());
+
+        assert_eq!(result.len(), 1);
+        assert!(!result[0].is_deferred);
     }
 
     #[test]

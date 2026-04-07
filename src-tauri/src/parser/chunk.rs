@@ -43,6 +43,9 @@ pub struct DisplayItem {
     pub hook_name: String,
     pub hook_command: String,
     pub is_orphan: bool,
+    /// True when the session was suspended via a "defer" PreToolUse permission decision
+    /// before a tool_result arrived for this tool_use block.
+    pub is_deferred: bool,
 }
 
 impl Default for DisplayItem {
@@ -68,6 +71,7 @@ impl Default for DisplayItem {
             hook_name: String::new(),
             hook_command: String::new(),
             is_orphan: false,
+            is_deferred: false,
         }
     }
 }
@@ -349,6 +353,12 @@ fn merge_ai_buffer(buf: &[AIMsg]) -> Chunk {
         }
     }
 
+    // Any tool_use blocks still in pending have no matching tool_result — the session was
+    // suspended via a "defer" PreToolUse permission decision before the tool ran.
+    for p in pending.values() {
+        items[p.index].is_deferred = true;
+    }
+
     let first = buf.first().map(|m| m.timestamp).unwrap_or_else(Utc::now);
     let last = buf.last().map(|m| m.timestamp).unwrap_or(first);
     let dur = last.signed_duration_since(first).num_milliseconds();
@@ -445,5 +455,147 @@ pub fn is_team_task(item: &DisplayItem) -> bool {
     match &item.tool_input {
         Some(Value::Object(map)) => map.contains_key("team_name") && map.contains_key("name"),
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parser::classify::{AIMsg, ClassifiedMsg, ContentBlock, Usage};
+    use chrono::Utc;
+
+    fn make_ai_msg(blocks: Vec<ContentBlock>, is_meta: bool) -> AIMsg {
+        AIMsg {
+            timestamp: Utc::now(),
+            model: if is_meta {
+                String::new()
+            } else {
+                "claude-test".to_string()
+            },
+            text: String::new(),
+            thinking_count: 0,
+            tool_calls: Vec::new(),
+            blocks,
+            usage: Usage::default(),
+            stop_reason: String::new(),
+            is_meta,
+        }
+    }
+
+    fn tool_use_block(id: &str, name: &str) -> ContentBlock {
+        ContentBlock {
+            block_type: "tool_use".to_string(),
+            tool_id: id.to_string(),
+            tool_name: name.to_string(),
+            ..Default::default()
+        }
+    }
+
+    fn tool_result_block(id: &str, content: &str) -> ContentBlock {
+        ContentBlock {
+            block_type: "tool_result".to_string(),
+            tool_id: id.to_string(),
+            content: content.to_string(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn tool_use_with_matching_result_is_not_deferred() {
+        // A complete pair: tool_use followed by a tool_result in a meta entry.
+        let tool_id = "toolu_001";
+        let msgs = vec![
+            ClassifiedMsg::AI(make_ai_msg(vec![tool_use_block(tool_id, "Bash")], false)),
+            ClassifiedMsg::AI(make_ai_msg(
+                vec![tool_result_block(tool_id, "output")],
+                true,
+            )),
+        ];
+        let chunks = build_chunks(&msgs);
+        assert_eq!(chunks.len(), 1);
+        let items = &chunks[0].items;
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].item_type, DisplayItemType::ToolCall);
+        assert_eq!(items[0].tool_result, "output");
+        assert!(
+            !items[0].is_deferred,
+            "matched tool_use should not be deferred"
+        );
+    }
+
+    #[test]
+    fn tool_use_without_result_is_marked_deferred() {
+        // Session ends after tool_use with no tool_result — simulates "defer" suspension.
+        let tool_id = "toolu_defer_001";
+        let msgs = vec![ClassifiedMsg::AI(make_ai_msg(
+            vec![tool_use_block(tool_id, "Read")],
+            false,
+        ))];
+        let chunks = build_chunks(&msgs);
+        assert_eq!(chunks.len(), 1);
+        let items = &chunks[0].items;
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].item_type, DisplayItemType::ToolCall);
+        assert!(items[0].tool_result.is_empty());
+        assert!(
+            items[0].is_deferred,
+            "dangling tool_use should be marked deferred"
+        );
+    }
+
+    #[test]
+    fn multiple_tool_uses_only_unmatched_are_deferred() {
+        // Two tool_use blocks: one gets a result, one doesn't.
+        let id_complete = "toolu_complete";
+        let id_deferred = "toolu_deferred";
+        let msgs = vec![
+            ClassifiedMsg::AI(make_ai_msg(
+                vec![
+                    tool_use_block(id_complete, "Bash"),
+                    tool_use_block(id_deferred, "Read"),
+                ],
+                false,
+            )),
+            ClassifiedMsg::AI(make_ai_msg(
+                vec![tool_result_block(id_complete, "done")],
+                true,
+            )),
+        ];
+        let chunks = build_chunks(&msgs);
+        assert_eq!(chunks.len(), 1);
+        let items = &chunks[0].items;
+        assert_eq!(items.len(), 2);
+
+        let complete = items.iter().find(|i| i.tool_name == "Bash").unwrap();
+        let deferred = items.iter().find(|i| i.tool_name == "Read").unwrap();
+
+        assert_eq!(complete.tool_result, "done");
+        assert!(!complete.is_deferred);
+        assert!(deferred.tool_result.is_empty());
+        assert!(deferred.is_deferred);
+    }
+
+    #[test]
+    fn deferred_subagent_tool_use_is_marked_deferred() {
+        // A Task/Agent tool_use block without a matching result is also deferred.
+        let tool_id = "toolu_agent_deferred";
+        let msgs = vec![ClassifiedMsg::AI(make_ai_msg(
+            vec![ContentBlock {
+                block_type: "tool_use".to_string(),
+                tool_id: tool_id.to_string(),
+                tool_name: "Task".to_string(),
+                ..Default::default()
+            }],
+            false,
+        ))];
+        let chunks = build_chunks(&msgs);
+        assert_eq!(chunks.len(), 1);
+        let items = &chunks[0].items;
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].item_type, DisplayItemType::Subagent);
+        assert!(
+            items[0].is_deferred,
+            "dangling Task tool_use should be marked deferred"
+        );
     }
 }
