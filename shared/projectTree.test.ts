@@ -8,7 +8,12 @@ import {
   detectWorktreeKind,
   worktreeLeafName,
   buildFlatItems,
+  type FlatItem,
 } from "./projectTree";
+
+function omitExpandFields(items: FlatItem[]): Omit<FlatItem, "hasChildren" | "isExpanded">[] {
+  return items.map(({ hasChildren: _h, isExpanded: _e, ...rest }) => rest);
+}
 
 function makeSession(overrides: Partial<SessionInfo> = {}): SessionInfo {
   return {
@@ -117,34 +122,87 @@ describe("buildTree", () => {
     const roots = buildTree(nodes);
     expect(roots).toHaveLength(2);
   });
+
+  it("creates virtual intermediate node for -- segments between parent and worktree", () => {
+    const nodes = [
+      { name: "sp-03bf9f55", key: "-Users-me--sp-03bf9f55", sessionCount: 1, hasOngoing: false },
+      {
+        name: "wt",
+        key: "-Users-me--sp-03bf9f55-translation-service--claude-worktrees-main",
+        sessionCount: 1,
+        hasOngoing: false,
+      },
+    ];
+    const roots = buildTree(nodes);
+    expect(roots).toHaveLength(1);
+    const parent = roots[0];
+    expect(parent.node.key).toBe("-Users-me--sp-03bf9f55");
+    expect(parent.children).toHaveLength(1);
+    const vn = parent.children[0];
+    expect(vn.node.name).toBe("translation-service");
+    expect(vn.node.key).toMatch(/^__virtual:/);
+    expect(vn.children).toHaveLength(1);
+    expect(vn.children[0].node.key).toBe(
+      "-Users-me--sp-03bf9f55-translation-service--claude-worktrees-main",
+    );
+  });
+
+  it("virtual node aggregates sessionCount and hasOngoing from children", () => {
+    const nodes = [
+      { name: "proj", key: "-Users-me--proj", sessionCount: 1, hasOngoing: false },
+      {
+        name: "wt",
+        key: "-Users-me--proj-svc--claude-worktrees-main",
+        sessionCount: 2,
+        hasOngoing: true,
+      },
+    ];
+    const roots = buildTree(nodes);
+    const vn = roots[0].children[0];
+    expect(vn.node.sessionCount).toBe(2);
+    expect(vn.node.hasOngoing).toBe(true);
+  });
 });
 
 describe("detectWorktreeKind", () => {
-  it("detects worktrees", () => {
+  it("detects worktrees (old single-dash style)", () => {
     expect(detectWorktreeKind("-Users-me-backend", "-Users-me-backend-worktrees-EC-123")).toBe(
       "worktrees",
     );
   });
 
-  it("detects claude-worktrees", () => {
+  it("detects claude-worktrees (-- style, last segment)", () => {
     expect(detectWorktreeKind("-Users-me-backend", "-Users-me-backend--claude-worktrees-fox")).toBe(
       "claude-worktrees",
     );
   });
 
+  it("detects claude-worktrees when intermediate -- segment exists (virtual parent key)", () => {
+    expect(
+      detectWorktreeKind(
+        "__virtual:-Users-me--proj:svc",
+        "-Users-me--proj-svc--claude-worktrees-main",
+      ),
+    ).toBe("claude-worktrees");
+  });
+
   it("returns null for non-worktree children", () => {
     expect(detectWorktreeKind("-Users-me-backend", "-Users-me-backend-tools")).toBeNull();
+  });
+
+  it("returns null for -- child that is not a worktree", () => {
+    expect(detectWorktreeKind("-Users-me--proj", "-Users-me--proj--subproject")).toBeNull();
   });
 });
 
 describe("worktreeLeafName", () => {
-  it("extracts leaf name for worktrees", () => {
+  it("extracts leaf name for worktrees (old single-dash style)", () => {
     expect(
       worktreeLeafName("-Users-me-backend", "-Users-me-backend-worktrees-EC-123", "worktrees"),
     ).toBe("EC-123");
   });
 
-  it("extracts leaf name for claude-worktrees", () => {
+  it("extracts leaf name for claude-worktrees (-- style)", () => {
     expect(
       worktreeLeafName(
         "-Users-me-backend",
@@ -152,6 +210,16 @@ describe("worktreeLeafName", () => {
         "claude-worktrees",
       ),
     ).toBe("happy-crane");
+  });
+
+  it("extracts leaf name via -- segment when virtual parent key is used", () => {
+    expect(
+      worktreeLeafName(
+        "__virtual:-Users-me--proj:svc",
+        "-Users-me--proj-svc--claude-worktrees-security-rubygems-addressable-133",
+        "claude-worktrees",
+      ),
+    ).toBe("security-rubygems-addressable-133");
   });
 });
 
@@ -162,7 +230,7 @@ describe("flattenTree", () => {
     ]);
     const flat = flattenTree(roots);
     expect(flat).toHaveLength(1);
-    expect(flat[0]).toEqual({
+    expect(omitExpandFields(flat)[0]).toEqual({
       key: "-Users-me-backend",
       name: "backend",
       count: 2,
@@ -170,6 +238,8 @@ describe("flattenTree", () => {
       depth: 0,
       isGroup: false,
     });
+    expect(flat[0].hasChildren).toBe(false);
+    expect(flat[0].isExpanded).toBe(true);
   });
 
   it("creates worktree group nodes", () => {
@@ -186,10 +256,77 @@ describe("flattenTree", () => {
     const flat = flattenTree(roots);
     // parent, group header, leaf
     expect(flat).toHaveLength(3);
+    expect(flat[0].hasChildren).toBe(true);
+    expect(flat[0].isExpanded).toBe(true);
     expect(flat[1].isGroup).toBe(true);
     expect(flat[1].name).toBe("worktrees");
+    expect(flat[1].hasChildren).toBe(true);
     expect(flat[2].name).toBe("EC-123");
     expect(flat[2].depth).toBe(2);
+  });
+
+  it("hides children of a collapsed project node", () => {
+    const nodes = [
+      { name: "backend", key: "-Users-me-backend", sessionCount: 1, hasOngoing: false },
+      {
+        name: "EC-123",
+        key: "-Users-me-backend-worktrees-EC-123",
+        sessionCount: 1,
+        hasOngoing: false,
+      },
+    ];
+    const collapsed = new Set(["-Users-me-backend"]);
+    const flat = flattenTree(buildTree(nodes), collapsed);
+    // only the parent; children hidden
+    expect(flat).toHaveLength(1);
+    expect(flat[0].isExpanded).toBe(false);
+    expect(flat[0].hasChildren).toBe(true);
+  });
+
+  it("hides children of a collapsed group header", () => {
+    const nodes = [
+      { name: "backend", key: "-Users-me-backend", sessionCount: 1, hasOngoing: false },
+      {
+        name: "EC-123",
+        key: "-Users-me-backend-worktrees-EC-123",
+        sessionCount: 1,
+        hasOngoing: false,
+      },
+    ];
+    const collapsed = new Set(["__group:worktrees:-Users-me-backend"]);
+    const flat = flattenTree(buildTree(nodes), collapsed);
+    // parent + group header only; leaf hidden
+    expect(flat).toHaveLength(2);
+    expect(flat[1].isGroup).toBe(true);
+    expect(flat[1].isExpanded).toBe(false);
+  });
+
+  it("shows virtual intermediate node between parent and worktree group", () => {
+    const nodes = [
+      { name: "sp-03bf9f55", key: "-Users-me--sp-03bf9f55", sessionCount: 1, hasOngoing: false },
+      {
+        name: "wt",
+        key: "-Users-me--sp-03bf9f55-translation-service--claude-worktrees-security-rubygems-addressable-133",
+        sessionCount: 1,
+        hasOngoing: false,
+      },
+    ];
+    const flat = flattenTree(buildTree(nodes));
+    // depth 0: sp-03bf9f55
+    // depth 1: translation-service (virtual)
+    // depth 2: claude-worktrees (group)
+    // depth 3: security-rubygems-addressable-133 (leaf)
+    expect(flat).toHaveLength(4);
+    expect(flat[0].name).toBe("sp-03bf9f55");
+    expect(flat[0].depth).toBe(0);
+    expect(flat[1].name).toBe("translation-service");
+    expect(flat[1].depth).toBe(1);
+    expect(flat[1].isGroup).toBe(false);
+    expect(flat[2].name).toBe("claude-worktrees");
+    expect(flat[2].isGroup).toBe(true);
+    expect(flat[2].depth).toBe(2);
+    expect(flat[3].name).toBe("security-rubygems-addressable-133");
+    expect(flat[3].depth).toBe(3);
   });
 });
 
@@ -199,7 +336,7 @@ describe("buildFlatItems", () => {
       makeSession({ path: "/home/user/.claude/projects/proj-a/s1.jsonl", cwd: "/x/proj-a" }),
     ];
     const items = buildFlatItems(sessions);
-    expect(items[0]).toEqual({
+    expect(omitExpandFields(items)[0]).toEqual({
       key: null,
       name: "All Projects",
       count: 1,
@@ -207,6 +344,8 @@ describe("buildFlatItems", () => {
       depth: 0,
       isGroup: false,
     });
+    expect(items[0].hasChildren).toBe(false);
+    expect(items[0].isExpanded).toBe(true);
   });
 
   it("returns correct total count in All Projects", () => {

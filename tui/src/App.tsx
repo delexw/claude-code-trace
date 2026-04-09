@@ -47,8 +47,18 @@ export function App() {
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [sidebarFocused, setSidebarFocused] = useState(false);
   const [sidebarHighlight, setSidebarHighlight] = useState(0);
+  const [collapsedKeys, setCollapsedKeys] = useState<Set<string>>(new Set());
 
-  const projectEntries = useProjectEntries(allSessions);
+  const toggleCollapse = useCallback((key: string) => {
+    setCollapsedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+
+  const projectEntries = useProjectEntries(allSessions, collapsedKeys);
 
   const pickerSessions = useMemo(() => {
     if (selectedProject === null) return allSessions;
@@ -213,7 +223,17 @@ export function App() {
       } else if (key.return) {
         const entry = projectEntries[sidebarHighlight];
         if (entry && !entry.isGroup) handleSelectProject(entry.key);
-      } else if (input === "l" || key.rightArrow || key.escape) {
+      } else if (input === " ") {
+        const entry = projectEntries[sidebarHighlight];
+        if (entry?.hasChildren && entry.key) toggleCollapse(entry.key);
+      } else if (key.rightArrow) {
+        const entry = projectEntries[sidebarHighlight];
+        if (entry?.hasChildren && entry.key && !entry.isExpanded) toggleCollapse(entry.key);
+        else setSidebarFocused(false);
+      } else if (key.leftArrow) {
+        const entry = projectEntries[sidebarHighlight];
+        if (entry?.hasChildren && entry.key && entry.isExpanded) toggleCollapse(entry.key);
+      } else if (input === "l" || key.escape) {
         setSidebarFocused(false);
       } else if (input === "q") {
         exit();
@@ -516,6 +536,8 @@ export function App() {
           selectedProject={selectedProject}
           highlightedIndex={sidebarHighlight}
           isFocused={sidebarFocused}
+          collapsedKeys={collapsedKeys}
+          onToggleCollapse={toggleCollapse}
         />
         <Box flexDirection="column" flexGrow={1}>
           {renderView()}

@@ -382,10 +382,12 @@ body {
 }
 
 .project-tree__name {
+  flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+  text-align: left;
 }
 
 .project-tree__meta {
@@ -441,11 +443,33 @@ body {
 .project-tree__item--child {
   font-size: 11px;
   opacity: 0.85;
+  position: relative;
 }
 
-.project-tree__branch {
-  color: var(--text-dim);
-  font-size: 10px;
+/* ---- Tree guide lines ---- */
+
+/* Each guide span is one ancestor depth level: a thin vertical rail. */
+.project-tree__guide {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--border);
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+/* The last guide (immediate parent level) adds a short horizontal arm
+   at the item's vertical midpoint, forming an L-connector to the toggle. */
+.project-tree__guide--last::after {
+  content: "";
+  position: absolute;
+  bottom: 50%;
+  left: 0;
+  width: 5px;
+  height: 1px;
+  background: var(--border);
+  opacity: 1;
 }
 
 .project-tree__item--group {
@@ -466,6 +490,33 @@ body {
   vertical-align: middle;
   font-size: 13px;
   margin-right: 4px;
+}
+
+/* ---- Toggle (expand/collapse) button ---- */
+
+.project-tree__toggle {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  color: transparent;
+  border-radius: 3px;
+  margin-right: 2px;
+  cursor: default;
+  user-select: none;
+}
+
+.project-tree__toggle--active {
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.project-tree__toggle--active:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
 }
 
 /* ---- Info Bar ---- */

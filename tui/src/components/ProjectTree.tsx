@@ -12,12 +12,17 @@ interface ProjectTreeProps {
   selectedProject: string | null;
   highlightedIndex: number;
   isFocused: boolean;
+  collapsedKeys?: ReadonlySet<string>;
+  onToggleCollapse: (key: string) => void;
 }
 
 export type { FlatItem };
 
-export function useProjectEntries(sessions: SessionInfo[]): FlatItem[] {
-  return useMemo(() => buildFlatItems(sessions), [sessions]);
+export function useProjectEntries(
+  sessions: SessionInfo[],
+  collapsedKeys?: ReadonlySet<string>,
+): FlatItem[] {
+  return useMemo(() => buildFlatItems(sessions, collapsedKeys), [sessions, collapsedKeys]);
 }
 
 export function ProjectTree({
@@ -25,15 +30,17 @@ export function ProjectTree({
   selectedProject,
   highlightedIndex,
   isFocused,
+  collapsedKeys,
+  onToggleCollapse: _onToggleCollapse,
 }: ProjectTreeProps) {
-  const entries = useProjectEntries(sessions);
+  const entries = useProjectEntries(sessions, collapsedKeys);
   // Dynamic width: min 24, adapts to longest entry
   // Allow up to 40% of terminal width for sidebar, min 28
   const termCols = process.stdout.columns || 80;
   const maxWidth = Math.floor(termCols * 0.4);
   const contentWidth = Math.max(
     28,
-    ...entries.map((e) => e.name.length + e.depth * 2 + String(e.count).length + 8),
+    ...entries.map((e) => e.name.length + e.depth * 2 + String(e.count).length + 10),
   );
   const sidebarWidth = Math.min(maxWidth, contentWidth);
 
@@ -60,6 +67,8 @@ export function ProjectTree({
         const indent = "  ".repeat(item.depth);
         const branch = item.depth > 0 ? `${IconTreeBranch} ` : "";
         const icon = isSelected && !item.isGroup ? IconSelected2 : " ";
+        const chevron =
+          item.hasChildren && item.key ? (item.isExpanded ? "\u25be " : "\u25b8 ") : "";
         const label = item.isGroup ? `${IconGroup} ${item.name}` : item.name;
 
         return (
@@ -81,6 +90,7 @@ export function ProjectTree({
                 {icon}
                 {indent}
                 {branch}
+                {chevron}
                 {label} <Text dimColor>{item.count}</Text>
                 {item.ongoing ? " " : ""}
               </Text>

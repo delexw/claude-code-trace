@@ -14,7 +14,7 @@ import { DebugViewer } from "./components/DebugViewer";
 import { InfoBar } from "./components/InfoBar";
 import { KeybindBar } from "./components/KeybindBar";
 import { ViewToolbar } from "./components/ViewToolbar";
-import { ProjectTree, useProjectKeys } from "./components/ProjectTree";
+import { ProjectTree, useProjectKeys, useProjectItems } from "./components/ProjectTree";
 import { ResizeHandle } from "./components/ResizeHandle";
 import { SettingsModal } from "./components/SettingsModal";
 
@@ -28,6 +28,16 @@ export function App() {
   const [sidebarFocused, setSidebarFocused] = useState(false);
   const [sidebarHighlight, setSidebarHighlight] = useState(0); // index in project list (0 = "All")
   const [showSettings, setShowSettings] = useState(false);
+  const [collapsedKeys, setCollapsedKeys] = useState<Set<string>>(new Set());
+
+  const toggleCollapse = useCallback((key: string) => {
+    setCollapsedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
 
   const handleSelectProject = useCallback(
     (project: string | null) => {
@@ -41,7 +51,8 @@ export function App() {
 
   const session = useSession();
   const picker = usePicker(selectedProject);
-  const projectKeys = useProjectKeys(picker.allSessions);
+  const projectKeys = useProjectKeys(picker.allSessions, collapsedKeys);
+  const projectItems = useProjectItems(picker.allSessions, collapsedKeys);
 
   const { loadSession, loadDebugLog, sessionPath } = session;
   const { discoverSessions, updateSessionOngoing } = picker;
@@ -191,7 +202,19 @@ export function App() {
     keyMap["Enter"] = () => selectProjectByIndex(sidebarHighlight);
     keyMap["Escape"] = () => setSidebarFocused(false);
     keyMap["l"] = () => setSidebarFocused(false);
-    keyMap["ArrowRight"] = () => setSidebarFocused(false);
+    keyMap[" "] = () => {
+      const item = projectItems[sidebarHighlight];
+      if (item?.hasChildren && item.key) toggleCollapse(item.key);
+    };
+    keyMap["ArrowRight"] = () => {
+      const item = projectItems[sidebarHighlight];
+      if (item?.hasChildren && item.key && !item.isExpanded) toggleCollapse(item.key);
+      else setSidebarFocused(false);
+    };
+    keyMap["ArrowLeft"] = () => {
+      const item = projectItems[sidebarHighlight];
+      if (item?.hasChildren && item.key && item.isExpanded) toggleCollapse(item.key);
+    };
     keyMap["?"] = toggleKeybinds;
   } else {
     switch (view) {
@@ -371,7 +394,9 @@ export function App() {
           selectedProject={selectedProject}
           highlightedIndex={sidebarHighlight}
           isFocused={sidebarFocused}
+          collapsedKeys={collapsedKeys}
           onSelectProject={handleSelectProject}
+          onToggleCollapse={toggleCollapse}
           onRefresh={loadProjectDirs}
           onFocus={() => setSidebarFocused(true)}
           refreshing={picker.loading}
