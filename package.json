@@ -1,6 +1,6 @@
 {
   "name": "claude-code-trace",
-  "version": "0.4.10",
+  "version": "0.4.11",
   "private": true,
   "bin": {
     "cctrace": "./bin/cctrace.mjs"
