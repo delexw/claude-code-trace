@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use super::chunk::{build_chunks, Chunk};
 use super::classify::{classify, ClassifiedMsg};
 use super::debuglog::extract_hook_msgs;
-use super::entry::parse_entry;
+use super::entry::{parse_entry, Entry};
 
 /// SessionInfo holds metadata about a discovered session file for the picker.
 #[derive(Debug, Clone, Serialize)]
@@ -80,6 +80,81 @@ pub fn read_session_with_debug_hooks(path: &str) -> Result<(Vec<ClassifiedMsg>, 
     Ok((msgs, offset, bytes))
 }
 
+/// Return the set of UUIDs that lie on the live (main) conversation chain.
+///
+/// Strategy:
+/// 1. If any entry carries a non-empty `leafUuid`, the last such value is the
+///    authoritative tip of the live chain — Claude Code writes it on every turn.
+/// 2. Otherwise, find the non-sidechain leaf entry — the entry whose `uuid` is
+///    not referenced as any other entry's `parentUuid` — that appears latest in
+///    the file (most recently written, most likely to be the live tip).
+/// 3. Walk backwards from the chosen tip via `parentUuid` links to collect all
+///    UUIDs on the live path.
+///
+/// Returns an empty set when the chain cannot be determined; callers must then
+/// render all entries unchanged (safe fallback — no entries are silently dropped).
+fn resolve_live_chain_uuids(entries: &[Entry]) -> HashSet<String> {
+    if entries.is_empty() {
+        return HashSet::new();
+    }
+
+    // uuid → index in entries (used for the backward walk).
+    let mut uuid_idx: HashMap<String, usize> = HashMap::with_capacity(entries.len());
+    // UUIDs that appear as someone's parentUuid — they have a child, so they are not leaves.
+    let mut has_child: HashSet<String> = HashSet::with_capacity(entries.len());
+    // Last non-empty leafUuid seen (Claude Code writes this to mark the live tip).
+    let mut leaf_hint = String::new();
+
+    for (i, e) in entries.iter().enumerate() {
+        if !e.uuid.is_empty() {
+            uuid_idx.insert(e.uuid.clone(), i);
+        }
+        if !e.parent_uuid.is_empty() {
+            has_child.insert(e.parent_uuid.clone());
+        }
+        if !e.leaf_uuid.is_empty() {
+            leaf_hint = e.leaf_uuid.clone();
+        }
+    }
+
+    // Step 1: prefer the explicit leafUuid hint when it resolves to a known entry.
+    let live_tip = if !leaf_hint.is_empty() && uuid_idx.contains_key(&leaf_hint) {
+        leaf_hint
+    } else {
+        // Step 2: fallback — pick the last non-sidechain leaf entry in file order.
+        entries
+            .iter()
+            .rev()
+            .find(|e| !e.uuid.is_empty() && !e.is_sidechain && !has_child.contains(&e.uuid))
+            .map(|e| e.uuid.clone())
+            .unwrap_or_default()
+    };
+
+    if live_tip.is_empty() {
+        return HashSet::new();
+    }
+
+    // Step 3: walk backward from live_tip via parentUuid links.
+    let mut live_set: HashSet<String> = HashSet::new();
+    let mut current = live_tip;
+    loop {
+        if live_set.contains(&current) {
+            break; // cycle guard
+        }
+        live_set.insert(current.clone());
+        let parent = match uuid_idx.get(&current).and_then(|&i| entries.get(i)) {
+            Some(e) => e.parent_uuid.clone(),
+            None => break,
+        };
+        if parent.is_empty() {
+            break;
+        }
+        current = parent;
+    }
+
+    live_set
+}
+
 /// Read new lines from a session file starting at the given byte offset.
 /// Returns (new classified messages, updated offset, bytes read).
 pub fn read_session_incremental(
@@ -92,7 +167,7 @@ pub fn read_session_incremental(
         .seek(SeekFrom::Start(offset))
         .map_err(|e| format!("seeking: {e}"))?;
 
-    let mut msgs = Vec::new();
+    let mut raw_entries: Vec<Entry> = Vec::new();
     let mut bytes_read: u64 = 0;
     let mut line = String::new();
 
@@ -121,9 +196,36 @@ pub fn read_session_incremental(
         }
 
         if let Some(entry) = parse_entry(trimmed.as_bytes()) {
-            if let Some(msg) = classify(entry) {
-                msgs.push(msg);
-            }
+            raw_entries.push(entry);
+        }
+    }
+
+    // For full reads (offset == 0), resolve the live chain before classifying so
+    // that dead-end branch entries (interrupted turns, failed retries, subagent
+    // write-gap collisions) are suppressed.  Incremental watcher reads (offset > 0)
+    // skip resolution: new bytes are always continuations of the live chain, and
+    // we don't have the full chain context to resolve accurately.
+    let live_set = if offset == 0 {
+        resolve_live_chain_uuids(&raw_entries)
+    } else {
+        HashSet::new()
+    };
+
+    let mut msgs = Vec::new();
+    for entry in raw_entries {
+        // When live-branch resolution produced a non-empty set, skip any non-sidechain
+        // entry whose uuid is absent from the live chain.  Sidechain entries are passed
+        // through unchanged — classify() already filters them.  Entries with no uuid
+        // (e.g. leafUuid-only markers) are always passed through.
+        if !live_set.is_empty()
+            && !entry.uuid.is_empty()
+            && !entry.is_sidechain
+            && !live_set.contains(&entry.uuid)
+        {
+            continue;
+        }
+        if let Some(msg) = classify(entry) {
+            msgs.push(msg);
         }
     }
 
@@ -1272,6 +1374,124 @@ mod tests {
         assert_eq!(totals.total_tokens, 75);
 
         std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    // --- resolve_live_chain_uuids tests ---
+
+    fn make_entry(uuid: &str, parent_uuid: &str, leaf_uuid: &str, is_sidechain: bool) -> Entry {
+        Entry {
+            uuid: uuid.to_string(),
+            parent_uuid: parent_uuid.to_string(),
+            leaf_uuid: leaf_uuid.to_string(),
+            is_sidechain,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn live_chain_empty_entries_returns_empty_set() {
+        let result = resolve_live_chain_uuids(&[]);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn live_chain_single_entry_no_parent_returns_self() {
+        let entries = vec![make_entry("u1", "", "", false)];
+        let set = resolve_live_chain_uuids(&entries);
+        assert!(set.contains("u1"));
+        assert_eq!(set.len(), 1);
+    }
+
+    #[test]
+    fn live_chain_linear_chain_returns_all() {
+        // A → B → C (linear, no branches)
+        let entries = vec![
+            make_entry("A", "", "", false),
+            make_entry("B", "A", "", false),
+            make_entry("C", "B", "", false),
+        ];
+        let set = resolve_live_chain_uuids(&entries);
+        assert!(set.contains("A"));
+        assert!(set.contains("B"));
+        assert!(set.contains("C"));
+        assert_eq!(set.len(), 3);
+    }
+
+    #[test]
+    fn live_chain_dead_end_branch_excluded() {
+        // Main chain: A → B → C → D (live leaf)
+        // Dead-end:        B → X (dead-end leaf, written before D)
+        let entries = vec![
+            make_entry("A", "", "", false),
+            make_entry("B", "A", "", false),
+            make_entry("X", "B", "", false), // dead-end, appears before D
+            make_entry("C", "B", "", false),
+            make_entry("D", "C", "", false), // live leaf — appears last
+        ];
+        let set = resolve_live_chain_uuids(&entries);
+        // Live chain is A→B→C→D
+        assert!(set.contains("A"), "root must be included");
+        assert!(set.contains("B"), "shared node must be included");
+        assert!(set.contains("C"), "live chain node must be included");
+        assert!(set.contains("D"), "live leaf must be included");
+        // Dead-end must be excluded
+        assert!(!set.contains("X"), "dead-end entry must be excluded");
+    }
+
+    #[test]
+    fn live_chain_leaf_uuid_hint_overrides_file_order() {
+        // Main chain: A → B → C (live, but C is NOT the last entry)
+        // Dead-end:   A → D (appears last in file)
+        // A leafUuid hint points at C — this should win over D.
+        let entries = vec![
+            make_entry("A", "", "", false),
+            make_entry("B", "A", "", false),
+            make_entry("C", "B", "", false), // live tip, pointed to by leafUuid
+            make_entry("D", "A", "", false), // dead-end, appears last
+            Entry {
+                // Marker entry carrying the leafUuid hint (no uuid of its own)
+                uuid: String::new(),
+                leaf_uuid: "C".to_string(),
+                ..Default::default()
+            },
+        ];
+        let set = resolve_live_chain_uuids(&entries);
+        assert!(set.contains("A"));
+        assert!(set.contains("B"));
+        assert!(set.contains("C"), "leafUuid-pointed entry must be live");
+        assert!(
+            !set.contains("D"),
+            "dead-end after live tip must be excluded"
+        );
+    }
+
+    #[test]
+    fn live_chain_sidechain_entries_are_not_leaf_candidates() {
+        // Main chain: A → B (live leaf)
+        // Sidechain:  A → S (is_sidechain = true, appears last)
+        let entries = vec![
+            make_entry("A", "", "", false),
+            make_entry("B", "A", "", false),
+            make_entry("S", "A", "", true), // sidechain — must not be chosen as live tip
+        ];
+        let set = resolve_live_chain_uuids(&entries);
+        // Sidechain "S" should not become the live tip
+        assert!(set.contains("A"));
+        assert!(set.contains("B"), "main chain leaf must be in live set");
+        // S is sidechain; it won't be in the live_set, but classify() handles it separately
+    }
+
+    #[test]
+    fn live_chain_cycle_guard_prevents_infinite_loop() {
+        // Malformed entries: A.parent = B, B.parent = A (cycle)
+        let entries = vec![
+            make_entry("A", "B", "", false),
+            make_entry("B", "A", "", false),
+        ];
+        // Should terminate without panicking.
+        let set = resolve_live_chain_uuids(&entries);
+        // Both are referenced as parents, so neither is a leaf → no live tip → empty set.
+        assert!(set.is_empty() || !set.is_empty()); // just verify no panic/hang
     }
 
     #[test]

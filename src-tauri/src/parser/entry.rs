@@ -9,6 +9,8 @@ pub struct Entry {
     pub entry_type: String,
     #[serde(default)]
     pub uuid: String,
+    #[serde(default, rename = "parentUuid")]
+    pub parent_uuid: String,
     #[serde(default)]
     pub timestamp: String,
     #[serde(default, rename = "isSidechain")]
