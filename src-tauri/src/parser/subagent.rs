@@ -769,7 +769,7 @@ pub fn inject_orphan_subagents(chunks: &mut Vec<Chunk>, processes: &mut [Subagen
 /// Derive a human-readable description for an orphan subagent from its prompt.
 /// Skill-based subagents typically start with "Base directory for this skill: /…/skill-name\n".
 /// Falls back to the first 80 characters of the prompt.
-fn orphan_description_from_prompt(prompt: &str) -> String {
+pub fn orphan_description_from_prompt(prompt: &str) -> String {
     if prompt.is_empty() {
         return String::new();
     }

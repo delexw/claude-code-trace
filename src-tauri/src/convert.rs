@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use crate::parser::chunk::*;
 use crate::parser::last_output::{find_last_output, LastOutput, LastOutputType};
 use crate::parser::ongoing::OngoingChecker;
-use crate::parser::subagent::{ProcGraph, SubagentProcess};
+use crate::parser::subagent::{orphan_description_from_prompt, ProcGraph, SubagentProcess};
 use crate::parser::taxonomy::ToolCategory;
 use crate::parser::team::TeamSnapshot;
 
@@ -258,6 +258,11 @@ fn convert_display_items(
                     fdi.subagent_ongoing = OngoingChecker::is_subagent_ongoing_deep(proc, graph);
                     fdi.agent_id = proc.id.clone();
                     fdi.subagent_prompt = proc.prompt.clone();
+                    // Fallback: derive description from the agent's own prompt when the
+                    // parent tool call carried no description (e.g. Skill-forked agents).
+                    if fdi.subagent_desc.is_empty() && !proc.prompt.is_empty() {
+                        fdi.subagent_desc = orphan_description_from_prompt(&proc.prompt);
+                    }
                     if !proc.teammate_color.is_empty() {
                         fdi.team_color = proc.teammate_color.clone();
                     }
@@ -596,6 +601,46 @@ mod tests {
             "Base directory for this skill: /path/to/skill\n\n# My Skill"
         );
         assert_eq!(result[0].agent_id, "agent-abc");
+    }
+
+    #[test]
+    fn subagent_desc_derived_from_skill_prompt_when_empty() {
+        use crate::parser::chunk::{DisplayItem, DisplayItemType};
+        use crate::parser::subagent::SubagentProcess;
+
+        let tool_id = "orphan-ae9be0e043273ded1".to_string();
+        // Orphan item with empty subagent_desc (as inject_orphan_subagents may produce
+        // in edge cases, e.g. Skill-forked agents with no skill_progress linking).
+        let items = vec![DisplayItem {
+            item_type: DisplayItemType::Subagent,
+            tool_id: tool_id.clone(),
+            tool_name: "Agent".to_string(),
+            subagent_type: "general-purpose".to_string(),
+            subagent_desc: String::new(),
+            ..Default::default()
+        }];
+
+        let proc = SubagentProcess {
+            id: "ae9be0e043273ded1".to_string(),
+            parent_task_id: tool_id,
+            prompt:
+                "Base directory for this skill: /Users/yang/.claude/skills/rollbar-reader\n\n# Rollbar Reader"
+                    .to_string(),
+            ..Default::default()
+        };
+        let subagents = vec![proc];
+        let graph = ProcGraph::new(&subagents);
+        let color_map = std::collections::HashMap::new();
+        let mut pool_idx = 0;
+
+        let result =
+            convert_display_items(&items, &graph, &color_map, &mut pool_idx, &HashSet::new());
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(
+            result[0].subagent_desc, "rollbar-reader",
+            "skill name must be derived from prompt when subagent_desc is empty"
+        );
     }
 
     // ---- cycle detection test ----
