@@ -42,6 +42,10 @@ pub struct DisplayItem {
     pub hook_event: String,
     pub hook_name: String,
     pub hook_command: String,
+    /// All key-value pairs from the hook attachment JSON.
+    pub hook_metadata: Option<serde_json::Value>,
+    /// Tool result parsed as a JSON value when the content is an object or array.
+    pub tool_result_json: Option<serde_json::Value>,
     pub is_orphan: bool,
     /// True when the session was suspended via a "defer" PreToolUse permission decision
     /// before a tool_result arrived for this tool_use block.
@@ -70,6 +74,8 @@ impl Default for DisplayItem {
             hook_event: String::new(),
             hook_name: String::new(),
             hook_command: String::new(),
+            hook_metadata: None,
+            tool_result_json: None,
             is_orphan: false,
             is_deferred: false,
         }
@@ -198,6 +204,7 @@ pub fn build_chunks(msgs: &[ClassifiedMsg]) -> Vec<Chunk> {
                         text: m.command.clone(),
                         tool_name: m.hook_name.clone(),
                         tool_id: m.hook_event.clone(),
+                        hook_metadata: m.metadata.clone(),
                         ..Default::default()
                     }],
                     usage: Usage::default(),
@@ -258,11 +265,17 @@ fn merge_ai_buffer(buf: &[AIMsg]) -> Chunk {
             for b in &m.blocks {
                 match b.block_type.as_str() {
                     "thinking" => {
-                        items.push(DisplayItem {
-                            item_type: DisplayItemType::Thinking,
-                            text: b.text.clone(),
-                            ..Default::default()
-                        });
+                        // Extended thinking blocks store an encrypted signature in the JSONL
+                        // but redact the actual text (thinking field is ""). Only emit a
+                        // Thinking DisplayItem when there is real content to show; thinking_count
+                        // already tracks the presence of thinking blocks regardless.
+                        if !b.text.is_empty() {
+                            items.push(DisplayItem {
+                                item_type: DisplayItemType::Thinking,
+                                text: b.text.clone(),
+                                ..Default::default()
+                            });
+                        }
                     }
                     "text" => {
                         items.push(DisplayItem {
@@ -318,6 +331,7 @@ fn merge_ai_buffer(buf: &[AIMsg]) -> Chunk {
                     "tool_result" => {
                         if let Some(p) = pending.remove(&b.tool_id) {
                             items[p.index].tool_result = b.content.clone();
+                            items[p.index].tool_result_json = b.content_json.clone();
                             items[p.index].tool_error = b.is_error;
                             let dur = m.timestamp.signed_duration_since(p.timestamp);
                             items[p.index].duration_ms = dur.num_milliseconds();
@@ -344,6 +358,7 @@ fn merge_ai_buffer(buf: &[AIMsg]) -> Chunk {
                             hook_event: b.tool_id.clone(),
                             hook_name: b.tool_name.clone(),
                             hook_command: b.text.clone(),
+                            hook_metadata: b.hook_metadata.clone(),
                             ..Default::default()
                         });
                     }

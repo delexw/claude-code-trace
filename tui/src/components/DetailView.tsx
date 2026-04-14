@@ -345,6 +345,14 @@ function DetailItemBody({
               <Text dimColor>{item.hook_command}</Text>
             </Box>
           )}
+          {item.hook_metadata && (
+            <Box flexDirection="column" gap={1}>
+              <Text color={colors.textMuted} bold>
+                metadata:
+              </Text>
+              <Text dimColor>{item.hook_metadata}</Text>
+            </Box>
+          )}
         </Box>
       );
     default:

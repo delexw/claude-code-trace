@@ -257,6 +257,16 @@ function DetailItemBody({ item }: { item: DisplayItem }) {
               </div>
             </div>
           )}
+          {item.hook_metadata && (
+            <div className="detail-item__section">
+              <div className="detail-item__section-title">Metadata</div>
+              <div className="detail-item__json">
+                <pre>
+                  <code>{item.hook_metadata}</code>
+                </pre>
+              </div>
+            </div>
+          )}
         </div>
       );
     default:

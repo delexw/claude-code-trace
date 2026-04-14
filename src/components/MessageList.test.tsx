@@ -183,6 +183,8 @@ describe("MessageList", () => {
             hook_event: "",
             hook_name: "",
             hook_command: "",
+            hook_metadata: "",
+            tool_result_json: "",
             is_orphan: false,
           },
         ],

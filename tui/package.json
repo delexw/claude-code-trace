@@ -1,6 +1,6 @@
 {
   "name": "claude-code-trace-tui",
-  "version": "0.4.12",
+  "version": "0.4.13",
   "description": "Terminal UI for Claude Code Trace",
   "bin": {
     "cctrace-tui": "./dist/tui/src/cli.js"

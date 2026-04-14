@@ -40,6 +40,10 @@ pub struct ContentBlock {
     pub is_error: bool,
     pub teammate_id: String,
     pub teammate_color: String,
+    /// For hook_event blocks: all key-value pairs from the hook attachment JSON.
+    pub hook_metadata: Option<Value>,
+    /// For tool_result blocks: raw content value before stringification.
+    pub content_json: Option<Value>,
 }
 
 /// Classified message types.
@@ -100,6 +104,9 @@ pub struct HookMsg {
     pub hook_event: String,
     pub hook_name: String,
     pub command: String,
+    /// All key-value pairs from the hook attachment JSON (stdout, stderr, command,
+    /// exitCode, durationMs, additionalContext, decision, reason, …).
+    pub metadata: Option<Value>,
 }
 
 pub const SYSTEM_OUTPUT_TAGS: &[&str] = &[
@@ -172,6 +179,7 @@ pub fn classify(e: Entry) -> Option<ClassifiedMsg> {
                     hook_event,
                     hook_name,
                     command,
+                    metadata: None,
                 }));
             }
         }
@@ -197,6 +205,7 @@ pub fn classify(e: Entry) -> Option<ClassifiedMsg> {
                     hook_event: "Stop".to_string(),
                     hook_name,
                     command: String::new(),
+                    metadata: None,
                 }));
             }
             // hook_progress: written in verbose/stream-json mode for mid-session hooks.
@@ -206,6 +215,7 @@ pub fn classify(e: Entry) -> Option<ClassifiedMsg> {
                     hook_event: e.hook_event.clone(),
                     hook_name: e.hook_name.clone(),
                     command: String::new(),
+                    metadata: None,
                 }));
             }
             // hookEvent present on any system entry (forward-compat for future hook types).
@@ -215,6 +225,7 @@ pub fn classify(e: Entry) -> Option<ClassifiedMsg> {
                     hook_event: e.hook_event.clone(),
                     hook_name: e.hook_name.clone(),
                     command: String::new(),
+                    metadata: None,
                 }));
             }
             _ => {}
@@ -253,11 +264,17 @@ pub fn classify(e: Entry) -> Option<ClassifiedMsg> {
                 }
                 .trim()
                 .to_string();
+                // Store the whole attachment object so all key-value pairs are available:
+                // type, hookName, hookEvent, command, stdout, stderr, exitCode, durationMs,
+                // additionalContext (when stdout is parsed JSON), decision, reason, etc.
+                // Any nested JSON strings (e.g. stdout) are left for the frontend to expand.
+                let metadata = Some(att.clone());
                 return Some(ClassifiedMsg::Hook(HookMsg {
                     timestamp: ts,
                     hook_event: hook_event.to_string(),
                     hook_name,
                     command,
+                    metadata,
                 }));
             }
         }
@@ -300,6 +317,7 @@ pub fn classify(e: Entry) -> Option<ClassifiedMsg> {
                 hook_event: "Stop".to_string(),
                 hook_name,
                 command,
+                metadata: None,
             }));
         }
     }
@@ -677,14 +695,19 @@ fn extract_meta_blocks(content: &Option<Value>, text_fallback: &str) -> Vec<Cont
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
-            let raw_content = stringify_content(&b.get("content").cloned());
+            let raw_content_val = b.get("content").cloned();
+            let raw_content = stringify_content(&raw_content_val);
             let content = resolve_persisted_output(&raw_content);
             let is_error = b.get("is_error").and_then(|v| v.as_bool()).unwrap_or(false);
+            // Keep the raw Value so callers can access all key-value pairs when the
+            // tool result is a JSON object (not just the stringified form).
+            let content_json = raw_content_val.filter(|v| v.is_object() || v.is_array());
             Some(ContentBlock {
                 block_type: "tool_result".to_string(),
                 tool_id,
                 content,
                 is_error,
+                content_json,
                 ..Default::default()
             })
         })

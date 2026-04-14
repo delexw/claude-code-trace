@@ -2,7 +2,7 @@
 
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **cct-626ddc17** (1747 symbols, 4138 relationships, 146 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **tail-claude-gui** (1766 symbols, 4194 relationships, 148 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
@@ -18,7 +18,7 @@ This project is indexed by GitNexus as **cct-626ddc17** (1747 symbols, 4138 rela
 
 1. `gitnexus_query({query: "<error or symptom>"})` — find execution flows related to the issue
 2. `gitnexus_context({name: "<suspect function>"})` — see all callers, callees, and process participation
-3. `READ gitnexus://repo/cct-626ddc17/process/{processName}` — trace the full execution flow step by step
+3. `READ gitnexus://repo/tail-claude-gui/process/{processName}` — trace the full execution flow step by step
 4. For regressions: `gitnexus_detect_changes({scope: "compare", base_ref: "main"})` — see what your branch changed
 
 ## When Refactoring
@@ -55,12 +55,12 @@ This project is indexed by GitNexus as **cct-626ddc17** (1747 symbols, 4138 rela
 
 ## Resources
 
-| Resource                                      | Use for                                  |
-| --------------------------------------------- | ---------------------------------------- |
-| `gitnexus://repo/cct-626ddc17/context`        | Codebase overview, check index freshness |
-| `gitnexus://repo/cct-626ddc17/clusters`       | All functional areas                     |
-| `gitnexus://repo/cct-626ddc17/processes`      | All execution flows                      |
-| `gitnexus://repo/cct-626ddc17/process/{name}` | Step-by-step execution trace             |
+| Resource                                         | Use for                                  |
+| ------------------------------------------------ | ---------------------------------------- |
+| `gitnexus://repo/tail-claude-gui/context`        | Codebase overview, check index freshness |
+| `gitnexus://repo/tail-claude-gui/clusters`       | All functional areas                     |
+| `gitnexus://repo/tail-claude-gui/processes`      | All execution flows                      |
+| `gitnexus://repo/tail-claude-gui/process/{name}` | Step-by-step execution trace             |
 
 ## Self-Check Before Finishing
 

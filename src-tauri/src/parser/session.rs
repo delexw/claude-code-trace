@@ -217,10 +217,19 @@ pub fn read_session_incremental(
         // entry whose uuid is absent from the live chain.  Sidechain entries are passed
         // through unchanged — classify() already filters them.  Entries with no uuid
         // (e.g. leafUuid-only markers) are always passed through.
+        //
+        // Exception: "attachment" entries (hook results, skill listings, etc.) are
+        // side-nodes — they hang off a chain entry via parentUuid but are never
+        // referenced as someone else's parentUuid, so their own uuid never appears in
+        // the live set.  Include them when their parentUuid is on the live chain.
+        let is_live_attachment = entry.entry_type == "attachment"
+            && !entry.parent_uuid.is_empty()
+            && live_set.contains(&entry.parent_uuid);
         if !live_set.is_empty()
             && !entry.uuid.is_empty()
             && !entry.is_sidechain
             && !live_set.contains(&entry.uuid)
+            && !is_live_attachment
         {
             continue;
         }
@@ -1544,6 +1553,39 @@ mod tests {
             completed_msgs.len(),
             1,
             "completed line should produce a message"
+        );
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn attachment_hook_on_live_chain_is_not_dropped() {
+        // Regression: attachment entries (hook results) are side-nodes — they have their
+        // own uuid but nothing references that uuid as a parentUuid.  The live-chain filter
+        // must not drop them when their parentUuid is on the live chain.
+        //
+        // Chain: u1 → a1 → u2 (live leaf)
+        // Side:  a1 → hook_attachment (type="attachment", uuid="h1", parentUuid="a1")
+        let tmp = env::temp_dir().join("tail-test-attachment-hook");
+        std::fs::create_dir_all(&tmp).unwrap();
+        let path = tmp.join("session.jsonl");
+
+        let user1 = "{\"type\":\"user\",\"uuid\":\"u1\",\"parentUuid\":null,\"isSidechain\":false,\"timestamp\":\"2025-01-15T10:00:00Z\",\"message\":{\"role\":\"user\",\"content\":\"Write a file\"}}\n";
+        let asst1 = "{\"type\":\"assistant\",\"uuid\":\"a1\",\"parentUuid\":\"u1\",\"isSidechain\":false,\"timestamp\":\"2025-01-15T10:00:01Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Sure\"}],\"model\":\"claude-sonnet-4\",\"stop_reason\":\"tool_use\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0}}}\n";
+        // Hook attachment: side-node hanging off a1, never referenced as anyone's parentUuid.
+        let hook  = "{\"type\":\"attachment\",\"uuid\":\"h1\",\"parentUuid\":\"a1\",\"isSidechain\":false,\"timestamp\":\"2025-01-15T10:00:02Z\",\"attachment\":{\"type\":\"hook_success\",\"hookEvent\":\"PreToolUse\",\"hookName\":\"PreToolUse:Write\",\"stdout\":\"\",\"stderr\":\"\",\"exitCode\":0,\"command\":\"check\",\"durationMs\":10}}\n";
+        let user2 = "{\"type\":\"user\",\"uuid\":\"u2\",\"parentUuid\":\"a1\",\"isSidechain\":false,\"timestamp\":\"2025-01-15T10:00:03Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"t1\",\"content\":\"done\"}]}}\n";
+
+        std::fs::write(&path, format!("{user1}{asst1}{hook}{user2}")).unwrap();
+
+        let (msgs, _, _) = read_session_incremental(path.to_str().unwrap(), 0).unwrap();
+
+        let has_hook = msgs.iter().any(|m| {
+            matches!(m, ClassifiedMsg::Hook(h) if h.hook_event == "PreToolUse" && h.hook_name == "PreToolUse:Write")
+        });
+        assert!(
+            has_hook,
+            "PreToolUse:Write attachment hook must survive the live-chain filter"
         );
 
         std::fs::remove_dir_all(&tmp).ok();

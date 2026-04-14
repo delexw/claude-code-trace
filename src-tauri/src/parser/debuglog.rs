@@ -250,6 +250,7 @@ pub fn extract_hook_msgs(session_path: &str) -> Vec<super::classify::ClassifiedM
                     hook_event: hook_event.to_string(),
                     hook_name,
                     command,
+                    metadata: None,
                 },
             ))
         })
@@ -334,6 +335,7 @@ prompt captured\n\
                     hook_event: hook_event.to_string(),
                     hook_name,
                     command: e.extra.clone(),
+                    metadata: None,
                 }))
             })
             .collect();

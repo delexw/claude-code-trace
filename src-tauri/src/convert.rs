@@ -39,6 +39,10 @@ pub struct FrontendDisplayItem {
     pub hook_event: String,
     pub hook_name: String,
     pub hook_command: String,
+    /// All key-value pairs from the hook attachment JSON (pretty-printed).
+    pub hook_metadata: String,
+    /// Tool result as pretty-printed JSON when the content is an object or array.
+    pub tool_result_json: String,
     pub is_orphan: bool,
     pub subagent_prompt: String,
     pub is_deferred: bool,
@@ -247,6 +251,8 @@ fn convert_display_items(
                 hook_event: it.hook_event.clone(),
                 hook_name: it.hook_name.clone(),
                 hook_command: it.hook_command.clone(),
+                hook_metadata: pretty_json(&it.hook_metadata),
+                tool_result_json: pretty_json(&it.tool_result_json),
                 is_orphan: it.is_orphan,
                 subagent_prompt: String::new(),
                 is_deferred: it.is_deferred,

@@ -55,6 +55,10 @@ export interface DisplayItem {
   hook_event: string;
   hook_name: string;
   hook_command: string;
+  /** All key-value pairs from the hook attachment JSON (pretty-printed). */
+  hook_metadata: string;
+  /** Tool result as pretty-printed JSON when the content is an object or array. */
+  tool_result_json: string;
   is_orphan: boolean;
 }
 
