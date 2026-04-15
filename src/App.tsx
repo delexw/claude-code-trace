@@ -219,13 +219,13 @@ export function App() {
   } else {
     switch (view) {
       case "list": {
-        const listDown = () => setSelectedMessage((i) => Math.max(i - 1, 0));
-        const listUp = () =>
+        const moveDown = () =>
           setSelectedMessage((i) => Math.min(i + 1, session.messages.length - 1));
-        keyMap["j"] = listDown;
-        keyMap["ArrowDown"] = listDown;
-        keyMap["k"] = listUp;
-        keyMap["ArrowUp"] = listUp;
+        const moveUp = () => setSelectedMessage((i) => Math.max(i - 1, 0));
+        keyMap["j"] = moveDown;
+        keyMap["ArrowDown"] = moveDown;
+        keyMap["k"] = moveUp;
+        keyMap["ArrowUp"] = moveUp;
         keyMap["G"] = jumpToTop;
         keyMap["g"] = jumpToBottom;
         keyMap["Tab"] = () => toggleMessage(selectedMessage);
