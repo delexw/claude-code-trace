@@ -41,19 +41,23 @@ export function useAutoScroll<T extends HTMLElement>(
     prevCountRef.current = itemCount;
   }, [itemCount, ref]);
 
-  // Also scroll when content changes (same count but content grew).
-  // Use a MutationObserver to detect DOM changes within the container.
+  // Also scroll when new items are appended (same count but content grew).
+  // Only watch direct child additions to avoid triggering on attribute/text changes
+  // (e.g. expanded state changes) which would conflict with manual navigation.
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
 
-    const observer = new MutationObserver(() => {
-      if (isNearBottomRef.current) {
-        el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    const observer = new MutationObserver((mutations) => {
+      for (const m of mutations) {
+        if (m.type === "childList" && isNearBottomRef.current) {
+          el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+          break;
+        }
       }
     });
 
-    observer.observe(el, { childList: true, subtree: true, characterData: true });
+    observer.observe(el, { childList: true });
     return () => observer.disconnect();
   }, [ref]);
 
