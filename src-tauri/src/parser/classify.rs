@@ -153,8 +153,8 @@ pub fn classify(e: Entry) -> Option<ClassifiedMsg> {
 
     // Rescue hook events from noise filter before discarding all "progress" entries.
     // All existing hooks use data.type="hook_progress", but guard on hookEvent presence
-    // so that future hook types (e.g. TaskCreated added in v2.1.84) are also rescued
-    // without needing to enumerate data.type values.
+    // so that future hook types (e.g. TaskCreated added in v2.1.84, PreCompact in v2.1.105)
+    // are also rescued without needing to enumerate data.type values.
     if e.entry_type == "progress" {
         if let Some(ref data) = e.data {
             let is_hook = data.get("type").and_then(|v| v.as_str()) == Some("hook_progress")
