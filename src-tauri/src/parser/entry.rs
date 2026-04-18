@@ -71,6 +71,11 @@ pub struct Entry {
     // "hook_non_blocking_error"|"hook_blocking_error"|"hook_cancelled", hookEvent, hookName, ...}}
     #[serde(default)]
     pub attachment: Option<Value>,
+    // Present in type:"system", subtype:"away_summary" entries (v2.1.108+). Claude Code writes
+    // a recap entry when the user returns after being idle; the recap text is at top-level
+    // `content`, not inside `message.content`.
+    #[serde(default)]
+    pub content: String,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -217,6 +222,27 @@ mod tests {
             ..Default::default()
         };
         assert!(e.tool_use_result_map().is_none());
+    }
+
+    #[test]
+    fn parse_entry_captures_content_field_for_away_summary() {
+        // v2.1.108+: {type:"system",subtype:"away_summary",content:"<text>",uuid:"...",timestamp:"..."}
+        let line = json!({
+            "type": "system",
+            "subtype": "away_summary",
+            "uuid": "recap-uuid-123",
+            "timestamp": "2026-04-14T10:00:00Z",
+            "isMeta": false,
+            "content": "Working on issue #49 — fixing recap entry parsing."
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("must parse away_summary entry");
+        assert_eq!(entry.entry_type, "system");
+        assert_eq!(entry.subtype, "away_summary");
+        assert_eq!(
+            entry.content,
+            "Working on issue #49 — fixing recap entry parsing."
+        );
     }
 
     #[test]

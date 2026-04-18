@@ -188,6 +188,16 @@ pub fn classify(e: Entry) -> Option<ClassifiedMsg> {
     // Rescue hook-related system entries before the NOISE_ENTRY_TYPES filter drops them.
     if e.entry_type == "system" {
         match e.subtype.as_str() {
+            // away_summary: written by v2.1.108+ when the user returns after being idle,
+            // or when /recap is invoked manually. The recap text lives in the top-level
+            // `content` field (not `message.content`). Display as a CompactMsg so it
+            // appears inline in the transcript like a context summary.
+            "away_summary" => {
+                return Some(ClassifiedMsg::Compact(CompactMsg {
+                    timestamp: ts,
+                    text: e.content.clone(),
+                }));
+            }
             // stop_hook_summary: written every time Stop hooks run (success or failure).
             // hookInfos contains [{command, durationMs}, ...] for each hook that ran.
             "stop_hook_summary" if e.hook_count > 0 => {
@@ -1463,6 +1473,46 @@ mod tests {
                 );
             }
             other => panic!("Expected AI, got {:?}", other),
+        }
+    }
+
+    // --- Issue #49: session recap (away_summary) entries are displayed as CompactMsg ---
+
+    #[test]
+    fn classify_away_summary_returns_compact_msg() {
+        // v2.1.108+: recap entries use type:"system", subtype:"away_summary", content:"<text>"
+        let e = Entry {
+            entry_type: "system".to_string(),
+            uuid: "uuid-recap".to_string(),
+            timestamp: "2026-04-14T10:00:00Z".to_string(),
+            subtype: "away_summary".to_string(),
+            content: "Working on a bug fix in entry.rs.".to_string(),
+            ..Default::default()
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::Compact(c)) => {
+                assert_eq!(c.text, "Working on a bug fix in entry.rs.");
+            }
+            other => panic!("Expected Compact for away_summary, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn classify_away_summary_with_empty_content_returns_compact_msg() {
+        // Empty content is preserved consistently with how "summary" entries are handled.
+        let e = Entry {
+            entry_type: "system".to_string(),
+            uuid: "uuid-recap-empty".to_string(),
+            timestamp: "2026-04-14T10:00:00Z".to_string(),
+            subtype: "away_summary".to_string(),
+            content: String::new(),
+            ..Default::default()
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::Compact(c)) => {
+                assert_eq!(c.text, "");
+            }
+            other => panic!("Expected Compact for empty away_summary, got {:?}", other),
         }
     }
 
