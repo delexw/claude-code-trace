@@ -60,8 +60,8 @@ pub fn read_session(path: &str) -> Result<Vec<Chunk>, String> {
 /// Full session load: JSONL classified messages merged with hook events from the
 /// debug log (if one exists at `~/.claude/debug/{session_id}.txt`).
 ///
-/// Non-Stop hooks (PreToolUse, PostToolUse, UserPromptSubmit, SessionStart) are
-/// only written to the debug log (not the JSONL) in Claude Code v2.1.84+. This
+/// Non-Stop hooks (PreToolUse, PostToolUse, UserPromptSubmit, SessionStart, PreCompact,
+/// etc.) are only written to the debug log (not the JSONL) in Claude Code v2.1.84+. This
 /// function surfaces them by reading the debug log and merging by timestamp.
 pub fn read_session_with_debug_hooks(path: &str) -> Result<(Vec<ClassifiedMsg>, u64, u64), String> {
     let (mut msgs, offset, bytes) = read_session_incremental(path, 0)?;

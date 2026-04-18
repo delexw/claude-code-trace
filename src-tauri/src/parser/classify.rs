@@ -153,8 +153,8 @@ pub fn classify(e: Entry) -> Option<ClassifiedMsg> {
 
     // Rescue hook events from noise filter before discarding all "progress" entries.
     // All existing hooks use data.type="hook_progress", but guard on hookEvent presence
-    // so that future hook types (e.g. TaskCreated added in v2.1.84) are also rescued
-    // without needing to enumerate data.type values.
+    // so that future hook types (e.g. TaskCreated added in v2.1.84, PreCompact in v2.1.105)
+    // are also rescued without needing to enumerate data.type values.
     if e.entry_type == "progress" {
         if let Some(ref data) = e.data {
             let is_hook = data.get("type").and_then(|v| v.as_str()) == Some("hook_progress")
@@ -1552,6 +1552,75 @@ mod tests {
         }));
         // classify must not panic; it returns None (tool-loaded noise) or a SystemMsg.
         let _ = classify(e);
+    }
+
+    // --- Issue #48: PreCompact hook event (v2.1.105) is handled generically ---
+
+    #[test]
+    fn classify_rescues_pre_compact_progress_hook_event() {
+        // v2.1.105: PreCompact fires as a progress entry before session compaction.
+        // The generic hookEvent presence check must rescue it without an explicit match arm.
+        let e = Entry {
+            entry_type: "progress".to_string(),
+            uuid: "uuid-pre-compact".to_string(),
+            timestamp: "2026-04-13T10:00:00Z".to_string(),
+            data: Some(json!({
+                "type": "hook_progress",
+                "hookEvent": "PreCompact",
+                "hookName": "my-compact-hook",
+                "command": "echo compacting"
+            })),
+            ..Default::default()
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::Hook(h)) => {
+                assert_eq!(h.hook_event, "PreCompact");
+                assert_eq!(h.hook_name, "my-compact-hook");
+            }
+            other => panic!(
+                "Expected Hook for PreCompact progress entry, got {:?}",
+                other
+            ),
+        }
+    }
+
+    #[test]
+    fn classify_rescues_pre_compact_attachment_with_decision_block() {
+        // v2.1.105: PreCompact hooks can block compaction by returning {"decision":"block"}.
+        // The attachment entry must be rescued and its metadata must preserve the decision field.
+        let e = Entry {
+            entry_type: "attachment".to_string(),
+            uuid: "uuid-pre-compact-block".to_string(),
+            timestamp: "2026-04-13T10:00:01Z".to_string(),
+            attachment: Some(json!({
+                "type": "hook_blocking_error",
+                "hookEvent": "PreCompact",
+                "hookName": "my-compact-hook",
+                "decision": "block",
+                "reason": "Not ready to compact"
+            })),
+            ..Default::default()
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::Hook(h)) => {
+                assert_eq!(h.hook_event, "PreCompact");
+                assert_eq!(h.hook_name, "my-compact-hook");
+                let meta = h.metadata.expect("metadata must be present");
+                assert_eq!(
+                    meta.get("decision").and_then(|v| v.as_str()),
+                    Some("block"),
+                    "decision:block payload must be preserved in metadata"
+                );
+                assert_eq!(
+                    meta.get("reason").and_then(|v| v.as_str()),
+                    Some("Not ready to compact")
+                );
+            }
+            other => panic!(
+                "Expected Hook for PreCompact attachment with decision:block, got {:?}",
+                other
+            ),
+        }
     }
 
     // --- Issue #37: document content block is recognised as user content ---
