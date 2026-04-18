@@ -808,6 +808,12 @@ pub struct IncrementalTokenScanner {
     subagent_offsets: HashMap<String, u64>,
 }
 
+impl Default for IncrementalTokenScanner {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl IncrementalTokenScanner {
     pub fn new() -> Self {
         Self {
@@ -1500,7 +1506,7 @@ mod tests {
         // Should terminate without panicking.
         let set = resolve_live_chain_uuids(&entries);
         // Both are referenced as parents, so neither is a leaf → no live tip → empty set.
-        assert!(set.is_empty() || !set.is_empty()); // just verify no panic/hang
+        assert!(set.is_empty());
     }
 
     #[test]

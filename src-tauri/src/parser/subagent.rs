@@ -11,7 +11,7 @@ use super::classify::*;
 use super::entry::parse_entry;
 
 /// Per-requestId token snapshot used for deduplication across JSONL files.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct TokenSnapshot {
     pub input: i64,
     pub output: i64,
