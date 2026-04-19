@@ -36,7 +36,7 @@ pub struct DebugEntry {
 
 lazy_static! {
     static ref HOOK_MSG_RE: Regex =
-        Regex::new(r"^Hook ([^ (]+) \(([^)]+)\) (success|error):$").unwrap();
+        Regex::new(r"^Hook ([^ (]+) \(([^)]+)\) (success|error|blocked):$").unwrap();
     static ref DEBUG_LINE_RE: Regex = Regex::new(
         r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z)\s+\[(DEBUG|WARN|ERROR)\]\s+(.*)$"
     )
@@ -412,5 +412,15 @@ compaction allowed\n\
             .map(|i| &hook_name_full[i + 1..])
             .unwrap_or(hook_name_full);
         assert_eq!(hook_name, "PreCompact");
+    }
+
+    #[test]
+    fn hook_msg_re_matches_blocked_status_for_pre_compact() {
+        // v2.1.105 PreCompact hooks that block compaction may log with "blocked:" status.
+        let line = "Hook PreCompact (PreCompact) blocked:";
+        let caps = HOOK_MSG_RE.captures(line).unwrap();
+        assert_eq!(caps.get(1).unwrap().as_str(), "PreCompact");
+        assert_eq!(caps.get(2).unwrap().as_str(), "PreCompact");
+        assert_eq!(caps.get(3).unwrap().as_str(), "blocked");
     }
 }

@@ -233,7 +233,7 @@ pub fn classify(e: Entry) -> Option<ClassifiedMsg> {
     }
 
     // Rescue hook attachment entries for all non-Stop hook events (PreToolUse, PostToolUse,
-    // UserPromptSubmit, Notification, SessionStart, etc.).
+    // UserPromptSubmit, Notification, SessionStart, PreCompact, etc.).
     // Claude Code writes these as: {type:"attachment", attachment:{type:"hook_success"|
     // "hook_non_blocking_error"|"hook_blocking_error"|"hook_cancelled"|..., hookEvent, hookName}}
     if e.entry_type == "attachment" {
@@ -1485,6 +1485,64 @@ mod tests {
                 assert_eq!(h.hook_name, "~/.claude/hooks/deny.sh");
             }
             other => panic!("Expected Hook, got {:?}", other),
+        }
+    }
+
+    // --- Issue #48: PreCompact hook event type (v2.1.105) is handled generically ---
+
+    #[test]
+    fn pre_compact_progress_entry_produces_hook_msg() {
+        // PreCompact fires as a progress entry before session compaction.
+        // The generic hookEvent rescue must recognise it without an explicit match arm.
+        let mut e = make_entry("user", None);
+        e.entry_type = "progress".to_string();
+        e.data = Some(json!({
+            "type": "hook_progress",
+            "hookEvent": "PreCompact",
+            "hookName": "PreCompact:my-hook",
+            "command": "~/.claude/hooks/compact-guard.sh"
+        }));
+        match classify(e) {
+            Some(ClassifiedMsg::Hook(h)) => {
+                assert_eq!(h.hook_event, "PreCompact");
+                assert_eq!(h.hook_name, "PreCompact:my-hook");
+            }
+            other => panic!(
+                "Expected Hook for PreCompact progress entry, got {:?}",
+                other
+            ),
+        }
+    }
+
+    #[test]
+    fn pre_compact_attachment_with_block_decision_produces_hook_msg_with_metadata() {
+        // When a PreCompact hook blocks compaction via {"decision":"block"}, Claude Code
+        // writes an attachment entry. The decision field must be preserved in metadata.
+        let mut e = make_entry("user", None);
+        e.entry_type = "attachment".to_string();
+        e.attachment = Some(json!({
+            "type": "hook_blocking_error",
+            "hookEvent": "PreCompact",
+            "hookName": "PreCompact:compact-guard",
+            "decision": "block",
+            "reason": "uncommitted changes detected",
+            "exitCode": 2,
+            "durationMs": 50
+        }));
+        match classify(e) {
+            Some(ClassifiedMsg::Hook(h)) => {
+                assert_eq!(h.hook_event, "PreCompact");
+                assert_eq!(h.hook_name, "PreCompact:compact-guard");
+                let meta = h
+                    .metadata
+                    .expect("metadata must be present for attachment hooks");
+                assert_eq!(meta.get("decision").and_then(|v| v.as_str()), Some("block"));
+                assert_eq!(
+                    meta.get("reason").and_then(|v| v.as_str()),
+                    Some("uncommitted changes detected")
+                );
+            }
+            other => panic!("Expected Hook for PreCompact attachment, got {:?}", other),
         }
     }
 
