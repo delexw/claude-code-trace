@@ -73,7 +73,7 @@ impl SessionCache {
                 all.extend(sessions);
             }
         }
-        all.sort_by(|a, b| b.mod_time.cmp(&a.mod_time));
+        all.sort_by_key(|b| std::cmp::Reverse(b.mod_time));
         Ok(all)
     }
 }

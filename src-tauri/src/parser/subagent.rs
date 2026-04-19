@@ -11,7 +11,7 @@ use super::classify::*;
 use super::entry::parse_entry;
 
 /// Per-requestId token snapshot used for deduplication across JSONL files.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct TokenSnapshot {
     pub input: i64,
     pub output: i64,
@@ -319,7 +319,7 @@ pub fn discover_subagents(session_path: &str) -> Result<Vec<SubagentProcess>, St
         procs.push(proc);
     }
 
-    procs.sort_by(|a, b| a.start_time.cmp(&b.start_time));
+    procs.sort_by_key(|a| a.start_time);
     Ok(procs)
 }
 
@@ -992,7 +992,7 @@ pub fn discover_team_sessions(
         procs.push(proc);
     }
 
-    procs.sort_by(|a, b| a.start_time.cmp(&b.start_time));
+    procs.sort_by_key(|a| a.start_time);
     Ok(procs)
 }
 

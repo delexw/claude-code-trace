@@ -264,18 +264,16 @@ fn merge_ai_buffer(buf: &[AIMsg]) -> Chunk {
         if !m.is_meta {
             for b in &m.blocks {
                 match b.block_type.as_str() {
-                    "thinking" => {
-                        // Extended thinking blocks store an encrypted signature in the JSONL
-                        // but redact the actual text (thinking field is ""). Only emit a
-                        // Thinking DisplayItem when there is real content to show; thinking_count
-                        // already tracks the presence of thinking blocks regardless.
-                        if !b.text.is_empty() {
-                            items.push(DisplayItem {
-                                item_type: DisplayItemType::Thinking,
-                                text: b.text.clone(),
-                                ..Default::default()
-                            });
-                        }
+                    // Extended thinking blocks store an encrypted signature in the JSONL
+                    // but redact the actual text (thinking field is ""). Only emit a
+                    // Thinking DisplayItem when there is real content to show; thinking_count
+                    // already tracks the presence of thinking blocks regardless.
+                    "thinking" if !b.text.is_empty() => {
+                        items.push(DisplayItem {
+                            item_type: DisplayItemType::Thinking,
+                            text: b.text.clone(),
+                            ..Default::default()
+                        });
                     }
                     "text" => {
                         items.push(DisplayItem {

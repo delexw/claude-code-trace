@@ -325,17 +325,14 @@ impl<'a> OngoingChecker<'a> {
                     continue;
                 }
                 match item.item_type {
-                    DisplayItemType::Subagent => {
-                        if item.tool_result.is_empty() {
-                            return true;
-                        }
+                    DisplayItemType::Subagent if item.tool_result.is_empty() => {
+                        return true;
                     }
-                    DisplayItemType::ToolCall => {
+                    DisplayItemType::ToolCall
                         if (item.tool_name == "Task" || item.tool_name == "Agent")
-                            && item.tool_result.is_empty()
-                        {
-                            return true;
-                        }
+                            && item.tool_result.is_empty() =>
+                    {
+                        return true;
                     }
                     _ => {}
                 }
