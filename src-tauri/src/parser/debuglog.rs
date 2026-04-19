@@ -36,7 +36,7 @@ pub struct DebugEntry {
 
 lazy_static! {
     static ref HOOK_MSG_RE: Regex =
-        Regex::new(r"^Hook ([^ (]+) \(([^)]+)\) (success|error):$").unwrap();
+        Regex::new(r"^Hook ([^ (]+) \(([^)]+)\) (success|error|blocked):$").unwrap();
     static ref DEBUG_LINE_RE: Regex = Regex::new(
         r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z)\s+\[(DEBUG|WARN|ERROR)\]\s+(.*)$"
     )
@@ -214,7 +214,7 @@ pub fn filter_by_text(entries: &[DebugEntry], query: &str) -> Vec<DebugEntry> {
 /// execution in `~/.claude/debug/{session_id}.txt` (only when run with `--debug`).
 /// This function reads those lines and returns HookMsg entries that can be merged
 /// into the session's classified message list to surface non-Stop hooks (PreToolUse,
-/// PostToolUse, UserPromptSubmit, SessionStart, etc.) that are not recorded in JSONL.
+/// PostToolUse, UserPromptSubmit, SessionStart, PreCompact, etc.) that are not recorded in JSONL.
 ///
 /// Stop hooks are excluded because they are already captured via `stop_hook_summary`
 /// system entries in the JSONL file.
@@ -386,5 +386,41 @@ prompt captured\n\
             .map(|i| &hook_name_full[i + 1..])
             .unwrap_or(hook_name_full);
         assert_eq!(hook_name, "UserPromptSubmit");
+    }
+
+    #[test]
+    fn extract_hook_msgs_parses_pre_compact_hook_event() {
+        // v2.1.105: PreCompact fires before session compaction. The debug log captures it
+        // with the same format as other hooks. The generic regex must match it.
+        let content = "\
+2026-04-13T10:00:00.000Z [DEBUG] Hook PreCompact (PreCompact) success:\n\
+compaction allowed\n\
+";
+        let f = write_debug_file(content);
+        let (entries, _) = read_debug_log(f.path().to_str().unwrap()).unwrap();
+
+        let caps = HOOK_MSG_RE.captures(&entries[0].message).unwrap();
+        assert_eq!(caps.get(2).unwrap().as_str(), "PreCompact");
+
+        // Must not be excluded (only Stop is excluded).
+        let hook_event = caps.get(2).unwrap().as_str();
+        assert_ne!(hook_event, "Stop");
+
+        let hook_name_full = caps.get(1).unwrap().as_str();
+        let hook_name = hook_name_full
+            .find(':')
+            .map(|i| &hook_name_full[i + 1..])
+            .unwrap_or(hook_name_full);
+        assert_eq!(hook_name, "PreCompact");
+    }
+
+    #[test]
+    fn hook_msg_re_matches_blocked_status_for_pre_compact() {
+        // v2.1.105 PreCompact hooks that block compaction may log with "blocked:" status.
+        let line = "Hook PreCompact (PreCompact) blocked:";
+        let caps = HOOK_MSG_RE.captures(line).unwrap();
+        assert_eq!(caps.get(1).unwrap().as_str(), "PreCompact");
+        assert_eq!(caps.get(2).unwrap().as_str(), "PreCompact");
+        assert_eq!(caps.get(3).unwrap().as_str(), "blocked");
     }
 }

@@ -153,8 +153,8 @@ pub fn classify(e: Entry) -> Option<ClassifiedMsg> {
 
     // Rescue hook events from noise filter before discarding all "progress" entries.
     // All existing hooks use data.type="hook_progress", but guard on hookEvent presence
-    // so that future hook types (e.g. TaskCreated added in v2.1.84) are also rescued
-    // without needing to enumerate data.type values.
+    // so that future hook types (e.g. TaskCreated added in v2.1.84, PreCompact in v2.1.105)
+    // are also rescued without needing to enumerate data.type values.
     if e.entry_type == "progress" {
         if let Some(ref data) = e.data {
             let is_hook = data.get("type").and_then(|v| v.as_str()) == Some("hook_progress")
@@ -188,6 +188,16 @@ pub fn classify(e: Entry) -> Option<ClassifiedMsg> {
     // Rescue hook-related system entries before the NOISE_ENTRY_TYPES filter drops them.
     if e.entry_type == "system" {
         match e.subtype.as_str() {
+            // away_summary: written by v2.1.108+ when the user returns after being idle,
+            // or when /recap is invoked manually. The recap text lives in the top-level
+            // `content` field (not `message.content`). Display as a CompactMsg so it
+            // appears inline in the transcript like a context summary.
+            "away_summary" => {
+                return Some(ClassifiedMsg::Compact(CompactMsg {
+                    timestamp: ts,
+                    text: e.content.clone(),
+                }));
+            }
             // stop_hook_summary: written every time Stop hooks run (success or failure).
             // hookInfos contains [{command, durationMs}, ...] for each hook that ran.
             "stop_hook_summary" if e.hook_count > 0 => {
@@ -233,7 +243,7 @@ pub fn classify(e: Entry) -> Option<ClassifiedMsg> {
     }
 
     // Rescue hook attachment entries for all non-Stop hook events (PreToolUse, PostToolUse,
-    // UserPromptSubmit, Notification, SessionStart, etc.).
+    // UserPromptSubmit, Notification, SessionStart, PreCompact, etc.).
     // Claude Code writes these as: {type:"attachment", attachment:{type:"hook_success"|
     // "hook_non_blocking_error"|"hook_blocking_error"|"hook_cancelled"|..., hookEvent, hookName}}
     if e.entry_type == "attachment" {
@@ -1466,6 +1476,46 @@ mod tests {
         }
     }
 
+    // --- Issue #49: session recap (away_summary) entries are displayed as CompactMsg ---
+
+    #[test]
+    fn classify_away_summary_returns_compact_msg() {
+        // v2.1.108+: recap entries use type:"system", subtype:"away_summary", content:"<text>"
+        let e = Entry {
+            entry_type: "system".to_string(),
+            uuid: "uuid-recap".to_string(),
+            timestamp: "2026-04-14T10:00:00Z".to_string(),
+            subtype: "away_summary".to_string(),
+            content: "Working on a bug fix in entry.rs.".to_string(),
+            ..Default::default()
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::Compact(c)) => {
+                assert_eq!(c.text, "Working on a bug fix in entry.rs.");
+            }
+            other => panic!("Expected Compact for away_summary, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn classify_away_summary_with_empty_content_returns_compact_msg() {
+        // Empty content is preserved consistently with how "summary" entries are handled.
+        let e = Entry {
+            entry_type: "system".to_string(),
+            uuid: "uuid-recap-empty".to_string(),
+            timestamp: "2026-04-14T10:00:00Z".to_string(),
+            subtype: "away_summary".to_string(),
+            content: String::new(),
+            ..Default::default()
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::Compact(c)) => {
+                assert_eq!(c.text, "");
+            }
+            other => panic!("Expected Compact for empty away_summary, got {:?}", other),
+        }
+    }
+
     // --- Issue #35: PermissionDenied hook event is handled generically ---
 
     #[test]
@@ -1488,6 +1538,64 @@ mod tests {
         }
     }
 
+    // --- Issue #48: PreCompact hook event type (v2.1.105) is handled generically ---
+
+    #[test]
+    fn pre_compact_progress_entry_produces_hook_msg() {
+        // PreCompact fires as a progress entry before session compaction.
+        // The generic hookEvent rescue must recognise it without an explicit match arm.
+        let mut e = make_entry("user", None);
+        e.entry_type = "progress".to_string();
+        e.data = Some(json!({
+            "type": "hook_progress",
+            "hookEvent": "PreCompact",
+            "hookName": "PreCompact:my-hook",
+            "command": "~/.claude/hooks/compact-guard.sh"
+        }));
+        match classify(e) {
+            Some(ClassifiedMsg::Hook(h)) => {
+                assert_eq!(h.hook_event, "PreCompact");
+                assert_eq!(h.hook_name, "PreCompact:my-hook");
+            }
+            other => panic!(
+                "Expected Hook for PreCompact progress entry, got {:?}",
+                other
+            ),
+        }
+    }
+
+    #[test]
+    fn pre_compact_attachment_with_block_decision_produces_hook_msg_with_metadata() {
+        // When a PreCompact hook blocks compaction via {"decision":"block"}, Claude Code
+        // writes an attachment entry. The decision field must be preserved in metadata.
+        let mut e = make_entry("user", None);
+        e.entry_type = "attachment".to_string();
+        e.attachment = Some(json!({
+            "type": "hook_blocking_error",
+            "hookEvent": "PreCompact",
+            "hookName": "PreCompact:compact-guard",
+            "decision": "block",
+            "reason": "uncommitted changes detected",
+            "exitCode": 2,
+            "durationMs": 50
+        }));
+        match classify(e) {
+            Some(ClassifiedMsg::Hook(h)) => {
+                assert_eq!(h.hook_event, "PreCompact");
+                assert_eq!(h.hook_name, "PreCompact:compact-guard");
+                let meta = h
+                    .metadata
+                    .expect("metadata must be present for attachment hooks");
+                assert_eq!(meta.get("decision").and_then(|v| v.as_str()), Some("block"));
+                assert_eq!(
+                    meta.get("reason").and_then(|v| v.as_str()),
+                    Some("uncommitted changes detected")
+                );
+            }
+            other => panic!("Expected Hook for PreCompact attachment, got {:?}", other),
+        }
+    }
+
     // --- Issue #41: missing file_path in tool_use_result is handled gracefully ---
 
     #[test]
@@ -1502,6 +1610,75 @@ mod tests {
         }));
         // classify must not panic; it returns None (tool-loaded noise) or a SystemMsg.
         let _ = classify(e);
+    }
+
+    // --- Issue #48: PreCompact hook event (v2.1.105) is handled generically ---
+
+    #[test]
+    fn classify_rescues_pre_compact_progress_hook_event() {
+        // v2.1.105: PreCompact fires as a progress entry before session compaction.
+        // The generic hookEvent presence check must rescue it without an explicit match arm.
+        let e = Entry {
+            entry_type: "progress".to_string(),
+            uuid: "uuid-pre-compact".to_string(),
+            timestamp: "2026-04-13T10:00:00Z".to_string(),
+            data: Some(json!({
+                "type": "hook_progress",
+                "hookEvent": "PreCompact",
+                "hookName": "my-compact-hook",
+                "command": "echo compacting"
+            })),
+            ..Default::default()
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::Hook(h)) => {
+                assert_eq!(h.hook_event, "PreCompact");
+                assert_eq!(h.hook_name, "my-compact-hook");
+            }
+            other => panic!(
+                "Expected Hook for PreCompact progress entry, got {:?}",
+                other
+            ),
+        }
+    }
+
+    #[test]
+    fn classify_rescues_pre_compact_attachment_with_decision_block() {
+        // v2.1.105: PreCompact hooks can block compaction by returning {"decision":"block"}.
+        // The attachment entry must be rescued and its metadata must preserve the decision field.
+        let e = Entry {
+            entry_type: "attachment".to_string(),
+            uuid: "uuid-pre-compact-block".to_string(),
+            timestamp: "2026-04-13T10:00:01Z".to_string(),
+            attachment: Some(json!({
+                "type": "hook_blocking_error",
+                "hookEvent": "PreCompact",
+                "hookName": "my-compact-hook",
+                "decision": "block",
+                "reason": "Not ready to compact"
+            })),
+            ..Default::default()
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::Hook(h)) => {
+                assert_eq!(h.hook_event, "PreCompact");
+                assert_eq!(h.hook_name, "my-compact-hook");
+                let meta = h.metadata.expect("metadata must be present");
+                assert_eq!(
+                    meta.get("decision").and_then(|v| v.as_str()),
+                    Some("block"),
+                    "decision:block payload must be preserved in metadata"
+                );
+                assert_eq!(
+                    meta.get("reason").and_then(|v| v.as_str()),
+                    Some("Not ready to compact")
+                );
+            }
+            other => panic!(
+                "Expected Hook for PreCompact attachment with decision:block, got {:?}",
+                other
+            ),
+        }
     }
 
     // --- Issue #37: document content block is recognised as user content ---
