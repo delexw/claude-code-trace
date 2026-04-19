@@ -353,7 +353,7 @@ pub fn discover_project_sessions(project_dir: &str) -> Result<Vec<SessionInfo>, 
         });
     }
 
-    sessions.sort_by(|a, b| b.mod_time.cmp(&a.mod_time));
+    sessions.sort_by_key(|b| std::cmp::Reverse(b.mod_time));
     Ok(sessions)
 }
 
@@ -365,7 +365,7 @@ pub fn discover_all_project_sessions(project_dirs: &[String]) -> Result<Vec<Sess
             all.extend(sessions);
         }
     }
-    all.sort_by(|a, b| b.mod_time.cmp(&a.mod_time));
+    all.sort_by_key(|b| std::cmp::Reverse(b.mod_time));
     Ok(all)
 }
 
@@ -443,7 +443,7 @@ where
         }
     }
 
-    sessions.sort_by(|a, b| b.mod_time.cmp(&a.mod_time));
+    sessions.sort_by_key(|b| std::cmp::Reverse(b.mod_time));
     Ok(sessions)
 }
 
@@ -806,6 +806,12 @@ pub struct IncrementalTokenScanner {
     subagent_sizes: HashMap<String, u64>,
     /// Per-subagent byte offsets for incremental reading.
     subagent_offsets: HashMap<String, u64>,
+}
+
+impl Default for IncrementalTokenScanner {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl IncrementalTokenScanner {
@@ -1500,7 +1506,7 @@ mod tests {
         // Should terminate without panicking.
         let set = resolve_live_chain_uuids(&entries);
         // Both are referenced as parents, so neither is a leaf → no live tip → empty set.
-        assert!(set.is_empty() || !set.is_empty()); // just verify no panic/hang
+        assert!(set.is_empty());
     }
 
     #[test]
