@@ -25,8 +25,8 @@
 #   CCTRACE_STATIC_DIR  static dist  (default: /app/dist in this image)
 # =============================================================================
 
-ARG RUST_VERSION=1.82
-ARG NODE_VERSION=20
+ARG RUST_IMAGE=rust:latest
+ARG NODE_VERSION=24
 ARG DEBIAN_CODENAME=bookworm
 
 # -----------------------------------------------------------------------------
@@ -51,7 +51,7 @@ RUN npm run build
 # -----------------------------------------------------------------------------
 # Stage 2 — build the Rust backend (Tauri v2 linking needs webkit2gtk headers)
 # -----------------------------------------------------------------------------
-FROM rust:${RUST_VERSION}-${DEBIAN_CODENAME} AS backend-builder
+FROM ${RUST_IMAGE} AS backend-builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
@@ -76,7 +76,7 @@ RUN cargo build --release --locked --bin claude-code-trace
 # -----------------------------------------------------------------------------
 # Stage 3 — runtime image
 # -----------------------------------------------------------------------------
-FROM debian:${DEBIAN_CODENAME}-slim AS runtime
+FROM debian:trixie-slim AS runtime
 
 # Runtime deps:
 #   * webkit2gtk + friends — required by the Tauri v2 runtime on Linux even
@@ -91,6 +91,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         librsvg2-2 \
         libxdo3 \
         xvfb \
+        xauth \
         dumb-init \
         ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
