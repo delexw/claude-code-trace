@@ -11,12 +11,7 @@
 [![Tauri](https://img.shields.io/badge/tauri-v2-24C8D8?logo=tauri&logoColor=white)](https://v2.tauri.app/)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-blue)](https://github.com/delexw/claude-code-trace/releases)
 
-A desktop + web viewer for Claude Code session JSONL files. Built with [Tauri v2](https://v2.tauri.app/) (Rust backend + React frontend).
-
-> Note: I haven’t spent much time polishing the TUI yet, so there are still a few UX rough edges. TUI also calls Rust APIs to retrieve normalized Claude Code session data
-> Contributions are very welcome
-
-Reads session logs from `~/.claude/` and renders them as a scrollable conversation with expandable tool calls, token counts, and live tailing. Works as a **native desktop app** (macOS, Linux, Windows) or as a **web app** in any browser.
+Browse, tail, and search Claude Code session logs in real time. Reads `~/.claude/projects/` JSONL files and renders them as scrollable conversations with expandable tool calls, token counts, and live tailing. Runs as a **native desktop app** (macOS, Linux, Windows), **web app**, or **TUI** — built with Tauri v2 (Rust) + React.
 
 <p align="center">
   <img src="demo.gif" alt="Demo" />
@@ -94,6 +89,8 @@ cctrace              # desktop app (default)
 cctrace --web        # web mode (opens browser at http://localhost:1420)
 cctrace --tui        # terminal UI (starts backend + TUI together)
 ```
+
+> **Note:** The TUI is functional but has a few UX rough edges — contributions welcome.
 
 Launch to open the session picker. It auto-discovers all sessions from `~/.claude/projects/`.
 
@@ -184,6 +181,10 @@ git push origin v0.4.0
 ```
 
 This creates a draft release with macOS, Linux, and Windows artifacts attached. Review and publish it from the [Releases](https://github.com/delexw/claude-code-trace/releases) page.
+
+## Contributing
+
+Bug reports, feature requests, and pull requests are welcome. See [Development](#development) for how to build and run locally. For significant changes, open an issue first to align on scope.
 
 ## License
 
