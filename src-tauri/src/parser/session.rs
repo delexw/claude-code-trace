@@ -1617,13 +1617,20 @@ mod tests {
 
     // --- Issue #60: forked session compat (v2.1.118+) ---
 
-    /// Build a JSONL line for an inherited (forked) entry with forkedFrom field.
+    use serde_json::json;
+
     fn forked_user_line(uuid: &str, parent_uuid: &str, timestamp: &str, content: &str) -> String {
-        format!(
-            "{{\"type\":\"user\",\"uuid\":\"{uuid}\",\"parentUuid\":\"{parent_uuid}\",\"isSidechain\":false,\
-            \"timestamp\":\"{timestamp}\",\"forkedFrom\":{{\"sessionId\":\"parent-session\",\"messageUuid\":\"{uuid}\"}},\
-            \"message\":{{\"role\":\"user\",\"content\":\"{content}\"}}}}\n"
-        )
+        serde_json::to_string(&json!({
+            "type": "user",
+            "uuid": uuid,
+            "parentUuid": parent_uuid,
+            "isSidechain": false,
+            "timestamp": timestamp,
+            "forkedFrom": {"sessionId": "parent-session", "messageUuid": uuid},
+            "message": {"role": "user", "content": content}
+        }))
+        .unwrap()
+            + "\n"
     }
 
     fn forked_assistant_line(
@@ -1633,21 +1640,42 @@ mod tests {
         input_tokens: i64,
         output_tokens: i64,
     ) -> String {
-        format!(
-            "{{\"type\":\"assistant\",\"uuid\":\"{uuid}\",\"parentUuid\":\"{parent_uuid}\",\"isSidechain\":false,\
-            \"timestamp\":\"{timestamp}\",\"requestId\":\"req-{uuid}\",\"forkedFrom\":{{\"sessionId\":\"parent-session\",\"messageUuid\":\"{uuid}\"}},\
-            \"message\":{{\"role\":\"assistant\",\"content\":[],\"model\":\"claude-sonnet-4\",\"stop_reason\":\"end_turn\",\
-            \"usage\":{{\"input_tokens\":{input_tokens},\"output_tokens\":{output_tokens},\
-            \"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0}}}}}}\n"
-        )
+        serde_json::to_string(&json!({
+            "type": "assistant",
+            "uuid": uuid,
+            "parentUuid": parent_uuid,
+            "isSidechain": false,
+            "timestamp": timestamp,
+            "requestId": format!("req-{uuid}"),
+            "forkedFrom": {"sessionId": "parent-session", "messageUuid": uuid},
+            "message": {
+                "role": "assistant",
+                "content": [],
+                "model": "claude-sonnet-4",
+                "stop_reason": "end_turn",
+                "usage": {
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                    "cache_read_input_tokens": 0,
+                    "cache_creation_input_tokens": 0
+                }
+            }
+        }))
+        .unwrap()
+            + "\n"
     }
 
     fn new_user_line(uuid: &str, parent_uuid: &str, timestamp: &str, content: &str) -> String {
-        format!(
-            "{{\"type\":\"user\",\"uuid\":\"{uuid}\",\"parentUuid\":\"{parent_uuid}\",\"isSidechain\":false,\
-            \"timestamp\":\"{timestamp}\",\
-            \"message\":{{\"role\":\"user\",\"content\":\"{content}\"}}}}\n"
-        )
+        serde_json::to_string(&json!({
+            "type": "user",
+            "uuid": uuid,
+            "parentUuid": parent_uuid,
+            "isSidechain": false,
+            "timestamp": timestamp,
+            "message": {"role": "user", "content": content}
+        }))
+        .unwrap()
+            + "\n"
     }
 
     fn new_assistant_line(
@@ -1657,14 +1685,28 @@ mod tests {
         input_tokens: i64,
         output_tokens: i64,
     ) -> String {
-        format!(
-            "{{\"type\":\"assistant\",\"uuid\":\"{uuid}\",\"parentUuid\":\"{parent_uuid}\",\"isSidechain\":false,\
-            \"timestamp\":\"{timestamp}\",\"requestId\":\"req-{uuid}\",\
-            \"message\":{{\"role\":\"assistant\",\"content\":[{{\"type\":\"text\",\"text\":\"reply\"}}],\
-            \"model\":\"claude-sonnet-4\",\"stop_reason\":\"end_turn\",\
-            \"usage\":{{\"input_tokens\":{input_tokens},\"output_tokens\":{output_tokens},\
-            \"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0}}}}}}\n"
-        )
+        serde_json::to_string(&json!({
+            "type": "assistant",
+            "uuid": uuid,
+            "parentUuid": parent_uuid,
+            "isSidechain": false,
+            "timestamp": timestamp,
+            "requestId": format!("req-{uuid}"),
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "reply"}],
+                "model": "claude-sonnet-4",
+                "stop_reason": "end_turn",
+                "usage": {
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                    "cache_read_input_tokens": 0,
+                    "cache_creation_input_tokens": 0
+                }
+            }
+        }))
+        .unwrap()
+            + "\n"
     }
 
     #[test]
