@@ -71,7 +71,10 @@ COPY src-tauri ./src-tauri
 COPY --from=frontend-builder /build/dist ./dist
 
 WORKDIR /build/src-tauri
-RUN cargo build --release --locked --bin claude-code-trace
+# Fat LTO (lto=true in Cargo.toml) loads all program bitcode at once and OOMs
+# in memory-constrained Docker builds. Thin LTO delivers most of the same
+# optimisation while keeping peak RSS under control.
+RUN CARGO_PROFILE_RELEASE_LTO=thin cargo build --release --locked --bin claude-code-trace
 
 # -----------------------------------------------------------------------------
 # Stage 3 — runtime image
