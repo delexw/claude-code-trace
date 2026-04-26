@@ -13,6 +13,8 @@
 
 Browse, tail, and search Claude Code session logs in real time. Reads `~/.claude/projects/` JSONL files and renders them as scrollable conversations with expandable tool calls, token counts, and live tailing. Runs as a **native desktop app** (macOS, Linux, Windows), **web app**, or **TUI** — built with Tauri v2 (Rust) + React.
 
+> Also check out [**Codex Trace**](https://github.com/PixelPaw-Labs/codex-trace) — a session viewer for OpenAI Codex.
+
 <p align="center">
   <img src="demo.gif" alt="Demo" />
 </p>
