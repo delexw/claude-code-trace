@@ -135,10 +135,12 @@ impl Entry {
 }
 
 /// Parse a single JSONL line into an Entry.
-/// Returns None if the JSON is invalid or the entry has no UUID.
+/// Returns None if the JSON is invalid, the entry has no UUID, or the entry
+/// has no type (guards against empty entries written by async PostToolUse
+/// hooks in Claude Code pre-v2.1.119).
 pub fn parse_entry(line: &[u8]) -> Option<Entry> {
     let e: Entry = serde_json::from_slice(line).ok()?;
-    if e.uuid.is_empty() && e.leaf_uuid.is_empty() {
+    if (e.uuid.is_empty() && e.leaf_uuid.is_empty()) || e.entry_type.is_empty() {
         return None;
     }
     Some(e)
@@ -303,6 +305,26 @@ mod tests {
             entry.forked_from.is_none(),
             "regular entry must not have forkedFrom"
         );
+    }
+
+    #[test]
+    fn parse_entry_with_uuid_but_empty_type_returns_none() {
+        // Async PostToolUse hooks in Claude Code pre-v2.1.119 could write entries
+        // that have a uuid but no type field.  These must be silently skipped.
+        let line = json!({
+            "uuid": "dead-beef-1234",
+            "timestamp": "2025-01-15T10:30:00Z",
+            "message": {"role": "user", "content": "hook output"}
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        assert!(parse_entry(&bytes).is_none());
+    }
+
+    #[test]
+    fn parse_entry_completely_empty_object_returns_none() {
+        // A completely empty JSONL entry {} has no uuid and no type — must be skipped.
+        let bytes = b"{}";
+        assert!(parse_entry(bytes).is_none());
     }
 
     #[test]
