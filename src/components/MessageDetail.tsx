@@ -142,11 +142,10 @@ export function MessageDetail({
         if (!entry.item.agent_id) return entry;
         const fresh = findItemByAgentId(msg.items, entry.item.agent_id);
         if (!fresh) return entry;
-        // Skip if nothing meaningful changed.
-        if (
-          fresh.subagent_ongoing === entry.item.subagent_ongoing &&
-          fresh.subagent_messages.length === entry.item.subagent_messages.length
-        ) {
+        // Session updates rebuild the message tree. Reuse the open panel only
+        // when it still points at the same item object; shallow counts miss
+        // appended tool calls inside existing subagent messages.
+        if (fresh === entry.item) {
           return entry;
         }
         changed = true;
