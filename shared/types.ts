@@ -1,7 +1,7 @@
 // Types matching the Rust backend serialization
 
 export interface DisplayMessage {
-  role: "user" | "claude" | "system" | "compact";
+  role: "user" | "claude" | "system" | "compact" | "recap";
   model: string;
   content: string;
   timestamp: string;

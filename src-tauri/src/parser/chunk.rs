@@ -88,7 +88,10 @@ pub enum ChunkType {
     User,
     AI,
     System,
+    /// Actual compaction event (isCompactSummary or legacy summary entry).
     Compact,
+    /// Session recap written on idle return (away_summary).
+    Recap,
 }
 
 /// Chunk is the output of the pipeline. Each chunk represents one visible unit.
@@ -215,7 +218,11 @@ pub fn build_chunks(msgs: &[ClassifiedMsg]) -> Vec<Chunk> {
             ClassifiedMsg::Compact(m) => {
                 flush(&mut ai_buf, &mut chunks);
                 chunks.push(Chunk {
-                    chunk_type: ChunkType::Compact,
+                    chunk_type: if m.is_recap {
+                        ChunkType::Recap
+                    } else {
+                        ChunkType::Compact
+                    },
                     timestamp: m.timestamp,
                     output: m.text.clone(),
                     ..Default::default()

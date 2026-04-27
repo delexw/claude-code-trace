@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo } from "react";
 import { useScrollToSelected } from "../hooks/useScrollToSelected";
 import { useAutoScroll } from "../hooks/useAutoScroll";
 import { useRegisterViewActions, type ViewActionsRef } from "../hooks/useViewActions";
@@ -59,10 +59,6 @@ export function MessageList({
       {messages.length === 0 && <div className="message-list__empty">No messages loaded</div>}
       {ordered.map((i) => {
         const msg = messages[i];
-        if (msg.role === "compact") {
-          return <CompactSeparator key={i} content={msg.content} />;
-        }
-
         const isSelected = i === selectedIndex;
         const isLast = i === messages.length - 1;
 
@@ -80,22 +76,6 @@ export function MessageList({
           />
         );
       })}
-    </div>
-  );
-}
-
-export function CompactSeparator({ content }: { content: string }) {
-  const [expanded, setExpanded] = useState(false);
-  return (
-    <div className="compact-separator">
-      <div className="compact-separator__line">
-        <span className="compact-separator__rule" />
-        <button className="compact-separator__label" onClick={() => setExpanded((v) => !v)}>
-          Context compacted{content ? (expanded ? " ▲" : " ▼") : ""}
-        </button>
-        <span className="compact-separator__rule" />
-      </div>
-      {expanded && content && <div className="compact-separator__summary">{content}</div>}
     </div>
   );
 }

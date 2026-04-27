@@ -426,9 +426,13 @@ fn chunks_to_messages_inner(
                     subagent_label: String::new(),
                 });
             }
-            ChunkType::Compact => {
+            ChunkType::Compact | ChunkType::Recap => {
                 msgs.push(DisplayMessage {
-                    role: "compact".to_string(),
+                    role: if c.chunk_type == ChunkType::Recap {
+                        "recap".to_string()
+                    } else {
+                        "compact".to_string()
+                    },
                     model: String::new(),
                     content: c.output.clone(),
                     timestamp: format_time(&c.timestamp),

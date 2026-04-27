@@ -96,6 +96,8 @@ pub struct TeammateMsg {
 pub struct CompactMsg {
     pub timestamp: DateTime<Utc>,
     pub text: String,
+    /// True for away_summary (session recap); false for actual compaction events.
+    pub is_recap: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -200,6 +202,7 @@ pub fn classify(e: Entry) -> Option<ClassifiedMsg> {
                 return Some(ClassifiedMsg::Compact(CompactMsg {
                     timestamp: ts,
                     text: e.content.clone(),
+                    is_recap: true,
                 }));
             }
             // stop_hook_summary: written every time Stop hooks run (success or failure).
@@ -304,6 +307,7 @@ pub fn classify(e: Entry) -> Option<ClassifiedMsg> {
         return Some(ClassifiedMsg::Compact(CompactMsg {
             timestamp: ts,
             text: e.summary.clone(),
+            is_recap: false,
         }));
     }
 
@@ -414,6 +418,7 @@ pub fn classify(e: Entry) -> Option<ClassifiedMsg> {
         return Some(ClassifiedMsg::Compact(CompactMsg {
             timestamp: ts,
             text: sanitize_content(&content_str),
+            is_recap: false,
         }));
     }
 
@@ -1506,6 +1511,7 @@ mod tests {
         match classify(e) {
             Some(ClassifiedMsg::Compact(c)) => {
                 assert_eq!(c.text, "Working on a bug fix in entry.rs.");
+                assert!(c.is_recap, "away_summary must produce is_recap=true");
             }
             other => panic!("Expected Compact for away_summary, got {:?}", other),
         }
@@ -1525,6 +1531,7 @@ mod tests {
         match classify(e) {
             Some(ClassifiedMsg::Compact(c)) => {
                 assert_eq!(c.text, "");
+                assert!(c.is_recap, "away_summary must produce is_recap=true");
             }
             other => panic!("Expected Compact for empty away_summary, got {:?}", other),
         }
@@ -1777,6 +1784,7 @@ mod tests {
                     c.text.contains("This session is being continued"),
                     "compact summary text must be preserved"
                 );
+                assert!(!c.is_recap, "isCompactSummary must produce is_recap=false");
             }
             other => panic!(
                 "Expected Compact for isCompactSummary user entry, got {:?}",

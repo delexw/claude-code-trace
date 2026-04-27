@@ -65,22 +65,20 @@ describe("MessageList", () => {
     expect(messageEls[1]).toHaveTextContent(/Second message/);
   });
 
-  it("shows compact separator for compact role", () => {
-    const messages = [makeMessage({ role: "compact", content: "--- separator ---" })];
+  it("renders compact role as a message item with 'Compacted Message' label", () => {
+    const messages = [makeMessage({ role: "compact", content: "--- summary ---" })];
     const { container } = render(<MessageList {...defaultProps({ messages })} />);
-    expect(container.querySelector(".compact-separator")).toBeInTheDocument();
-    // Label always shows "Context compacted" with expand arrow when content is present.
-    expect(screen.getByText("Context compacted ▼")).toBeInTheDocument();
+    expect(container.querySelector(".message")).toBeInTheDocument();
+    expect(screen.getByText("Compacted Message")).toBeInTheDocument();
+    expect(screen.getByText("--- summary ---")).toBeInTheDocument();
   });
 
-  it("expands compact separator to show content on click", () => {
-    const messages = [makeMessage({ role: "compact", content: "--- separator ---" })];
-    render(<MessageList {...defaultProps({ messages })} />);
-    // Summary hidden initially.
-    expect(screen.queryByText("--- separator ---")).not.toBeInTheDocument();
-    // Click to expand.
-    fireEvent.click(screen.getByText("Context compacted ▼"));
-    expect(screen.getByText("--- separator ---")).toBeInTheDocument();
+  it("renders recap role as a message item with 'Session Recap' label", () => {
+    const messages = [makeMessage({ role: "recap", content: "recap text" })];
+    const { container } = render(<MessageList {...defaultProps({ messages })} />);
+    expect(container.querySelector(".message")).toBeInTheDocument();
+    expect(screen.getByText("Session Recap")).toBeInTheDocument();
+    expect(screen.getByText("recap text")).toBeInTheDocument();
   });
 
   it("shows correct role labels for user, claude, system", () => {

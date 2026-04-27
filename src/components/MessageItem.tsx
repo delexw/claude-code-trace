@@ -17,6 +17,28 @@ interface MessageItemProps {
   ref?: React.Ref<HTMLDivElement>;
 }
 
+function roleClass(msg: DisplayMessage): string {
+  if (msg.role === "user") return "message--user";
+  if (msg.role === "claude") return "message--claude";
+  if (msg.role === "compact" || msg.role === "recap") return "message--compact";
+  return msg.is_error ? "message--system-error" : "message--system";
+}
+
+function roleLabel(msg: DisplayMessage): string {
+  if (msg.role === "user") return "User";
+  if (msg.role === "claude") return "Claude";
+  if (msg.role === "compact") return "Compacted Message";
+  if (msg.role === "recap") return "Session Recap";
+  return "System";
+}
+
+function roleCssModifier(msg: DisplayMessage): string {
+  if (msg.role === "user") return "user";
+  if (msg.role === "claude") return "claude";
+  if (msg.role === "compact" || msg.role === "recap") return "compact";
+  return "system";
+}
+
 export function MessageItem({
   ref,
   message: msg,
@@ -27,15 +49,7 @@ export function MessageItem({
   onOpenDetail,
   isOngoing,
 }: MessageItemProps) {
-  const roleClass =
-    msg.role === "user"
-      ? "message--user"
-      : msg.role === "claude"
-        ? "message--claude"
-        : msg.is_error
-          ? "message--system-error"
-          : "message--system";
-
+  const rc = roleClass(msg);
   const model = msg.model ? shortModel(msg.model) : "";
   const modelColor = msg.model ? getModelColor(msg.model) : undefined;
   const time = formatExactTime(msg.timestamp);
@@ -45,7 +59,7 @@ export function MessageItem({
   return (
     <div
       ref={ref}
-      className={`message ${roleClass}${isSelected ? " message--selected" : ""}`}
+      className={`message ${rc}${isSelected ? " message--selected" : ""}`}
       onClick={() => onClick(index)}
       onDoubleClick={() => onOpenDetail(index)}
     >
@@ -61,10 +75,8 @@ export function MessageItem({
             <SystemIcon />
           )}
         </span>
-        <span
-          className={`message__role message__role--${msg.role === "claude" ? "claude" : msg.role === "user" ? "user" : "system"}`}
-        >
-          {msg.role === "user" ? "User" : msg.role === "claude" ? "Claude" : "System"}
+        <span className={`message__role message__role--${roleCssModifier(msg)}`}>
+          {roleLabel(msg)}
         </span>
         {model && (
           <span className="message__model" style={{ color: modelColor }}>
