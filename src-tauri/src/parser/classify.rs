@@ -407,6 +407,16 @@ pub fn classify(e: Entry) -> Option<ClassifiedMsg> {
         }
     }
 
+    // Compact summary: user entries with isCompactSummary:true are injected by Claude Code
+    // after a compaction event and contain an AI-generated summary of the compacted messages.
+    // Classify as CompactMsg so they render as a styled separator rather than a user turn.
+    if e.entry_type == "user" && e.is_compact_summary {
+        return Some(ClassifiedMsg::Compact(CompactMsg {
+            timestamp: ts,
+            text: sanitize_content(&content_str),
+        }));
+    }
+
     // User message.
     if e.entry_type == "user" && !e.is_meta {
         let trimmed = content_str.trim();
@@ -1737,6 +1747,53 @@ mod tests {
         match classify(e) {
             Some(ClassifiedMsg::User(_)) => {}
             other => panic!("Expected UserMsg for document block, got {:?}", other),
+        }
+    }
+
+    // --- compact_boundary / isCompactSummary classification ---
+
+    #[test]
+    fn classify_compact_summary_user_entry_as_compact_msg() {
+        // User entries with isCompactSummary:true are injected by Claude Code after compaction.
+        // They must be classified as CompactMsg so they render as a styled separator, not as
+        // a regular user turn that would confusingly appear alongside the pre-compact messages.
+        let e = Entry {
+            entry_type: "user".to_string(),
+            uuid: "compact-summary-uuid".to_string(),
+            timestamp: "2026-04-26T12:21:02Z".to_string(),
+            is_compact_summary: true,
+            message: super::super::entry::EntryMessage {
+                role: "user".to_string(),
+                content: Some(json!(
+                    "This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.\n\nSummary:\n1. Primary Request: ..."
+                )),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::Compact(c)) => {
+                assert!(
+                    c.text.contains("This session is being continued"),
+                    "compact summary text must be preserved"
+                );
+            }
+            other => panic!(
+                "Expected Compact for isCompactSummary user entry, got {:?}",
+                other
+            ),
+        }
+    }
+
+    #[test]
+    fn classify_regular_user_entry_not_affected_by_compact_summary_flag() {
+        // Regular user entries (isCompactSummary defaults to false) must still produce UserMsg.
+        let e = make_entry("user", Some(json!("Hello Claude")));
+        match classify(e) {
+            Some(ClassifiedMsg::User(u)) => {
+                assert!(u.text.contains("Hello Claude"));
+            }
+            other => panic!("Expected User, got {:?}", other),
         }
     }
 }

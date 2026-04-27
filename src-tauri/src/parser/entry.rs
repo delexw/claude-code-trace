@@ -76,6 +76,20 @@ pub struct Entry {
     // `content`, not inside `message.content`.
     #[serde(default)]
     pub content: String,
+    // Present in type:"system", subtype:"compact_boundary" entries. Claude Code writes this to
+    // mark where a compaction occurred. parentUuid is null (breaks the chain), but
+    // logicalParentUuid points to the last message before compaction so we can follow the
+    // chain back and include pre-compaction messages in the conversation view.
+    #[serde(
+        default,
+        rename = "logicalParentUuid",
+        deserialize_with = "null_as_default"
+    )]
+    pub logical_parent_uuid: String,
+    // Present in type:"user" entries when Claude Code wrote the AI-generated summary of a
+    // compacted conversation. We classify these as CompactMsg instead of regular user messages.
+    #[serde(default, rename = "isCompactSummary")]
+    pub is_compact_summary: bool,
     // Present in forked session entries (pre-v2.1.118). When /fork branched a conversation,
     // each duplicated parent entry carried forkedFrom:{sessionId,messageUuid} to identify
     // its origin. Entries without this field are newly added in the fork itself.
@@ -378,5 +392,63 @@ mod tests {
             parse_entry(&bytes).is_none(),
             "fork-context-ref with no uuid must return None"
         );
+    }
+
+    // --- compact_boundary and isCompactSummary fields ---
+
+    #[test]
+    fn parse_entry_captures_logical_parent_uuid_for_compact_boundary() {
+        // compact_boundary entries have parentUuid:null but logicalParentUuid pointing to the
+        // last pre-compaction message so the live chain can follow back to that message.
+        let line = json!({
+            "type": "system",
+            "subtype": "compact_boundary",
+            "uuid": "boundary-uuid-001",
+            "parentUuid": null,
+            "logicalParentUuid": "last-pre-compact-uuid",
+            "timestamp": "2026-04-26T12:21:02Z",
+            "isMeta": false
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("must parse compact_boundary entry");
+        assert_eq!(entry.entry_type, "system");
+        assert_eq!(entry.subtype, "compact_boundary");
+        assert_eq!(entry.parent_uuid, "");
+        assert_eq!(entry.logical_parent_uuid, "last-pre-compact-uuid");
+    }
+
+    #[test]
+    fn parse_entry_captures_is_compact_summary_flag() {
+        // Compact summary user entries have isCompactSummary:true so classify() can
+        // render them as a CompactMsg separator instead of a regular user message.
+        let line = json!({
+            "type": "user",
+            "uuid": "compact-summary-uuid-001",
+            "parentUuid": "boundary-uuid-001",
+            "isCompactSummary": true,
+            "timestamp": "2026-04-26T12:21:02Z",
+            "message": {"role": "user", "content": "This session is being continued..."}
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("must parse compact summary entry");
+        assert!(entry.is_compact_summary, "isCompactSummary must be true");
+    }
+
+    #[test]
+    fn parse_entry_logical_parent_uuid_defaults_to_empty() {
+        // Regular entries without logicalParentUuid must have an empty string.
+        let line = json!({
+            "type": "user",
+            "uuid": "regular-uuid",
+            "timestamp": "2026-04-26T10:00:00Z",
+            "message": {"role": "user", "content": "Hello"}
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("must parse regular entry");
+        assert_eq!(
+            entry.logical_parent_uuid, "",
+            "regular entry must have empty logical_parent_uuid"
+        );
+        assert!(!entry.is_compact_summary);
     }
 }

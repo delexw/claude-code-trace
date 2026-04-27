@@ -135,6 +135,8 @@ fn resolve_live_chain_uuids(entries: &[Entry]) -> HashSet<String> {
     }
 
     // Step 3: walk backward from live_tip via parentUuid links.
+    // When parentUuid is empty but logicalParentUuid is set (compact_boundary entries),
+    // follow logicalParentUuid instead so that pre-compaction messages are included.
     let mut live_set: HashSet<String> = HashSet::new();
     let mut current = live_tip;
     loop {
@@ -143,12 +145,10 @@ fn resolve_live_chain_uuids(entries: &[Entry]) -> HashSet<String> {
         }
         live_set.insert(current.clone());
         let parent = match uuid_idx.get(&current).and_then(|&i| entries.get(i)) {
-            Some(e) => e.parent_uuid.clone(),
-            None => break,
+            Some(e) if !e.parent_uuid.is_empty() => e.parent_uuid.clone(),
+            Some(e) if !e.logical_parent_uuid.is_empty() => e.logical_parent_uuid.clone(),
+            _ => break,
         };
-        if parent.is_empty() {
-            break;
-        }
         current = parent;
     }
 
@@ -1525,6 +1525,109 @@ mod tests {
         let set = resolve_live_chain_uuids(&entries);
         // Both are referenced as parents, so neither is a leaf → no live tip → empty set.
         assert!(set.is_empty());
+    }
+
+    // --- compact_boundary / logicalParentUuid chain extension ---
+
+    fn make_compact_boundary(uuid: &str, logical_parent_uuid: &str) -> Entry {
+        Entry {
+            uuid: uuid.to_string(),
+            parent_uuid: String::new(), // null → empty
+            logical_parent_uuid: logical_parent_uuid.to_string(),
+            entry_type: "system".to_string(),
+            subtype: "compact_boundary".to_string(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn live_chain_follows_logical_parent_uuid_through_compact_boundary() {
+        // Pre-compact: A → B → C (C is the last pre-compact message)
+        // compact_boundary: D (parentUuid=null, logicalParentUuid=C)
+        // Post-compact: D → E → F (F is the live leaf)
+        let entries = vec![
+            make_entry("A", "", "", false),
+            make_entry("B", "A", "", false),
+            make_entry("C", "B", "", false),
+            make_compact_boundary("D", "C"),
+            make_entry("E", "D", "", false),
+            make_entry("F", "E", "", false), // live leaf
+        ];
+        let set = resolve_live_chain_uuids(&entries);
+
+        // Post-compact chain must be present.
+        assert!(set.contains("F"), "live leaf must be in live set");
+        assert!(set.contains("E"), "post-compact entry must be in live set");
+        assert!(set.contains("D"), "compact_boundary must be in live set");
+
+        // Pre-compact chain must also be present (followed via logicalParentUuid).
+        assert!(
+            set.contains("C"),
+            "last pre-compact entry must be in live set"
+        );
+        assert!(
+            set.contains("B"),
+            "mid pre-compact entry must be in live set"
+        );
+        assert!(
+            set.contains("A"),
+            "first pre-compact entry must be in live set"
+        );
+        assert_eq!(set.len(), 6);
+    }
+
+    #[test]
+    fn live_chain_multiple_compactions_includes_all_pre_compact_messages() {
+        // Two compactions: first compacts A→B→C, second compacts post-compact messages.
+        // Pre-compact1: A → B → C
+        // compact_boundary1: D (logicalParentUuid=C)
+        // Post-compact1 / pre-compact2: D → E → F
+        // compact_boundary2: G (logicalParentUuid=F)
+        // Post-compact2: G → H → I (I is the live leaf)
+        let entries = vec![
+            make_entry("A", "", "", false),
+            make_entry("B", "A", "", false),
+            make_entry("C", "B", "", false),
+            make_compact_boundary("D", "C"),
+            make_entry("E", "D", "", false),
+            make_entry("F", "E", "", false),
+            make_compact_boundary("G", "F"),
+            make_entry("H", "G", "", false),
+            make_entry("I", "H", "", false), // live leaf
+        ];
+        let set = resolve_live_chain_uuids(&entries);
+        assert_eq!(
+            set.len(),
+            9,
+            "all entries across both compactions must be in live set"
+        );
+        for id in &["A", "B", "C", "D", "E", "F", "G", "H", "I"] {
+            assert!(set.contains(*id), "{id} must be in live set");
+        }
+    }
+
+    #[test]
+    fn live_chain_compact_boundary_with_dead_end_branch_excluded() {
+        // Main chain: A → B → compact_boundary(C, logicalParent=B) → D → E (live)
+        // Dead-end branch: B → X (dead-end)
+        let entries = vec![
+            make_entry("A", "", "", false),
+            make_entry("B", "A", "", false),
+            make_entry("X", "B", "", false), // dead-end branch
+            make_compact_boundary("C", "B"),
+            make_entry("D", "C", "", false),
+            make_entry("E", "D", "", false), // live leaf
+        ];
+        let set = resolve_live_chain_uuids(&entries);
+        assert!(set.contains("E"), "live leaf must be in live set");
+        assert!(set.contains("D"));
+        assert!(set.contains("C"), "compact_boundary must be in live set");
+        assert!(
+            set.contains("B"),
+            "pre-compact entry must be in live set via logicalParentUuid"
+        );
+        assert!(set.contains("A"), "root must be in live set");
+        assert!(!set.contains("X"), "dead-end branch must be excluded");
     }
 
     #[test]
