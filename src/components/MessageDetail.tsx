@@ -13,6 +13,7 @@ import {
 } from "../lib/format";
 import { getModelColor, getTeamColor } from "../lib/theme";
 import { MessageItem } from "./MessageItem";
+import { CompactSeparator } from "./MessageList";
 import { DetailItem } from "./DetailItem";
 import { useToggleSet } from "../hooks/useToggleSet";
 import { useScrollToSelected } from "../hooks/useScrollToSelected";
@@ -606,15 +607,7 @@ function AgentListColumn({
         <div className="agent-panel__list" ref={listRef}>
           {messages.map((msg, i) => {
             if (msg.role === "compact") {
-              return (
-                <div key={`compact-${msg.timestamp}`} className="compact-separator">
-                  <div className="compact-separator__line">
-                    <span className="compact-separator__rule" />
-                    <span>{msg.content}</span>
-                    <span className="compact-separator__rule" />
-                  </div>
-                </div>
-              );
+              return <CompactSeparator key={`compact-${msg.timestamp}`} content={msg.content} />;
             }
             const isSelected = i === selectedMsg;
             const isExpanded = expandedSet.has(i);

@@ -67,10 +67,20 @@ describe("MessageList", () => {
 
   it("shows compact separator for compact role", () => {
     const messages = [makeMessage({ role: "compact", content: "--- separator ---" })];
-    render(<MessageList {...defaultProps({ messages })} />);
-    expect(screen.getByText("--- separator ---")).toBeInTheDocument();
     const { container } = render(<MessageList {...defaultProps({ messages })} />);
     expect(container.querySelector(".compact-separator")).toBeInTheDocument();
+    // Label always shows "Context compacted" with expand arrow when content is present.
+    expect(screen.getByText("Context compacted ▼")).toBeInTheDocument();
+  });
+
+  it("expands compact separator to show content on click", () => {
+    const messages = [makeMessage({ role: "compact", content: "--- separator ---" })];
+    render(<MessageList {...defaultProps({ messages })} />);
+    // Summary hidden initially.
+    expect(screen.queryByText("--- separator ---")).not.toBeInTheDocument();
+    // Click to expand.
+    fireEvent.click(screen.getByText("Context compacted ▼"));
+    expect(screen.getByText("--- separator ---")).toBeInTheDocument();
   });
 
   it("shows correct role labels for user, claude, system", () => {

@@ -1284,6 +1284,34 @@ body {
   background: var(--border);
 }
 
+.compact-separator__label {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 11px;
+  padding: 0;
+  white-space: nowrap;
+}
+
+.compact-separator__label:hover {
+  color: var(--text-secondary);
+}
+
+.compact-separator__summary {
+  margin: 6px 0 2px;
+  padding: 10px 12px;
+  background: var(--bg-secondary);
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  text-align: left;
+  max-height: 300px;
+  overflow-y: auto;
+  line-height: 1.5;
+}
+
 /* ---- Message Detail ---- */
 
 .message-detail {
