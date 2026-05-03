@@ -789,8 +789,11 @@ pub(crate) fn scan_session_metadata(path: &str) -> SessionMetadata {
     } else {
         meta.is_ongoing = has_activity_after_last_ending;
     }
-    // Pending tool calls override.
-    if !meta.is_ongoing && !pending_tool_ids.is_empty() {
+    // Pending tool calls override — only when no text/ending response was seen after them.
+    // If last_ending_index is set, remaining pending IDs appeared before the ending marker;
+    // they are orphaned (e.g. from rewound timelines in pre-v2.1.122 /branch fork sessions)
+    // rather than genuinely awaiting results, so we must not treat them as ongoing.
+    if !meta.is_ongoing && !pending_tool_ids.is_empty() && last_ending_index.is_none() {
         meta.is_ongoing = true;
     }
 
@@ -1986,6 +1989,96 @@ mod tests {
         assert_eq!(
             ai_count, 2,
             "both inherited and new AI messages must appear"
+        );
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    // --- Issue #67: orphaned tool_use blocks from pre-v2.1.122 /branch fork sessions ---
+
+    #[test]
+    fn orphaned_tool_use_before_end_turn_does_not_mark_session_ongoing() {
+        // Pre-v2.1.122 /branch forks may contain tool_use blocks from rewound timelines
+        // with no matching tool_result in any subsequent user message. If the fork's own
+        // conversation ends normally (text response), the session must NOT be marked ongoing.
+        let tmp = env::temp_dir().join("tail-test-orphan-tool-use-ongoing");
+        std::fs::create_dir_all(&tmp).unwrap();
+        let path = tmp.join("session.jsonl");
+
+        // Orphaned assistant entry: tool_use block with no subsequent tool_result.
+        let orphan_a = "{\"type\":\"assistant\",\"uuid\":\"a1\",\"parentUuid\":\"u1\",\"timestamp\":\"2026-05-01T10:00:00Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"toolu_orphan\",\"name\":\"Bash\",\"input\":{\"command\":\"ls\"}}],\"model\":\"claude-sonnet-4-20250514\",\"stop_reason\":\"tool_use\",\"usage\":{\"input_tokens\":50,\"output_tokens\":20,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0}}}\n";
+        // Fork's own user message (no tool_result for toolu_orphan).
+        let new_u = "{\"type\":\"user\",\"uuid\":\"u2\",\"parentUuid\":\"a1\",\"timestamp\":\"2026-05-01T10:00:01Z\",\"message\":{\"role\":\"user\",\"content\":\"What else can you do?\"}}\n";
+        // Fork's own assistant response — ends the conversation with a text block.
+        let new_a = "{\"type\":\"assistant\",\"uuid\":\"a2\",\"parentUuid\":\"u2\",\"timestamp\":\"2026-05-01T10:00:02Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"I can help with many things.\"}],\"model\":\"claude-sonnet-4-20250514\",\"stop_reason\":\"end_turn\",\"usage\":{\"input_tokens\":100,\"output_tokens\":30,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0}}}\n";
+
+        std::fs::write(&path, format!("{orphan_a}{new_u}{new_a}")).unwrap();
+
+        let meta = scan_session_metadata(path.to_str().unwrap());
+        assert!(
+            !meta.is_ongoing,
+            "session with orphaned tool_use before end_turn must not be marked ongoing"
+        );
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn genuine_pending_tool_use_at_session_end_marks_session_ongoing() {
+        // A session that genuinely ends mid-tool-call (Claude invoked a tool but the result
+        // has not yet been written to the JSONL) must still be marked as ongoing.
+        let tmp = env::temp_dir().join("tail-test-genuine-pending-tool-use");
+        std::fs::create_dir_all(&tmp).unwrap();
+        let path = tmp.join("session.jsonl");
+
+        let asst = "{\"type\":\"assistant\",\"uuid\":\"a1\",\"parentUuid\":\"u1\",\"timestamp\":\"2026-05-01T10:00:00Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"toolu_genuine\",\"name\":\"Bash\",\"input\":{\"command\":\"ls\"}}],\"model\":\"claude-sonnet-4-20250514\",\"stop_reason\":\"tool_use\",\"usage\":{\"input_tokens\":50,\"output_tokens\":20,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0}}}\n";
+        // No subsequent user message — session ends with the pending tool call.
+
+        std::fs::write(&path, asst).unwrap();
+
+        let meta = scan_session_metadata(path.to_str().unwrap());
+        assert!(
+            meta.is_ongoing,
+            "session genuinely ending with pending tool_use must be marked ongoing"
+        );
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn orphaned_tool_use_in_conversation_is_rendered_as_deferred() {
+        // When an orphaned tool_use block (no matching tool_result) lands on the live chain,
+        // build_chunks must mark the corresponding DisplayItem as is_deferred=true so the UI
+        // can render it as a suspended/incomplete tool call rather than omitting it entirely.
+        let tmp = env::temp_dir().join("tail-test-orphan-tool-use-deferred");
+        std::fs::create_dir_all(&tmp).unwrap();
+        let path = tmp.join("session.jsonl");
+
+        let orphan_a = "{\"type\":\"assistant\",\"uuid\":\"a1\",\"parentUuid\":null,\"timestamp\":\"2026-05-01T10:00:00Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"toolu_orphan\",\"name\":\"Bash\",\"input\":{\"command\":\"ls\"}}],\"model\":\"claude-sonnet-4-20250514\",\"stop_reason\":\"tool_use\",\"usage\":{\"input_tokens\":50,\"output_tokens\":20,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0}}}\n";
+        let new_u = "{\"type\":\"user\",\"uuid\":\"u2\",\"parentUuid\":\"a1\",\"timestamp\":\"2026-05-01T10:00:01Z\",\"message\":{\"role\":\"user\",\"content\":\"What else can you do?\"}}\n";
+        let new_a = "{\"type\":\"assistant\",\"uuid\":\"a2\",\"parentUuid\":\"u2\",\"timestamp\":\"2026-05-01T10:00:02Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"I can help.\"}],\"model\":\"claude-sonnet-4-20250514\",\"stop_reason\":\"end_turn\",\"usage\":{\"input_tokens\":100,\"output_tokens\":10,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0}}}\n";
+
+        std::fs::write(&path, format!("{orphan_a}{new_u}{new_a}")).unwrap();
+
+        let chunks = read_session(path.to_str().unwrap()).expect("read_session must succeed");
+        let ai_chunk = chunks
+            .iter()
+            .find(|c| matches!(c.chunk_type, crate::parser::chunk::ChunkType::AI))
+            .expect("must have at least one AI chunk");
+
+        let orphan_item = ai_chunk
+            .items
+            .iter()
+            .find(|it| it.tool_name == "Bash")
+            .expect("orphaned Bash tool_use must appear in AI chunk items");
+
+        assert!(
+            orphan_item.is_deferred,
+            "orphaned tool_use with no tool_result must be marked is_deferred=true"
+        );
+        assert!(
+            orphan_item.tool_result.is_empty(),
+            "orphaned tool_use must have empty tool_result"
         );
 
         std::fs::remove_dir_all(&tmp).ok();

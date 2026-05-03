@@ -6,8 +6,8 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { platform } from "node:os";
 
-const currentDir = dirname(fileURLToPath(import.meta.url));
-const root = resolve(currentDir, "..");
+const binDir = dirname(fileURLToPath(import.meta.url));
+const root = resolve(binDir, "..");
 
 const args = process.argv.slice(2);
 const mode = args.find((a) => ["--app", "--web", "--tui"].includes(a)) ?? "--app";
