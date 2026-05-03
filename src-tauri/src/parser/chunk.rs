@@ -137,18 +137,24 @@ pub fn build_chunks(msgs: &[ClassifiedMsg]) -> Vec<Chunk> {
     let mut chunks = Vec::new();
     let mut ai_buf: Vec<AIMsg> = Vec::new();
 
-    let flush = |buf: &mut Vec<AIMsg>, chunks: &mut Vec<Chunk>| {
+    // orphan_pending: when true, any tool_use blocks in the buffer that never received a
+    // tool_result are marked is_orphan (conversation continued past them — pre-v2.1.122
+    // /branch fork sessions can leave these from rewound timelines). When false, they are
+    // marked is_deferred (session was suspended mid-tool via a "defer" permission decision).
+    let flush = |buf: &mut Vec<AIMsg>, chunks: &mut Vec<Chunk>, orphan_pending: bool| {
         if buf.is_empty() {
             return;
         }
-        chunks.push(merge_ai_buffer(buf));
+        chunks.push(merge_ai_buffer(buf, orphan_pending));
         buf.clear();
     };
 
     for msg in msgs {
         match msg {
             ClassifiedMsg::User(m) => {
-                flush(&mut ai_buf, &mut chunks);
+                // A user message means the conversation continued: any still-pending
+                // tool_use blocks in the AI buffer are orphans, not deferred sessions.
+                flush(&mut ai_buf, &mut chunks, true);
                 chunks.push(Chunk {
                     chunk_type: ChunkType::User,
                     timestamp: m.timestamp,
@@ -157,7 +163,7 @@ pub fn build_chunks(msgs: &[ClassifiedMsg]) -> Vec<Chunk> {
                 });
             }
             ClassifiedMsg::System(m) => {
-                flush(&mut ai_buf, &mut chunks);
+                flush(&mut ai_buf, &mut chunks, false);
                 chunks.push(Chunk {
                     chunk_type: ChunkType::System,
                     timestamp: m.timestamp,
@@ -216,7 +222,7 @@ pub fn build_chunks(msgs: &[ClassifiedMsg]) -> Vec<Chunk> {
                 });
             }
             ClassifiedMsg::Compact(m) => {
-                flush(&mut ai_buf, &mut chunks);
+                flush(&mut ai_buf, &mut chunks, false);
                 chunks.push(Chunk {
                     chunk_type: if m.is_recap {
                         ChunkType::Recap
@@ -230,7 +236,7 @@ pub fn build_chunks(msgs: &[ClassifiedMsg]) -> Vec<Chunk> {
             }
         }
     }
-    flush(&mut ai_buf, &mut chunks);
+    flush(&mut ai_buf, &mut chunks, false);
     chunks
 }
 
@@ -239,7 +245,7 @@ struct PendingTool {
     timestamp: DateTime<Utc>,
 }
 
-fn merge_ai_buffer(buf: &[AIMsg]) -> Chunk {
+fn merge_ai_buffer(buf: &[AIMsg], orphan_pending: bool) -> Chunk {
     let mut texts: Vec<String> = Vec::new();
     let mut thinking = 0usize;
     let mut tool_calls: Vec<ToolCall> = Vec::new();
@@ -373,10 +379,17 @@ fn merge_ai_buffer(buf: &[AIMsg]) -> Chunk {
         }
     }
 
-    // Any tool_use blocks still in pending have no matching tool_result — the session was
-    // suspended via a "defer" PreToolUse permission decision before the tool ran.
+    // Any tool_use blocks still in pending have no matching tool_result.
     for p in pending.values() {
-        items[p.index].is_deferred = true;
+        if orphan_pending {
+            // The conversation continued past this turn without supplying a tool_result —
+            // the tool_use is an orphan from a rewound timeline (pre-v2.1.122 /branch bug).
+            // Mark is_orphan so the activity log skips it and the session is not shown as ongoing.
+            items[p.index].is_orphan = true;
+        } else {
+            // Session ended with this tool_use still pending — "defer" suspension.
+            items[p.index].is_deferred = true;
+        }
     }
 
     let first = buf.first().map(|m| m.timestamp).unwrap_or_else(Utc::now);
@@ -481,7 +494,7 @@ pub fn is_team_task(item: &DisplayItem) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parser::classify::{AIMsg, ClassifiedMsg, ContentBlock, Usage};
+    use crate::parser::classify::{AIMsg, ClassifiedMsg, ContentBlock, SystemMsg, Usage, UserMsg};
     use chrono::Utc;
 
     fn make_ai_msg(blocks: Vec<ContentBlock>, is_meta: bool) -> AIMsg {
@@ -616,6 +629,97 @@ mod tests {
         assert!(
             items[0].is_deferred,
             "dangling Task tool_use should be marked deferred"
+        );
+    }
+
+    // --- Issue #67: pre-v2.1.122 /branch fork sessions with rewound-timeline orphans ---
+
+    #[test]
+    fn tool_use_without_result_before_user_message_is_marked_orphan() {
+        // Pre-v2.1.122 /branch fork sessions can contain tool_use blocks from rewound
+        // timelines with no corresponding tool_result anywhere in the file. When a user
+        // message follows (the conversation continued), the pending tool_use is an orphan —
+        // it must be marked is_orphan, not is_deferred, so the session is not shown as ongoing.
+        let tool_id = "toolu_orphan_001";
+        let msgs = vec![
+            ClassifiedMsg::AI(make_ai_msg(vec![tool_use_block(tool_id, "Bash")], false)),
+            ClassifiedMsg::User(UserMsg {
+                timestamp: Utc::now(),
+                text: "hello".to_string(),
+                permission_mode: String::new(),
+            }),
+            ClassifiedMsg::AI(make_ai_msg(
+                vec![ContentBlock {
+                    block_type: "text".to_string(),
+                    text: "hi".to_string(),
+                    ..Default::default()
+                }],
+                false,
+            )),
+        ];
+        let chunks = build_chunks(&msgs);
+        assert_eq!(chunks.len(), 3, "expected AI, User, AI chunks");
+        let ai_chunk = &chunks[0];
+        assert_eq!(ai_chunk.items.len(), 1);
+        assert_eq!(ai_chunk.items[0].item_type, DisplayItemType::ToolCall);
+        assert!(
+            ai_chunk.items[0].is_orphan,
+            "tool_use without result before user message must be is_orphan"
+        );
+        assert!(
+            !ai_chunk.items[0].is_deferred,
+            "orphaned tool_use must not be is_deferred"
+        );
+    }
+
+    #[test]
+    fn orphaned_tool_use_does_not_make_session_appear_ongoing() {
+        // End-to-end: build_chunks + is_chunks_ongoing must return false when the only
+        // unmatched tool_use is an orphan that precedes a User message.
+        use crate::parser::ongoing::OngoingChecker;
+
+        let tool_id = "toolu_orphan_002";
+        let msgs = vec![
+            ClassifiedMsg::AI(make_ai_msg(vec![tool_use_block(tool_id, "Read")], false)),
+            ClassifiedMsg::User(UserMsg {
+                timestamp: Utc::now(),
+                text: "what now?".to_string(),
+                permission_mode: String::new(),
+            }),
+            ClassifiedMsg::AI(make_ai_msg(
+                vec![ContentBlock {
+                    block_type: "text".to_string(),
+                    text: "Here you go".to_string(),
+                    ..Default::default()
+                }],
+                false,
+            )),
+        ];
+        let chunks = build_chunks(&msgs);
+        assert!(
+            !OngoingChecker::is_chunks_ongoing(&chunks),
+            "session with orphaned tool_use before user message must not appear ongoing"
+        );
+    }
+
+    #[test]
+    fn tool_use_without_result_at_end_of_session_is_still_deferred() {
+        // Verify that the fix does not break the genuine deferred case: a session that ends
+        // with a pending tool_use (no subsequent user message) must remain is_deferred.
+        let tool_id = "toolu_deferred_end";
+        let msgs = vec![ClassifiedMsg::AI(make_ai_msg(
+            vec![tool_use_block(tool_id, "Write")],
+            false,
+        ))];
+        let chunks = build_chunks(&msgs);
+        assert_eq!(chunks.len(), 1);
+        assert!(
+            chunks[0].items[0].is_deferred,
+            "tool_use at end of session (no subsequent user message) must remain is_deferred"
+        );
+        assert!(
+            !chunks[0].items[0].is_orphan,
+            "tool_use at end of session must not be is_orphan"
         );
     }
 }
