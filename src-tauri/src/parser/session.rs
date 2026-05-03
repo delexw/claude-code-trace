@@ -1215,6 +1215,12 @@ fn scan_ongoing_user(
             *last_ending_index = Some(*activity_index);
             *has_after = false;
             *activity_index += 1;
+        } else if !text.trim().is_empty() {
+            // A regular user text message means the conversation continued past any
+            // pending tool_uses. Those tool_uses are orphans from a rewound timeline
+            // (pre-v2.1.122 /branch fork sessions) — clear them so the session is not
+            // falsely marked as ongoing.
+            pending_tool_ids.clear();
         }
         return;
     }
@@ -1262,6 +1268,20 @@ fn scan_ongoing_user(
             }
             _ => {}
         }
+    }
+
+    // If the user entry has continuation content (text, image, or document — not only
+    // tool_results), any still-pending tool_use IDs are orphans from a rewound timeline:
+    // the conversation moved forward without supplying their results. Pre-v2.1.122 /branch
+    // fork sessions can produce this when the source session had rewound timeline entries.
+    let has_continuation_content = blocks.iter().any(|b| {
+        matches!(
+            b.get("type").and_then(|v| v.as_str()).unwrap_or(""),
+            "text" | "image" | "document"
+        )
+    });
+    if has_continuation_content {
+        pending_tool_ids.clear();
     }
 }
 
@@ -1954,6 +1974,133 @@ mod tests {
             totals.output_tokens, 10,
             "IncrementalTokenScanner must skip forkedFrom entries (got {})",
             totals.output_tokens
+        );
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    // --- Issue #67: pre-v2.1.122 /branch fork sessions with orphaned tool_use blocks ---
+
+    #[test]
+    fn orphaned_tool_use_before_user_text_does_not_mark_session_ongoing() {
+        // Pre-v2.1.122 /branch fork sessions can contain assistant entries with tool_use
+        // blocks from rewound timelines — the corresponding tool_result is absent. A
+        // subsequent user text entry continues the conversation: those pending tool_use IDs
+        // must be cleared so scan_session_metadata does not falsely mark the session ongoing.
+        let tmp = env::temp_dir().join("tail-test-issue67-ongoing");
+        std::fs::create_dir_all(&tmp).unwrap();
+        let path = tmp.join("session.jsonl");
+
+        // Orphaned assistant: tool_use with no matching tool_result anywhere in the file.
+        let orphan = "{\"type\":\"assistant\",\"uuid\":\"a1\",\"parentUuid\":null,\"timestamp\":\"2026-04-28T10:00:00Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"toolu_orphan\",\"name\":\"Bash\",\"input\":{\"command\":\"ls\"}}],\"model\":\"claude-sonnet-4-6\",\"stop_reason\":\"tool_use\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0}}}\n";
+        // User entry with text continuing the conversation (no tool_result for toolu_orphan).
+        let user_text = "{\"type\":\"user\",\"uuid\":\"u1\",\"parentUuid\":\"a1\",\"timestamp\":\"2026-04-28T10:00:01Z\",\"message\":{\"role\":\"user\",\"content\":\"hello\"}}\n";
+        // Final assistant with text ending.
+        let final_asst = "{\"type\":\"assistant\",\"uuid\":\"a2\",\"parentUuid\":\"u1\",\"timestamp\":\"2026-04-28T10:00:02Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}],\"model\":\"claude-sonnet-4-6\",\"stop_reason\":\"end_turn\",\"usage\":{\"input_tokens\":20,\"output_tokens\":3,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0}}}\n";
+
+        std::fs::write(&path, format!("{orphan}{user_text}{final_asst}")).unwrap();
+
+        let meta = scan_session_metadata(path.to_str().unwrap());
+        assert!(
+            !meta.is_ongoing,
+            "session with orphaned tool_use before user text must not be marked ongoing (got is_ongoing=true)"
+        );
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn orphaned_tool_use_with_array_content_user_does_not_mark_ongoing() {
+        // Same as above but the user entry uses array content instead of a string.
+        let tmp = env::temp_dir().join("tail-test-issue67-array");
+        std::fs::create_dir_all(&tmp).unwrap();
+        let path = tmp.join("session.jsonl");
+
+        let orphan = "{\"type\":\"assistant\",\"uuid\":\"a1\",\"parentUuid\":null,\"timestamp\":\"2026-04-28T10:00:00Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"toolu_orphan2\",\"name\":\"Read\",\"input\":{\"file_path\":\"/tmp/x\"}}],\"model\":\"claude-sonnet-4-6\",\"stop_reason\":\"tool_use\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0}}}\n";
+        // User entry with array content containing a text block (new user turn).
+        let user_array = "{\"type\":\"user\",\"uuid\":\"u1\",\"parentUuid\":\"a1\",\"timestamp\":\"2026-04-28T10:00:01Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"what now?\"}]}}\n";
+        let final_asst = "{\"type\":\"assistant\",\"uuid\":\"a2\",\"parentUuid\":\"u1\",\"timestamp\":\"2026-04-28T10:00:02Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"here\"}],\"model\":\"claude-sonnet-4-6\",\"stop_reason\":\"end_turn\",\"usage\":{\"input_tokens\":20,\"output_tokens\":3,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0}}}\n";
+
+        std::fs::write(&path, format!("{orphan}{user_array}{final_asst}")).unwrap();
+
+        let meta = scan_session_metadata(path.to_str().unwrap());
+        assert!(
+            !meta.is_ongoing,
+            "session with orphaned tool_use before array-content user entry must not be ongoing"
+        );
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn genuine_deferred_tool_use_still_marks_session_ongoing() {
+        // A session that genuinely ends mid-tool-use (no subsequent user message) should
+        // still be marked ongoing. The orphan fix must not affect this case.
+        let tmp = env::temp_dir().join("tail-test-issue67-deferred");
+        std::fs::create_dir_all(&tmp).unwrap();
+        let path = tmp.join("session.jsonl");
+
+        // Only an assistant entry with tool_use — no user message follows.
+        let asst = "{\"type\":\"assistant\",\"uuid\":\"a1\",\"parentUuid\":null,\"timestamp\":\"2026-04-28T10:00:00Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"toolu_defer\",\"name\":\"Bash\",\"input\":{\"command\":\"sleep 10\"}}],\"model\":\"claude-sonnet-4-6\",\"stop_reason\":\"tool_use\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0}}}\n";
+
+        std::fs::write(&path, format!("{asst}")).unwrap();
+
+        let meta = scan_session_metadata(path.to_str().unwrap());
+        assert!(
+            meta.is_ongoing,
+            "session ending mid-tool-use (no subsequent user message) must remain ongoing"
+        );
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn read_session_incremental_orphaned_tool_use_before_user_is_orphan_in_chunks() {
+        // End-to-end: a fork session with an orphaned tool_use followed by a user text message
+        // must produce an AI chunk where the tool_use item is is_orphan=true, not is_deferred.
+        // Verify the session does not appear ongoing.
+        use crate::parser::chunk::build_chunks;
+        use crate::parser::ongoing::OngoingChecker;
+
+        let tmp = env::temp_dir().join("tail-test-issue67-e2e");
+        std::fs::create_dir_all(&tmp).unwrap();
+        let path = tmp.join("session.jsonl");
+
+        let orphan = "{\"type\":\"assistant\",\"uuid\":\"a1\",\"parentUuid\":null,\"isSidechain\":false,\"timestamp\":\"2026-04-28T10:00:00Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"toolu_e2e\",\"name\":\"Bash\",\"input\":{\"command\":\"ls\"}}],\"model\":\"claude-sonnet-4-6\",\"stop_reason\":\"tool_use\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0}}}\n";
+        let user_text = "{\"type\":\"user\",\"uuid\":\"u1\",\"parentUuid\":\"a1\",\"isSidechain\":false,\"timestamp\":\"2026-04-28T10:00:01Z\",\"message\":{\"role\":\"user\",\"content\":\"new question\"}}\n";
+        let final_asst = "{\"type\":\"assistant\",\"uuid\":\"a2\",\"parentUuid\":\"u1\",\"isSidechain\":false,\"timestamp\":\"2026-04-28T10:00:02Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"answer\"}],\"model\":\"claude-sonnet-4-6\",\"stop_reason\":\"end_turn\",\"usage\":{\"input_tokens\":20,\"output_tokens\":5,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0}}}\n";
+
+        std::fs::write(&path, format!("{orphan}{user_text}{final_asst}")).unwrap();
+
+        let (msgs, _, _) = read_session_incremental(path.to_str().unwrap(), 0).unwrap();
+        let chunks = build_chunks(&msgs);
+
+        // Find the AI chunk that contains the orphaned tool_use.
+        let orphan_chunk = chunks.iter().find(|c| {
+            c.chunk_type == crate::parser::chunk::ChunkType::AI
+                && c.items
+                    .iter()
+                    .any(|i| i.item_type == crate::parser::chunk::DisplayItemType::ToolCall)
+        });
+        assert!(
+            orphan_chunk.is_some(),
+            "must have an AI chunk with a tool_use item"
+        );
+        let item = orphan_chunk
+            .unwrap()
+            .items
+            .iter()
+            .find(|i| i.item_type == crate::parser::chunk::DisplayItemType::ToolCall)
+            .unwrap();
+        assert!(
+            item.is_orphan,
+            "tool_use without result before user message must be is_orphan"
+        );
+        assert!(!item.is_deferred, "must not be is_deferred");
+
+        assert!(
+            !OngoingChecker::is_chunks_ongoing(&chunks),
+            "session must not appear ongoing"
         );
 
         std::fs::remove_dir_all(&tmp).ok();
