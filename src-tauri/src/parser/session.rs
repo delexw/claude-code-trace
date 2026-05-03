@@ -2193,11 +2193,11 @@ mod tests {
     }
 
     #[test]
-    fn orphaned_tool_use_in_conversation_is_rendered_as_deferred() {
-        // When an orphaned tool_use block (no matching tool_result) lands on the live chain,
-        // build_chunks must mark the corresponding DisplayItem as is_deferred=true so the UI
-        // can render it as a suspended/incomplete tool call rather than omitting it entirely.
-        let tmp = env::temp_dir().join("tail-test-orphan-tool-use-deferred");
+    fn orphaned_tool_use_in_conversation_is_rendered_as_orphan() {
+        // When an orphaned tool_use block (no matching tool_result) is followed by a user
+        // message (conversation continued), build_chunks must mark the DisplayItem as
+        // is_orphan=true so the activity log skips it and the session is not shown as ongoing.
+        let tmp = env::temp_dir().join("tail-test-orphan-tool-use-orphan");
         std::fs::create_dir_all(&tmp).unwrap();
         let path = tmp.join("session.jsonl");
 
@@ -2220,8 +2220,12 @@ mod tests {
             .expect("orphaned Bash tool_use must appear in AI chunk items");
 
         assert!(
-            orphan_item.is_deferred,
-            "orphaned tool_use with no tool_result must be marked is_deferred=true"
+            orphan_item.is_orphan,
+            "orphaned tool_use before a user message must be marked is_orphan=true"
+        );
+        assert!(
+            !orphan_item.is_deferred,
+            "orphaned tool_use before a user message must not be is_deferred"
         );
         assert!(
             orphan_item.tool_result.is_empty(),
