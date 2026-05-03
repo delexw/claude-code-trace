@@ -189,6 +189,14 @@ mod tests {
     }
 
     #[test]
+    fn parse_entry_truncated_json_returns_none() {
+        // Simulates a line partially written before an unclean shutdown (kill -9, OOM).
+        // The JSON object is cut mid-string — must return None, not panic or error.
+        let bytes = b"{\"type\":\"assistant\",\"uuid\":\"a1\",\"message\":{\"role\":\"assistant\"";
+        assert!(parse_entry(bytes).is_none());
+    }
+
+    #[test]
     fn parse_entry_without_uuid_or_leaf_uuid_returns_none() {
         let line = json!({
             "type": "user",

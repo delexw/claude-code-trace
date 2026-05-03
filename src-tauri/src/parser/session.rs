@@ -173,9 +173,10 @@ pub fn read_session_incremental(
 
     loop {
         line.clear();
-        let n = reader
-            .read_line(&mut line)
-            .map_err(|e| format!("reading: {e}"))?;
+        let n = match reader.read_line(&mut line) {
+            Ok(n) => n,
+            Err(_) => break, // unreadable bytes (e.g. invalid UTF-8) — return what we have
+        };
         if n == 0 {
             break;
         }
@@ -525,7 +526,7 @@ pub(crate) fn scan_session_metadata(path: &str) -> SessionMetadata {
     for line_result in reader.lines() {
         let line = match line_result {
             Ok(l) => l,
-            Err(_) => break,
+            Err(_) => continue, // unreadable line (e.g. invalid UTF-8) — skip and continue
         };
         lines_read += 1;
 
@@ -1680,6 +1681,104 @@ mod tests {
             completed_msgs.len(),
             1,
             "completed line should produce a message"
+        );
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    // --- Issue #66: corrupt/truncated JSONL lines from unclean shutdowns ---
+
+    #[test]
+    fn read_session_incremental_skips_corrupt_mid_file_line() {
+        // A corrupt (invalid JSON but valid UTF-8) line in the middle of the file
+        // must be skipped. Valid entries before AND after it must still be parsed.
+        let tmp = env::temp_dir().join("tail-test-corrupt-mid-file");
+        std::fs::create_dir_all(&tmp).unwrap();
+        let path = tmp.join("session.jsonl");
+
+        let u1 = "{\"type\":\"user\",\"uuid\":\"u1\",\"parentUuid\":null,\"isSidechain\":false,\"timestamp\":\"2025-01-15T10:00:00Z\",\"message\":{\"role\":\"user\",\"content\":\"Hello\"}}\n";
+        let corrupt = "{truncated-invalid-json-cut-mid-write\n"; // valid UTF-8, invalid JSON
+        let u2 = "{\"type\":\"user\",\"uuid\":\"u2\",\"parentUuid\":\"u1\",\"isSidechain\":false,\"timestamp\":\"2025-01-15T10:00:01Z\",\"message\":{\"role\":\"user\",\"content\":\"World\"}}\n";
+
+        std::fs::write(&path, format!("{u1}{corrupt}{u2}")).unwrap();
+
+        let result = read_session_incremental(path.to_str().unwrap(), 0);
+        assert!(
+            result.is_ok(),
+            "corrupt mid-file line must not cause a session load error"
+        );
+
+        let (msgs, _, _) = result.unwrap();
+        let user_count = msgs
+            .iter()
+            .filter(|m| matches!(m, ClassifiedMsg::User(_)))
+            .count();
+        assert_eq!(
+            user_count, 2,
+            "both valid user entries must be parsed; corrupt line must be skipped"
+        );
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn read_session_incremental_skips_multiple_corrupt_lines() {
+        // Multiple corrupt lines scattered throughout the file must all be skipped.
+        let tmp = env::temp_dir().join("tail-test-multiple-corrupt");
+        std::fs::create_dir_all(&tmp).unwrap();
+        let path = tmp.join("session.jsonl");
+
+        let u1 = "{\"type\":\"user\",\"uuid\":\"u1\",\"parentUuid\":null,\"isSidechain\":false,\"timestamp\":\"2025-01-15T10:00:00Z\",\"message\":{\"role\":\"user\",\"content\":\"Hello\"}}\n";
+        let corrupt1 = "{\"truncated line 1\n";
+        let corrupt2 = "not json at all\n";
+        let corrupt3 = "{\"type\":\"assistant\",\"uuid\":\"a1\",\"message\":{\"role\":\"assistan\n"; // cut mid-value
+        let u2 = "{\"type\":\"user\",\"uuid\":\"u2\",\"parentUuid\":\"u1\",\"isSidechain\":false,\"timestamp\":\"2025-01-15T10:00:05Z\",\"message\":{\"role\":\"user\",\"content\":\"World\"}}\n";
+
+        std::fs::write(&path, format!("{u1}{corrupt1}{corrupt2}{corrupt3}{u2}")).unwrap();
+
+        let result = read_session_incremental(path.to_str().unwrap(), 0);
+        assert!(
+            result.is_ok(),
+            "multiple corrupt lines must not cause a load error"
+        );
+
+        let (msgs, _, _) = result.unwrap();
+        let user_count = msgs
+            .iter()
+            .filter(|m| matches!(m, ClassifiedMsg::User(_)))
+            .count();
+        assert_eq!(
+            user_count, 2,
+            "both valid user entries must survive; all corrupt lines must be skipped"
+        );
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn scan_session_metadata_skips_corrupt_lines() {
+        // scan_session_metadata must skip corrupt JSON lines and continue processing
+        // valid entries that appear after them in the file.
+        let tmp = env::temp_dir().join("tail-test-meta-corrupt");
+        std::fs::create_dir_all(&tmp).unwrap();
+        let path = tmp.join("session.jsonl");
+
+        let valid_user = "{\"type\":\"user\",\"uuid\":\"u1\",\"timestamp\":\"2025-01-15T10:00:00Z\",\"message\":{\"role\":\"user\",\"content\":\"Hello world\"}}\n";
+        let corrupt = "{\"type\":\"user\",\"uuid\":\"u2\",\"timestamp\":\"2025-01-15T10:00:01Z\",\"message\":{\"role\":\"user\",\"content\":\"CORRUPT truncated\n"; // truncated
+        let valid_assistant = "{\"type\":\"assistant\",\"uuid\":\"a1\",\"requestId\":\"r1\",\"message\":{\"model\":\"claude-sonnet-4-20250514\",\"role\":\"assistant\",\"content\":[],\"usage\":{\"input_tokens\":10,\"output_tokens\":5,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0},\"stop_reason\":\"end_turn\"}}\n";
+
+        std::fs::write(&path, format!("{valid_user}{corrupt}{valid_assistant}")).unwrap();
+
+        let meta = scan_session_metadata(path.to_str().unwrap());
+        assert!(
+            meta.first_msg.contains("Hello world"),
+            "first_msg must come from the valid user entry before the corrupt line; got: {:?}",
+            meta.first_msg
+        );
+        assert_eq!(
+            meta.input_tokens, 10,
+            "tokens from the valid assistant entry after the corrupt line must be counted (got {})",
+            meta.input_tokens
         );
 
         std::fs::remove_dir_all(&tmp).ok();
