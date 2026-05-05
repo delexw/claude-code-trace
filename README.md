@@ -227,16 +227,6 @@ git push origin v0.4.0
 
 This creates a draft release with macOS, Linux, and Windows artifacts attached. Review and publish it from the [Releases](https://github.com/delexw/claude-code-trace/releases) page.
 
-## Related search terms
-
-Claude Code Trace may also be useful if you are looking for a Claude Code log viewer, Claude Code JSONL viewer, Claude Code session viewer, Claude Code conversation history browser, Claude Code user message search tool, Claude Code tool call viewer, Claude Code MCP call inspector, or a local Claude Code debugging tool.
-
-## Recommended GitHub topics
-
-Add these topics to the repository to improve discoverability in GitHub search:
-
-`claude-code`, `claude`, `anthropic`, `jsonl`, `session-viewer`, `log-viewer`, `developer-tools`, `tauri`, `react`, `rust`, `tui`, `desktop-app`, `ai-tools`, `llm-tools`, `mcp`
-
 ## Contributing
 
 Bug reports, feature requests, and pull requests are welcome. See [Development](#development) for how to build and run locally. For significant changes, open an issue first to align on scope.
