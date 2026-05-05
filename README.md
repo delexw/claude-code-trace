@@ -1,4 +1,4 @@
-<p align="center">
+p<p align="center">
   <img src="icon.png" alt="Claude Code Trace app icon" width="128" />
 </p>
 
@@ -13,7 +13,7 @@
 
 **Claude Code Trace** is a **Claude Code session log viewer** for local JSONL files stored in `~/.claude/projects/`.
 
-Browse, tail, and inspect Claude Code conversations in real time. Claude Code Trace renders Claude Code JSONL session files as readable conversations with expandable tool calls, token counts, timestamps, MCP tool call detection, and live log tailing. It also helps you find sessions by user message. It runs as a **native desktop app** for macOS, Linux, and Windows, a **web app**, or a **terminal UI**.
+Browse, tail, and inspect Claude Code conversations in real time. Claude Code Trace renders Claude Code JSONL session files as readable conversations with expandable tool calls, token counts, timestamps, MCP tool call detection, and live log tailing. It also helps you find sessions by user message. It runs as a **native desktop app** for macOS, Linux, and Windows, or a **web app**.
 
 Use Claude Code Trace when you want to:
 
