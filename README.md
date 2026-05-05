@@ -1,4 +1,4 @@
-p<p align="center">
+<p align="center"> 
   <img src="icon.png" alt="Claude Code Trace app icon" width="128" />
 </p>
 
