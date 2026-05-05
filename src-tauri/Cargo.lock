@@ -512,7 +512,7 @@ dependencies = [
 
 [[package]]
 name = "claude-code-trace"
-version = "0.4.13"
+version = "0.5.0"
 dependencies = [
  "axum",
  "chrono",
