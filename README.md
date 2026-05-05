@@ -22,8 +22,11 @@ Use Claude Code Trace when you want to:
 - Inspect Claude Code tool calls, MCP calls, timestamps, and token usage
 - Monitor live Claude Code sessions while they are running
 - Debug long-running Claude Code workflows without reading raw JSONL files
+- Support and build a personal AI harness platform such as [DovePaw Lite](https://github.com/PixelPaw-Labs/DovePaw-Lite)
 - Browse Claude Code session logs from a desktop, browser, or terminal interface
 
+> Claude Code Trace is also used to support and build [**DovePaw Lite**](https://github.com/PixelPaw-Labs/DovePaw-Lite), a personal AI harness platform for orchestrating local agents.
+>
 > Also check out [**Codex Trace**](https://github.com/PixelPaw-Labs/codex-trace) — a session viewer for OpenAI Codex.
 
 <p align="center">
@@ -47,6 +50,8 @@ Use Claude Code Trace when you want to:
 Claude Code stores local session history as JSONL files. Those files are useful for debugging and reviewing AI coding sessions, but they are difficult to read directly. Claude Code Trace turns those JSONL logs into an interactive session viewer so you can find sessions by user message, inspect conversations, understand tool usage, and debug Claude Code workflows faster.
 
 Unlike general observability platforms, Claude Code Trace focuses on local Claude Code session logs. It does not require sending traces to an external service.
+
+Claude Code Trace is especially useful when building personal AI harnesses and local agent platforms. It helps inspect Claude Code sessions, understand tool usage, and debug the workflows that power projects like [DovePaw Lite](https://github.com/PixelPaw-Labs/DovePaw-Lite).
 
 ## Install
 
