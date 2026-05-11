@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { invoke } from "../lib/invoke";
 import type { SessionInfo } from "../types";
 import { useTauriEvent } from "./useTauriEvent";
@@ -16,25 +16,37 @@ export function usePicker(selectedProject: string | null = null) {
     searchQuery: "",
   });
 
-  const discoverSessions = useCallback(async (projectDirs: string[]) => {
-    setState((prev) => ({ ...prev, loading: true }));
-    try {
-      const sessions = await invoke<SessionInfo[]>("discover_sessions", {
-        projectDirs,
-      });
-      setState((prev) => ({ ...prev, sessions, loading: false }));
+  // Track the most recent project dirs so picker-refresh signals can re-fetch
+  // without needing the caller to re-supply them.
+  const projectDirsRef = useRef<string[] | null>(null);
 
-      // Start watching for new sessions
-      try {
-        await invoke<void>("watch_picker", { projectDirs });
-      } catch {
-        // watcher is optional
-      }
-    } catch (err) {
-      console.error("Failed to discover sessions:", err);
-      setState((prev) => ({ ...prev, loading: false }));
-    }
+  const fetchSessions = useCallback(async (projectDirs: string[]) => {
+    const sessions = await invoke<SessionInfo[]>("discover_sessions", {
+      projectDirs,
+    });
+    setState((prev) => ({ ...prev, sessions, loading: false }));
   }, []);
+
+  const discoverSessions = useCallback(
+    async (projectDirs: string[]) => {
+      projectDirsRef.current = projectDirs;
+      setState((prev) => ({ ...prev, loading: true }));
+      try {
+        await fetchSessions(projectDirs);
+
+        // Start watching for new sessions
+        try {
+          await invoke<void>("watch_picker", { projectDirs });
+        } catch {
+          // watcher is optional
+        }
+      } catch (err) {
+        console.error("Failed to discover sessions:", err);
+        setState((prev) => ({ ...prev, loading: false }));
+      }
+    },
+    [fetchSessions],
+  );
 
   const setSearchQuery = useCallback((query: string) => {
     setState((prev) => ({ ...prev, searchQuery: query }));
@@ -51,12 +63,14 @@ export function usePicker(selectedProject: string | null = null) {
     });
   }, []);
 
-  // Listen for picker-refresh events (backend already applies staleness)
-  useTauriEvent<{ sessions: SessionInfo[] }>("picker-refresh", (payload) => {
-    setState((prev) => ({
-      ...prev,
-      sessions: payload.sessions,
-    }));
+  // The backend emits a lightweight signal (no payload). Re-fetch via
+  // discover_sessions, which is coalesced by a short-lived server-side cache.
+  useTauriEvent<unknown>("picker-refresh", () => {
+    const dirs = projectDirsRef.current;
+    if (!dirs) return;
+    fetchSessions(dirs).catch((err) => {
+      console.error("Failed to refresh sessions:", err);
+    });
   });
 
   // Cleanup on unmount
