@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use tauri::{AppHandle, State};
 
 use crate::parser::session::SessionInfo;
@@ -10,10 +12,9 @@ use crate::watcher::start_picker_watcher;
 #[tauri::command]
 pub async fn discover_sessions(
     project_dirs: Vec<String>,
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
 ) -> Result<Vec<SessionInfo>, String> {
-    let cache = state.session_cache.lock().map_err(|e| e.to_string())?;
-    let mut sessions = cache.discover_all_project_sessions(&project_dirs)?;
+    let mut sessions = state.discover_sessions_cached(&project_dirs)?;
     // The session watcher has the most accurate ongoing detection, so apply
     // its verdict over the picker's lightweight metadata scan.
     state.apply_watched_ongoing(&mut sessions);
@@ -26,12 +27,12 @@ pub async fn discover_sessions(
 pub async fn watch_picker(
     project_dirs: Vec<String>,
     app: AppHandle,
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
 ) -> Result<(), String> {
     // Stop existing picker watcher if any.
     state.stop_picker_watcher()?;
 
-    let handle = start_picker_watcher(project_dirs, app);
+    let handle = start_picker_watcher(project_dirs, state.inner().clone(), Some(app));
     state.set_picker_watcher(handle)?;
 
     Ok(())
@@ -39,6 +40,6 @@ pub async fn watch_picker(
 
 /// Stop watching project directories.
 #[tauri::command]
-pub async fn unwatch_picker(state: State<'_, AppState>) -> Result<(), String> {
+pub async fn unwatch_picker(state: State<'_, Arc<AppState>>) -> Result<(), String> {
     state.stop_picker_watcher()
 }

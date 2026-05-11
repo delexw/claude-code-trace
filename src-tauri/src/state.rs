@@ -1,7 +1,9 @@
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 use tokio::sync::broadcast;
 
 use crate::parser::cache::SessionCache;
+use crate::parser::session::SessionInfo;
 use crate::settings::Settings;
 use crate::watcher::WatcherHandle;
 
@@ -14,6 +16,16 @@ pub struct SseEvent {
     pub data: String,
 }
 
+/// Short-lived cache for the picker's session list. Multiple concurrent
+/// callers within the TTL window share one disk scan.
+struct SessionsCache {
+    dirs: Vec<String>,
+    cached_at: Instant,
+    sessions: Vec<SessionInfo>,
+}
+
+const SESSIONS_CACHE_TTL: Duration = Duration::from_secs(2);
+
 /// AppState holds shared state managed by Tauri.
 pub struct AppState {
     pub session_watcher: Mutex<Option<WatcherHandle>>,
@@ -25,6 +37,8 @@ pub struct AppState {
     pub watched_session_ongoing: Mutex<Option<(String, bool)>>,
     /// Broadcast channel for SSE — watchers send events here, HTTP clients subscribe.
     pub event_tx: broadcast::Sender<SseEvent>,
+    /// 2-second TTL cache for the picker session list.
+    sessions_cache: Mutex<Option<SessionsCache>>,
 }
 
 impl AppState {
@@ -37,6 +51,7 @@ impl AppState {
             settings: Mutex::new(crate::settings::load_settings()),
             watched_session_ongoing: Mutex::new(None),
             event_tx,
+            sessions_cache: Mutex::new(None),
         }
     }
 
@@ -100,6 +115,29 @@ impl AppState {
                 s.is_ongoing = ongoing;
             }
         }
+    }
+
+    /// Discover sessions across `project_dirs`, returning a cached result if
+    /// fresh enough. Multiple concurrent callers within the TTL window share
+    /// one disk scan.
+    pub fn discover_sessions_cached(
+        &self,
+        project_dirs: &[String],
+    ) -> Result<Vec<SessionInfo>, String> {
+        let mut cache = self.sessions_cache.lock().map_err(|e| e.to_string())?;
+        if let Some(ref c) = *cache {
+            if c.dirs == project_dirs && c.cached_at.elapsed() < SESSIONS_CACHE_TTL {
+                return Ok(c.sessions.clone());
+            }
+        }
+        let session_cache = self.session_cache.lock().map_err(|e| e.to_string())?;
+        let sessions = session_cache.discover_all_project_sessions(project_dirs)?;
+        *cache = Some(SessionsCache {
+            dirs: project_dirs.to_vec(),
+            cached_at: Instant::now(),
+            sessions: sessions.clone(),
+        });
+        Ok(sessions)
     }
 
     /// Broadcast an SSE event to all connected browser clients.
