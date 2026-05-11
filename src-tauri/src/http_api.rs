@@ -28,7 +28,8 @@ use crate::watcher::{start_picker_watcher, start_session_watcher};
 /// Shared state for axum handlers.
 #[derive(Clone)]
 pub struct HttpState {
-    pub app: AppHandle,
+    pub app_state: Arc<AppState>,
+    pub app: Option<AppHandle>,
 }
 
 /// Default bind host. Overridable via the `CCTRACE_HTTP_HOST` env var.
@@ -67,12 +68,26 @@ pub fn resolve_static_dir() -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
-/// Start the HTTP API server. Host, port, and static-asset directory are
-/// configurable via the `CCTRACE_HTTP_HOST`, `CCTRACE_HTTP_PORT`, and
-/// `CCTRACE_STATIC_DIR` env vars.
+/// Start the HTTP API server from a Tauri AppHandle (desktop/web mode).
 pub async fn start_http_server(app: AppHandle) {
-    let state = Arc::new(HttpState { app });
+    let app_state: Arc<AppState> = app.state::<Arc<AppState>>().inner().clone();
+    run_server(Arc::new(HttpState {
+        app_state,
+        app: Some(app),
+    }))
+    .await;
+}
 
+/// Start the HTTP server without Tauri (headless mode).
+pub async fn start_http_server_headless(state: Arc<AppState>) {
+    run_server(Arc::new(HttpState {
+        app_state: state,
+        app: None,
+    }))
+    .await;
+}
+
+async fn run_server(state: Arc<HttpState>) {
     let mut router = Router::new()
         .route("/api/settings", get(api_get_settings))
         .route("/api/settings/dir", post(api_set_projects_dir))
@@ -118,7 +133,7 @@ pub async fn start_http_server(app: AppHandle) {
 // ---------------------------------------------------------------------------
 
 fn app_state(state: &HttpState) -> &AppState {
-    state.app.state::<AppState>().inner()
+    &state.app_state
 }
 
 fn err_response(status: axum::http::StatusCode, msg: String) -> Response {
@@ -239,14 +254,7 @@ async fn api_discover_sessions(
     Json(body): Json<DiscoverBody>,
 ) -> Response {
     let app_state = app_state(&state);
-    let project_dirs = body.dirs;
-    let cache = match app_state.session_cache.lock() {
-        Ok(c) => c,
-        Err(e) => {
-            return err_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
-        }
-    };
-    let mut sessions = match cache.discover_all_project_sessions(&project_dirs) {
+    let mut sessions = match app_state.discover_sessions_cached(&body.dirs) {
         Ok(s) => s,
         Err(e) => return err_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e),
     };
@@ -427,7 +435,7 @@ async fn api_watch_session(
     if let Err(e) = app_state.stop_session_watcher() {
         return err_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e);
     }
-    let handle = start_session_watcher(body.path, state.app.clone());
+    let handle = start_session_watcher(body.path, state.app_state.clone(), state.app.clone());
     if let Err(e) = app_state.set_session_watcher(handle) {
         return err_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e);
     }
@@ -457,7 +465,11 @@ async fn api_watch_picker(
     if let Err(e) = app_state.stop_picker_watcher() {
         return err_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e);
     }
-    let handle = start_picker_watcher(body.project_dirs, state.app.clone());
+    let handle = start_picker_watcher(
+        body.project_dirs,
+        state.app_state.clone(),
+        state.app.clone(),
+    );
     if let Err(e) = app_state.set_picker_watcher(handle) {
         return err_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e);
     }

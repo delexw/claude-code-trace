@@ -1,7 +1,9 @@
+use std::sync::Arc;
+
 use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
 use std::path::Path;
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
 use tokio::sync::mpsc;
 
 use crate::convert::*;
@@ -11,8 +13,9 @@ use crate::parser::ongoing::OngoingChecker;
 use crate::parser::session::{read_session_with_debug_hooks, IncrementalTokenScanner};
 use crate::parser::subagent::{discover_and_link_all, inject_orphan_subagents};
 use crate::parser::team::reconstruct_teams;
+use crate::state::AppState;
 
-const WATCHER_DEBOUNCE: Duration = Duration::from_millis(200);
+const WATCHER_DEBOUNCE: Duration = Duration::from_millis(1000);
 
 /// Run a debounced file-change loop: receive notify events, apply `filter`,
 /// and send a signal after `WATCHER_DEBOUNCE` of quiet time.
@@ -78,7 +81,11 @@ struct SessionUpdatePayload {
 }
 
 /// Start watching a session file. Emits "session-update" events on changes.
-pub fn start_session_watcher(path: String, app: AppHandle) -> WatcherHandle {
+pub fn start_session_watcher(
+    path: String,
+    state: Arc<AppState>,
+    app: Option<AppHandle>,
+) -> WatcherHandle {
     let (stop_tx, mut stop_rx) = mpsc::channel::<()>(1);
     let (signal_tx, mut signal_rx) = mpsc::channel::<()>(4);
     let (thread_stop_tx, thread_stop_rx) = std::sync::mpsc::sync_channel::<()>(1);
@@ -145,7 +152,7 @@ pub fn start_session_watcher(path: String, app: AppHandle) -> WatcherHandle {
 
     // Spawn the async rebuild loop.
     let path_for_rebuild = path.clone();
-    tauri::async_runtime::spawn(async move {
+    tokio::spawn(async move {
         let mut token_scanner = IncrementalTokenScanner::new();
         let mut prev_msg_count: usize = 0;
         let mut prev_item_count: usize = 0;
@@ -191,9 +198,7 @@ pub fn start_session_watcher(path: String, app: AppHandle) -> WatcherHandle {
                     let ongoing = OngoingChecker::new(&chunks, &all_procs, &path_for_rebuild).is_ongoing();
 
                     // Share ongoing status with AppState so the picker can use it.
-                    if let Some(state) = app.try_state::<crate::state::AppState>() {
-                        state.set_watched_ongoing(path_for_rebuild.clone(), ongoing);
-                    }
+                    state.set_watched_ongoing(path_for_rebuild.clone(), ongoing);
 
                     let teams = reconstruct_teams(&chunks, &all_procs);
                     let messages = chunks_to_messages(&chunks, &all_procs, &color_map);
@@ -241,13 +246,13 @@ pub fn start_session_watcher(path: String, app: AppHandle) -> WatcherHandle {
                     };
 
                     // Broadcast to SSE clients (HTTP API).
-                    if let Some(state) = app.try_state::<crate::state::AppState>() {
-                        if let Ok(json) = serde_json::to_string(&payload) {
-                            state.broadcast("session-update", &json);
-                        }
+                    if let Ok(json) = serde_json::to_string(&payload) {
+                        state.broadcast("session-update", &json);
                     }
 
-                    let _ = app.emit("session-update", payload);
+                    if let Some(ref app_handle) = app {
+                        let _ = app_handle.emit("session-update", payload);
+                    }
                 }
             }
         }
@@ -259,14 +264,16 @@ pub fn start_session_watcher(path: String, app: AppHandle) -> WatcherHandle {
     }
 }
 
-/// Serializable picker refresh event.
-#[derive(Clone, serde::Serialize)]
-struct PickerRefreshPayload {
-    sessions: Vec<crate::parser::session::SessionInfo>,
-}
-
 /// Start watching project directories for new/changed sessions.
-pub fn start_picker_watcher(project_dirs: Vec<String>, app: AppHandle) -> WatcherHandle {
+/// When changes are detected the watcher broadcasts a lightweight `picker-refresh`
+/// signal with no payload. Clients are responsible for fetching the updated
+/// session list via the `discover_sessions` / `/api/sessions` endpoint, which uses
+/// a short-lived cache to coalesce concurrent re-fetches.
+pub fn start_picker_watcher(
+    project_dirs: Vec<String>,
+    state: Arc<AppState>,
+    app: Option<AppHandle>,
+) -> WatcherHandle {
     let (stop_tx, mut stop_rx) = mpsc::channel::<()>(1);
     let (signal_tx, mut signal_rx) = mpsc::channel::<()>(4);
     let (thread_stop_tx, thread_stop_rx) = std::sync::mpsc::sync_channel::<()>(1);
@@ -320,58 +327,21 @@ pub fn start_picker_watcher(project_dirs: Vec<String>, app: AppHandle) -> Watche
     });
 
     // Spawn the async refresh loop.
-    tauri::async_runtime::spawn(async move {
+    tokio::spawn(async move {
         loop {
             tokio::select! {
                 _ = stop_rx.recv() => {
                     break;
                 }
                 Some(()) = signal_rx.recv() => {
-                    // Re-enumerate subdirs fresh from the base dirs on every
-                    // event so newly created project directories are included.
-                    let current_dirs: Vec<String> = base_dirs
-                        .iter()
-                        .flat_map(|base| {
-                            std::fs::read_dir(base)
-                                .ok()
-                                .into_iter()
-                                .flatten()
-                                .flatten()
-                                .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
-                                .map(|e| e.path().to_string_lossy().to_string())
-                        })
-                        .collect();
+                    // Send a lightweight signal — no session data embedded.
+                    // Clients call discover_sessions to fetch fresh data; the
+                    // server-side cache coalesces concurrent requests.
+                    state.broadcast("picker-refresh", "{}");
 
-                    // Use the session cache for efficient rescanning —
-                    // only files whose (mod_time, size) changed get reparsed.
-                    let mut sessions = if let Some(state) = app.try_state::<crate::state::AppState>() {
-                        let cache = match state.session_cache.lock() {
-                            Ok(c) => c,
-                            Err(_) => continue,
-                        };
-                        cache.discover_all_project_sessions(&current_dirs)
-                            .unwrap_or_default()
-                    } else {
-                        crate::parser::session::discover_all_project_sessions(&current_dirs)
-                            .unwrap_or_default()
-                    };
-
-                    // Apply the session watcher's ongoing status (more accurate
-                    // than the picker's lightweight metadata scan).
-                    if let Some(state) = app.try_state::<crate::state::AppState>() {
-                        state.apply_watched_ongoing(&mut sessions);
+                    if let Some(ref app_handle) = app {
+                        let _ = app_handle.emit("picker-refresh", serde_json::json!({}));
                     }
-
-                    let payload = PickerRefreshPayload { sessions };
-
-                    // Broadcast to SSE clients (HTTP API).
-                    if let Some(state) = app.try_state::<crate::state::AppState>() {
-                        if let Ok(json) = serde_json::to_string(&payload) {
-                            state.broadcast("picker-refresh", &json);
-                        }
-                    }
-
-                    let _ = app.emit("picker-refresh", payload);
                 }
             }
         }

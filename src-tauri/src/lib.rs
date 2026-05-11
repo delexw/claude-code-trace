@@ -8,6 +8,8 @@ mod settings;
 mod state;
 mod watcher;
 
+use std::sync::Arc;
+
 use tauri::Manager;
 
 pub fn run() {
@@ -16,6 +18,20 @@ pub fn run() {
     let headless = args.iter().any(|a| a == "--headless");
     let no_open = args.iter().any(|a| a == "--no-open");
     let desktop = !web_only && !headless;
+
+    // Headless mode: skip Tauri/WebKit entirely — run only the HTTP server.
+    // This eliminates the WebKitWebProcess + WebKitNetworkProcess that Tauri
+    // unconditionally spawns even when no window is displayed, which was the
+    // dominant cause of high CPU usage in Docker containers.
+    if headless {
+        eprintln!("Headless mode: HTTP API on http://127.0.0.1:11423");
+        let app_state = Arc::new(state::AppState::new());
+        let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+        rt.block_on(http_api::start_http_server_headless(app_state));
+        return;
+    }
+
+    let app_state = Arc::new(state::AppState::new());
 
     let mut builder = tauri::Builder::default();
 
@@ -38,7 +54,7 @@ pub fn run() {
     builder
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
-        .manage(state::AppState::new())
+        .manage(app_state)
         .invoke_handler(tauri::generate_handler![
             commands::session::load_session,
             commands::session::get_session_meta,
@@ -58,9 +74,7 @@ pub fn run() {
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(http_api::start_http_server(handle));
 
-            if headless {
-                eprintln!("Headless mode: HTTP API on http://127.0.0.1:11423");
-            } else if web_only {
+            if web_only {
                 if no_open {
                     eprintln!("Web mode: http://localhost:1420 (background, no browser)");
                 } else {

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use tauri::{AppHandle, State};
 
 use crate::convert::*;
@@ -11,7 +13,10 @@ use crate::watcher::start_session_watcher;
 
 /// Load a session file and return display messages.
 #[tauri::command]
-pub async fn load_session(path: String, state: State<'_, AppState>) -> Result<LoadResult, String> {
+pub async fn load_session(
+    path: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<LoadResult, String> {
     if path.is_empty() {
         return Err("no session path provided".to_string());
     }
@@ -70,13 +75,13 @@ pub async fn get_session_meta(path: String) -> Result<SessionMeta, String> {
 pub async fn watch_session(
     path: String,
     app: AppHandle,
-    state: State<'_, AppState>,
+    state: State<'_, Arc<AppState>>,
 ) -> Result<(), String> {
     // Stop existing watcher if any.
     state.stop_session_watcher()?;
 
     // Start watcher.
-    let handle = start_session_watcher(path, app);
+    let handle = start_session_watcher(path, state.inner().clone(), Some(app));
     state.set_session_watcher(handle)?;
 
     Ok(())
@@ -85,7 +90,7 @@ pub async fn watch_session(
 /// Return all project directories under the Claude projects base directory.
 /// Each subdirectory corresponds to an encoded project path.
 #[tauri::command]
-pub async fn get_project_dirs(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+pub async fn get_project_dirs(state: State<'_, Arc<AppState>>) -> Result<Vec<String>, String> {
     let configured = state
         .settings
         .lock()
@@ -108,7 +113,7 @@ pub async fn get_project_dirs(state: State<'_, AppState>) -> Result<Vec<String>,
 
 /// Stop watching the current session.
 #[tauri::command]
-pub async fn unwatch_session(state: State<'_, AppState>) -> Result<(), String> {
+pub async fn unwatch_session(state: State<'_, Arc<AppState>>) -> Result<(), String> {
     state.clear_watched_ongoing();
     state.stop_session_watcher()
 }
