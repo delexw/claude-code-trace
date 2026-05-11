@@ -213,6 +213,10 @@ pub fn read_session_incremental(
     };
 
     let mut msgs = Vec::new();
+    // Track seen (agentName, teamName, summary_text) tuples to deduplicate `summary`
+    // entries from pre-v2.1.128 sessions where idle sub-agents fired the same summary
+    // repeatedly while the sub-agent's transcript was static.
+    let mut seen_summaries: HashSet<(String, String, String)> = HashSet::new();
     for entry in raw_entries {
         // When live-branch resolution produced a non-empty set, skip any non-sidechain
         // entry whose uuid is absent from the live chain.  Sidechain entries are passed
@@ -233,6 +237,18 @@ pub fn read_session_incremental(
             && !is_live_attachment
         {
             continue;
+        }
+        // Skip duplicate summary entries — keep only the first occurrence of each
+        // (agentName, teamName, summary_text) triple.
+        if entry.entry_type == "summary" {
+            let key = (
+                entry.agent_name.clone(),
+                entry.team_name.clone(),
+                entry.summary.clone(),
+            );
+            if !seen_summaries.insert(key) {
+                continue;
+            }
         }
         if let Some(msg) = classify(entry) {
             msgs.push(msg);
@@ -2233,6 +2249,119 @@ mod tests {
         );
 
         std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    // --- Issue #78: duplicate summary entries from pre-v2.1.128 sessions ---
+
+    #[test]
+    fn duplicate_summary_entries_produce_single_compact_msg() {
+        // Pre-v2.1.128: idle sub-agents could write the same summary entry repeatedly.
+        // read_session_incremental must emit only one CompactMsg for each unique
+        // (agentName, teamName, summary_text) triple.
+        let tmp = env::temp_dir().join("tail-test-issue78-dup-summary");
+        std::fs::create_dir_all(&tmp).unwrap();
+        let path = tmp.join("session.jsonl");
+
+        // Three summary entries with identical agentName and summary text.
+        let s1 = "{\"type\":\"summary\",\"uuid\":\"s1\",\"parentUuid\":null,\"agentName\":\"agent1\",\"teamName\":\"\",\"summary\":\"Investigating the bug\",\"timestamp\":\"2026-05-01T10:00:00Z\"}\n";
+        let s2 = "{\"type\":\"summary\",\"uuid\":\"s2\",\"parentUuid\":\"s1\",\"agentName\":\"agent1\",\"teamName\":\"\",\"summary\":\"Investigating the bug\",\"timestamp\":\"2026-05-01T10:00:01Z\"}\n";
+        let s3 = "{\"type\":\"summary\",\"uuid\":\"s3\",\"parentUuid\":\"s2\",\"agentName\":\"agent1\",\"teamName\":\"\",\"summary\":\"Investigating the bug\",\"timestamp\":\"2026-05-01T10:00:02Z\"}\n";
+
+        std::fs::write(&path, format!("{s1}{s2}{s3}")).unwrap();
+
+        let (msgs, _, _) = read_session_incremental(path.to_str().unwrap(), 0).unwrap();
+        let compact_count = msgs
+            .iter()
+            .filter(|m| matches!(m, ClassifiedMsg::Compact(_)))
+            .count();
+        assert_eq!(
+            compact_count, 1,
+            "three identical summary entries must produce exactly one CompactMsg (got {compact_count})"
+        );
+    }
+
+    #[test]
+    fn distinct_summary_entries_are_all_kept() {
+        // When summary text changes (sub-agent's state genuinely advances), each unique
+        // (agentName, teamName, summary_text) triple must produce its own CompactMsg.
+        let tmp = env::temp_dir().join("tail-test-issue78-distinct-summary");
+        std::fs::create_dir_all(&tmp).unwrap();
+        let path = tmp.join("session.jsonl");
+
+        let s1 = "{\"type\":\"summary\",\"uuid\":\"s1\",\"parentUuid\":null,\"agentName\":\"agent1\",\"teamName\":\"\",\"summary\":\"Starting the task\",\"timestamp\":\"2026-05-01T10:00:00Z\"}\n";
+        let s2 = "{\"type\":\"summary\",\"uuid\":\"s2\",\"parentUuid\":\"s1\",\"agentName\":\"agent1\",\"teamName\":\"\",\"summary\":\"Half-way done\",\"timestamp\":\"2026-05-01T10:00:01Z\"}\n";
+        let s3 = "{\"type\":\"summary\",\"uuid\":\"s3\",\"parentUuid\":\"s2\",\"agentName\":\"agent1\",\"teamName\":\"\",\"summary\":\"Task complete\",\"timestamp\":\"2026-05-01T10:00:02Z\"}\n";
+
+        std::fs::write(&path, format!("{s1}{s2}{s3}")).unwrap();
+
+        let (msgs, _, _) = read_session_incremental(path.to_str().unwrap(), 0).unwrap();
+        let compact_count = msgs
+            .iter()
+            .filter(|m| matches!(m, ClassifiedMsg::Compact(_)))
+            .count();
+        assert_eq!(
+            compact_count, 3,
+            "three distinct summary entries must each produce a CompactMsg (got {compact_count})"
+        );
+    }
+
+    #[test]
+    fn duplicate_summary_entries_from_different_agents_are_kept_separately() {
+        // Two agents can independently have the same summary text — their entries must NOT
+        // be deduplicated against each other (different agentName → different key).
+        let tmp = env::temp_dir().join("tail-test-issue78-multi-agent-summary");
+        std::fs::create_dir_all(&tmp).unwrap();
+        let path = tmp.join("session.jsonl");
+
+        let s1 = "{\"type\":\"summary\",\"uuid\":\"s1\",\"parentUuid\":null,\"agentName\":\"agent1\",\"teamName\":\"\",\"summary\":\"Working\",\"timestamp\":\"2026-05-01T10:00:00Z\"}\n";
+        let s2 = "{\"type\":\"summary\",\"uuid\":\"s2\",\"parentUuid\":\"s1\",\"agentName\":\"agent2\",\"teamName\":\"\",\"summary\":\"Working\",\"timestamp\":\"2026-05-01T10:00:01Z\"}\n";
+        // Duplicate of s1 (same agentName + text) — must be deduplicated.
+        let s3 = "{\"type\":\"summary\",\"uuid\":\"s3\",\"parentUuid\":\"s2\",\"agentName\":\"agent1\",\"teamName\":\"\",\"summary\":\"Working\",\"timestamp\":\"2026-05-01T10:00:02Z\"}\n";
+
+        std::fs::write(&path, format!("{s1}{s2}{s3}")).unwrap();
+
+        let (msgs, _, _) = read_session_incremental(path.to_str().unwrap(), 0).unwrap();
+        let compact_count = msgs
+            .iter()
+            .filter(|m| matches!(m, ClassifiedMsg::Compact(_)))
+            .count();
+        assert_eq!(
+            compact_count, 2,
+            "agent1+agent2 summaries must produce 2 CompactMsgs (s1+s2 unique, s3 dup of s1); got {compact_count}"
+        );
+    }
+
+    #[test]
+    fn summary_dedup_does_not_affect_non_summary_entries() {
+        // The deduplication logic must only touch summary entries and leave all other
+        // entry types (user, assistant, system) completely unaffected.
+        let tmp = env::temp_dir().join("tail-test-issue78-non-summary");
+        std::fs::create_dir_all(&tmp).unwrap();
+        let path = tmp.join("session.jsonl");
+
+        let user = "{\"type\":\"user\",\"uuid\":\"u1\",\"parentUuid\":null,\"isSidechain\":false,\"timestamp\":\"2026-05-01T10:00:00Z\",\"message\":{\"role\":\"user\",\"content\":\"Hello\"}}\n";
+        let summary = "{\"type\":\"summary\",\"uuid\":\"s1\",\"parentUuid\":\"u1\",\"agentName\":\"agent1\",\"teamName\":\"\",\"summary\":\"doing work\",\"timestamp\":\"2026-05-01T10:00:01Z\"}\n";
+        let dup_summary = "{\"type\":\"summary\",\"uuid\":\"s2\",\"parentUuid\":\"s1\",\"agentName\":\"agent1\",\"teamName\":\"\",\"summary\":\"doing work\",\"timestamp\":\"2026-05-01T10:00:02Z\"}\n";
+
+        std::fs::write(&path, format!("{user}{summary}{dup_summary}")).unwrap();
+
+        let (msgs, _, _) = read_session_incremental(path.to_str().unwrap(), 0).unwrap();
+        let user_count = msgs
+            .iter()
+            .filter(|m| matches!(m, ClassifiedMsg::User(_)))
+            .count();
+        let compact_count = msgs
+            .iter()
+            .filter(|m| matches!(m, ClassifiedMsg::Compact(_)))
+            .count();
+        assert_eq!(
+            user_count, 1,
+            "user entry must be unaffected by summary dedup"
+        );
+        assert_eq!(
+            compact_count, 1,
+            "duplicate summary must be deduplicated to one CompactMsg"
+        );
     }
 }
 
