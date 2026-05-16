@@ -1,5 +1,6 @@
 use serde::Deserialize;
 use serde_json::Value;
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 /// Deserializes a JSON string field, treating `null` as the type's default
@@ -155,12 +156,85 @@ impl Entry {
     }
 }
 
+/// Parses 4 ASCII hex bytes into a u16. Returns None if bytes are fewer than 4
+/// or contain non-hex characters.
+fn hex4_to_u16(bytes: &[u8]) -> Option<u16> {
+    if bytes.len() < 4 {
+        return None;
+    }
+    let s = std::str::from_utf8(&bytes[..4]).ok()?;
+    u16::from_str_radix(s, 16).ok()
+}
+
+/// Replaces lone UTF-16 surrogates (U+D800–U+DFFF) in JSON `\uXXXX` escape
+/// sequences with the Unicode replacement character U+FFFD. JSONL files
+/// written by Claude Code before v2.1.132 may contain lone surrogates when
+/// the tool-error truncation logic split a multi-byte emoji at an offset
+/// boundary. serde_json rejects lone surrogates per RFC 8259; this pass makes
+/// such lines parseable before they reach the deserializer.
+fn sanitize_lone_surrogates(s: &str) -> Cow<str> {
+    let bytes = s.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+    // Delay allocation until the first lone surrogate is found.
+    let mut result: Option<Vec<u8>> = None;
+
+    while i < len {
+        // Match \uXXXX (6 bytes: backslash, u, 4 hex digits).
+        if bytes[i] == b'\\' && i + 5 < len && bytes[i + 1] == b'u' {
+            if let Some(cp) = hex4_to_u16(&bytes[i + 2..i + 6]) {
+                if (0xD800..=0xDBFF).contains(&cp) {
+                    // High surrogate — valid only when immediately followed by \uDCxx–\uDFxx.
+                    let is_valid_pair = i + 11 < len
+                        && bytes[i + 6] == b'\\'
+                        && bytes[i + 7] == b'u'
+                        && hex4_to_u16(&bytes[i + 8..i + 12])
+                            .is_some_and(|c| (0xDC00..=0xDFFF).contains(&c));
+                    if is_valid_pair {
+                        if let Some(ref mut buf) = result {
+                            buf.extend_from_slice(&bytes[i..i + 12]);
+                        }
+                        i += 12;
+                    } else {
+                        result
+                            .get_or_insert_with(|| bytes[..i].to_vec())
+                            .extend_from_slice(b"\\uFFFD");
+                        i += 6;
+                    }
+                    continue;
+                } else if (0xDC00..=0xDFFF).contains(&cp) {
+                    // Lone low surrogate.
+                    result
+                        .get_or_insert_with(|| bytes[..i].to_vec())
+                        .extend_from_slice(b"\\uFFFD");
+                    i += 6;
+                    continue;
+                }
+            }
+        }
+        if let Some(ref mut buf) = result {
+            buf.push(bytes[i]);
+        }
+        i += 1;
+    }
+
+    match result {
+        None => Cow::Borrowed(s),
+        Some(buf) => Cow::Owned(
+            String::from_utf8(buf)
+                .unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned()),
+        ),
+    }
+}
+
 /// Parse a single JSONL line into an Entry.
 /// Returns None if the JSON is invalid, the entry has no UUID, or the entry
 /// has no type (guards against empty entries written by async PostToolUse
 /// hooks in Claude Code pre-v2.1.119).
 pub fn parse_entry(line: &[u8]) -> Option<Entry> {
-    let e: Entry = serde_json::from_slice(line).ok()?;
+    let s = std::str::from_utf8(line).ok()?;
+    let sanitized = sanitize_lone_surrogates(s);
+    let e: Entry = serde_json::from_str(&sanitized).ok()?;
     if (e.uuid.is_empty() && e.leaf_uuid.is_empty()) || e.entry_type.is_empty() {
         return None;
     }
@@ -545,6 +619,136 @@ mod tests {
             entry.terminal_sequence.is_none(),
             "terminalSequence must be None when absent"
         );
+    }
+
+    // --- Issue #85: lone UTF-16 surrogate sanitization ---
+
+    #[test]
+    fn sanitize_lone_surrogates_no_surrogates_returns_borrowed() {
+        let s = r#"{\"key\":\"hello world\"}"#;
+        let result = sanitize_lone_surrogates(s);
+        assert!(
+            matches!(result, Cow::Borrowed(_)),
+            "no surrogates -- must return borrowed (no allocation)"
+        );
+        assert_eq!(result.as_ref(), s);
+    }
+
+    #[test]
+    fn sanitize_lone_high_surrogate_replaced_with_fffd() {
+        // \uD83D is a lone high surrogate (no following \uDCxx).
+        // The function outputs the literal JSON escape \uFFFD (6 ASCII chars).
+        let s = r#"{\"key\":\"emoji \uD83D truncated\"}"#;
+        let result = sanitize_lone_surrogates(s);
+        assert!(
+            result.as_ref().contains(r"\uFFFD"),
+            "replacement escape must be present"
+        );
+        assert!(
+            !result.as_ref().contains(r"\uD83D"),
+            "lone surrogate must be removed"
+        );
+    }
+
+    #[test]
+    fn sanitize_lone_low_surrogate_replaced_with_fffd() {
+        // \uDC36 is a lone low surrogate (not preceded by a high surrogate).
+        let s = r#"{\"key\":\"broken \uDC36 emoji\"}"#;
+        let result = sanitize_lone_surrogates(s);
+        assert!(
+            result.as_ref().contains(r"\uFFFD"),
+            "replacement escape must be present"
+        );
+        assert!(
+            !result.as_ref().contains(r"\uDC36"),
+            "lone surrogate must be removed"
+        );
+    }
+
+    #[test]
+    fn sanitize_valid_surrogate_pair_unchanged() {
+        // \uD83D\uDC36 is a valid surrogate pair (dog face emoji).
+        let s = r#"{\"key\":\"dog \uD83D\uDC36 emoji\"}"#;
+        let result = sanitize_lone_surrogates(s);
+        assert!(
+            matches!(result, Cow::Borrowed(_)),
+            "valid pair must return borrowed (no modification)"
+        );
+        assert_eq!(result.as_ref(), s);
+    }
+
+    #[test]
+    fn sanitize_multiple_lone_surrogates_all_replaced() {
+        let s = r#"{\"a\":\"\uD83D\",\"b\":\"\uDC00\"}"#;
+        let result = sanitize_lone_surrogates(s);
+        assert!(
+            !result.as_ref().contains(r"\uD83D"),
+            "first lone surrogate must be removed"
+        );
+        assert!(
+            !result.as_ref().contains(r"\uDC00"),
+            "second lone surrogate must be removed"
+        );
+        let fffd_count = result.as_ref().match_indices(r"\uFFFD").count();
+        assert_eq!(
+            fffd_count, 2,
+            "both lone surrogates must be replaced with \\uFFFD"
+        );
+    }
+
+    #[test]
+    fn sanitize_high_surrogate_at_end_of_string_replaced() {
+        // \uD83D at end of value -- no room for a low surrogate, must be replaced.
+        let s = r#"\"\uD83D\""#;
+        let result = sanitize_lone_surrogates(s);
+        assert!(
+            result.as_ref().contains(r"\uFFFD"),
+            "replacement escape must be present"
+        );
+        assert!(
+            !result.as_ref().contains(r"\uD83D"),
+            "lone surrogate must be removed"
+        );
+    }
+
+    #[test]
+    fn parse_entry_with_lone_high_surrogate_succeeds() {
+        // Simulates a JSONL line from Claude Code < v2.1.132 where tool error
+        // truncation left a lone \uD83D (high surrogate, no low surrogate follows).
+        // serde_json rejects this without sanitization; parse_entry must succeed.
+        let line = r#"{"type":"user","uuid":"emoji-lone-high","timestamp":"2026-05-01T10:00:00Z","message":{"role":"user","content":"truncated emoji: \uD83D end"}}"#.as_bytes();
+        let entry = parse_entry(line);
+        assert!(
+            entry.is_some(),
+            "parse_entry must succeed despite lone high surrogate"
+        );
+        let e = entry.unwrap();
+        assert_eq!(e.uuid, "emoji-lone-high");
+        assert_eq!(e.entry_type, "user");
+    }
+
+    #[test]
+    fn parse_entry_with_lone_low_surrogate_succeeds() {
+        // Lone low surrogate \uDC36 without a preceding high surrogate.
+        let line = r#"{"type":"user","uuid":"emoji-lone-low","timestamp":"2026-05-01T10:00:00Z","message":{"role":"user","content":"lone low: \uDC36"}}"#.as_bytes();
+        let entry = parse_entry(line);
+        assert!(
+            entry.is_some(),
+            "parse_entry must succeed despite lone low surrogate"
+        );
+        assert_eq!(entry.unwrap().uuid, "emoji-lone-low");
+    }
+
+    #[test]
+    fn parse_entry_with_valid_surrogate_pair_succeeds() {
+        // Valid surrogate pair \uD83D\uDC36 (dog face) must parse successfully.
+        let line = r#"{"type":"user","uuid":"emoji-valid-pair","timestamp":"2026-05-01T10:00:00Z","message":{"role":"user","content":"dog: \uD83D\uDC36"}}"#.as_bytes();
+        let entry = parse_entry(line);
+        assert!(
+            entry.is_some(),
+            "parse_entry must succeed with a valid surrogate pair"
+        );
+        assert_eq!(entry.unwrap().uuid, "emoji-valid-pair");
     }
 
     #[test]
