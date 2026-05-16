@@ -102,6 +102,14 @@ pub struct Entry {
     // session up to which the fork context should be read.
     #[serde(default, rename = "upToMessageId")]
     pub up_to_message_id: String,
+    // Present in hook-related entries (v2.1.133+). Claude Code injects the active effort level
+    // into hook input JSON as effort:{level:"low"|"normal"|"high"}.
+    #[serde(default)]
+    pub effort: Option<Value>,
+    // Present in hook output entries (v2.1.141+). Hooks may emit this field to send desktop
+    // notifications, window titles, or bells without a controlling terminal.
+    #[serde(default, rename = "terminalSequence")]
+    pub terminal_sequence: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -458,5 +466,101 @@ mod tests {
             "regular entry must have empty logical_parent_uuid"
         );
         assert!(!entry.is_compact_summary);
+    }
+
+    // --- Issue #86: v2.1.133+ effort.level and v2.1.141+ terminalSequence compat ---
+
+    #[test]
+    fn parse_entry_captures_effort_field_v2_1_133() {
+        // v2.1.133+: hook input JSON includes effort:{level:"..."} at the top level.
+        // The parser must capture the nested object so callers can inspect effort.level.
+        let line = json!({
+            "type": "system",
+            "subtype": "hook_progress",
+            "uuid": "hook-effort-uuid",
+            "timestamp": "2026-05-07T10:00:00Z",
+            "hookEvent": "PreToolUse",
+            "hookName": "my-hook",
+            "effort": {"level": "high"}
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("must parse hook entry with effort field");
+        let effort = entry.effort.expect("effort must be captured");
+        assert_eq!(
+            effort.get("level").and_then(|v| v.as_str()),
+            Some("high"),
+            "effort.level must be 'high'"
+        );
+    }
+
+    #[test]
+    fn parse_entry_effort_defaults_to_none_when_absent() {
+        // Entries from before v2.1.133 (or non-hook entries) have no effort field.
+        let line = json!({
+            "type": "user",
+            "uuid": "no-effort-uuid",
+            "timestamp": "2026-05-07T10:00:00Z",
+            "message": {"role": "user", "content": "Hello"}
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("must parse entry without effort field");
+        assert!(entry.effort.is_none(), "effort must be None when absent");
+    }
+
+    #[test]
+    fn parse_entry_captures_terminal_sequence_field_v2_1_141() {
+        // v2.1.141+: hook output entries may carry terminalSequence at the top level,
+        // allowing hooks to emit desktop notifications and bells.
+        let line = json!({
+            "type": "attachment",
+            "uuid": "hook-out-uuid",
+            "timestamp": "2026-05-13T10:00:00Z",
+            "attachment": {"type": "hook_success", "hookEvent": "PostToolUse"},
+            "terminalSequence": "\x1b]9;Notification\x07"
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry =
+            parse_entry(&bytes).expect("must parse hook output entry with terminalSequence");
+        assert_eq!(
+            entry.terminal_sequence.as_deref(),
+            Some("\x1b]9;Notification\x07"),
+            "terminalSequence must be captured"
+        );
+    }
+
+    #[test]
+    fn parse_entry_terminal_sequence_defaults_to_none_when_absent() {
+        // Entries from before v2.1.141 (or hooks that don't emit terminal sequences) have no
+        // terminalSequence field.
+        let line = json!({
+            "type": "attachment",
+            "uuid": "old-hook-out-uuid",
+            "timestamp": "2026-05-01T10:00:00Z",
+            "attachment": {"type": "hook_success", "hookEvent": "PostToolUse"}
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry =
+            parse_entry(&bytes).expect("must parse hook output entry without terminalSequence");
+        assert!(
+            entry.terminal_sequence.is_none(),
+            "terminalSequence must be None when absent"
+        );
+    }
+
+    #[test]
+    fn parse_entry_unknown_fields_are_silently_ignored() {
+        // Future Claude Code versions may add more fields. The parser must never crash on
+        // unknown top-level fields — they must be silently dropped.
+        let line = json!({
+            "type": "system",
+            "uuid": "future-uuid",
+            "timestamp": "2026-05-17T10:00:00Z",
+            "unknownFutureField": "some-value",
+            "anotherNewField": {"nested": true}
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("must parse despite unknown fields");
+        assert_eq!(entry.entry_type, "system");
+        assert_eq!(entry.uuid, "future-uuid");
     }
 }
