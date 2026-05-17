@@ -172,7 +172,7 @@ fn hex4_to_u16(bytes: &[u8]) -> Option<u16> {
 /// the tool-error truncation logic split a multi-byte emoji at an offset
 /// boundary. serde_json rejects lone surrogates per RFC 8259; this pass makes
 /// such lines parseable before they reach the deserializer.
-fn sanitize_lone_surrogates(s: &str) -> Cow<str> {
+fn sanitize_lone_surrogates(s: &str) -> Cow<'_, str> {
     let bytes = s.as_bytes();
     let len = bytes.len();
     let mut i = 0;
