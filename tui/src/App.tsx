@@ -48,6 +48,7 @@ export function App() {
   const [sidebarFocused, setSidebarFocused] = useState(false);
   const [sidebarHighlight, setSidebarHighlight] = useState(0);
   const [collapsedKeys, setCollapsedKeys] = useState<Set<string>>(new Set());
+  const projectDirsRef = useRef<string[] | null>(null);
 
   const toggleCollapse = useCallback((key: string) => {
     setCollapsedKeys((prev) => {
@@ -80,6 +81,7 @@ export function App() {
         if (cancelled) return;
         setAllSessions(list);
         setPickerLoading(false);
+        projectDirsRef.current = d;
         await api.watchPicker(d);
       } catch (e) {
         if (cancelled) return;
@@ -98,10 +100,17 @@ export function App() {
     };
   }, []);
 
-  useSSE<{ sessions: SessionInfo[] }>(
-    "picker-update",
-    useCallback((payload) => {
-      if (payload.sessions) setAllSessions(payload.sessions);
+  // The backend emits "picker-refresh" with an empty payload; re-fetch the
+  // session list using the dirs we discovered earlier.
+  useSSE<unknown>(
+    "picker-refresh",
+    useCallback(() => {
+      const dirs = projectDirsRef.current;
+      if (!dirs) return;
+      api
+        .discoverSessions(dirs)
+        .then((list) => setAllSessions(list))
+        .catch(() => {});
     }, []),
   );
 
