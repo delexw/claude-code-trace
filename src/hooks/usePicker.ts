@@ -48,6 +48,20 @@ export function usePicker(selectedProject: string | null = null) {
     [fetchSessions],
   );
 
+  /**
+   * Re-fetch the session list using the most recently supplied project dirs.
+   * Used by the viewport-aware picker to refresh visible cards eagerly,
+   * independent of file-system events. Cheap: coalesced by the backend's
+   * sessions cache.
+   */
+  const refresh = useCallback(() => {
+    const dirs = projectDirsRef.current;
+    if (!dirs) return;
+    fetchSessions(dirs).catch((err) => {
+      console.error("Failed to refresh sessions:", err);
+    });
+  }, [fetchSessions]);
+
   const setSearchQuery = useCallback((query: string) => {
     setState((prev) => ({ ...prev, searchQuery: query }));
   }, []);
@@ -104,6 +118,7 @@ export function usePicker(selectedProject: string | null = null) {
     searchQuery: state.searchQuery,
     setSearchQuery,
     discoverSessions,
+    refresh,
     updateSessionOngoing,
   };
 }
