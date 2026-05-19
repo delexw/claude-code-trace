@@ -1,5 +1,6 @@
 import { useRef, useMemo } from "react";
 import { useScrollToSelected } from "../hooks/useScrollToSelected";
+import { useVisibleSessions } from "../hooks/useVisibleSessions";
 import type { SessionInfo } from "../types";
 import { OngoingDots } from "./OngoingDots";
 import {
@@ -12,6 +13,7 @@ import {
   shortModel,
 } from "../lib/format";
 import { getModelColor } from "../lib/theme";
+import { mergeRefs } from "../lib/mergeRefs";
 import { BsClaude } from "react-icons/bs";
 import { TokensIcon, CostIcon, ForwardIcon } from "./Icons";
 
@@ -23,6 +25,12 @@ interface SessionPickerProps {
   onSelect: (session: SessionInfo) => void;
   onSearchChange: (query: string) => void;
   onSelectIndex?: (index: number) => void;
+  /**
+   * Called (debounced) with the paths of session cards currently in the viewport,
+   * and again periodically on a heartbeat while any cards remain visible. The caller
+   * uses this as a cue to refresh fresh session info.
+   */
+  onVisiblePathsChange?: (paths: string[]) => void;
 }
 
 export function SessionPicker({
@@ -33,10 +41,12 @@ export function SessionPicker({
   onSelect,
   onSearchChange,
   onSelectIndex,
+  onVisiblePathsChange,
 }: SessionPickerProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const selectedRef = useScrollToSelected(selectedIndex);
   const searchRef = useRef<HTMLInputElement>(null);
+  const registerVisible = useVisibleSessions(onVisiblePathsChange ?? noop);
 
   const dateGroups = groupByDate(sessions);
 
@@ -106,7 +116,7 @@ export function SessionPicker({
               return (
                 <div
                   key={session.path}
-                  ref={isSelected ? selectedRef : undefined}
+                  ref={mergeRefs(isSelected ? selectedRef : null, registerVisible(session.path))}
                   className={`picker__session${isSelected ? " picker__session--selected" : ""}${session.is_ongoing ? " picker__session--ongoing" : ""}`}
                   onMouseEnter={() => onSelectIndex?.(idx)}
                   onClick={() => onSelect(session)}
@@ -169,3 +179,5 @@ export function SessionPicker({
     </div>
   );
 }
+
+function noop() {}

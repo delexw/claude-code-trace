@@ -1,7 +1,43 @@
-import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, fireEvent, act } from "@testing-library/react";
 import { SessionPicker } from "./SessionPicker";
 import type { SessionInfo } from "../types";
+
+type IOCallback = (entries: IntersectionObserverEntry[], observer: IntersectionObserver) => void;
+
+class FakeIO {
+  static last: FakeIO | null = null;
+  cb: IOCallback;
+  observed: Element[] = [];
+  observe = (el: Element) => {
+    this.observed.push(el);
+  };
+  unobserve = vi.fn();
+  disconnect = vi.fn();
+  takeRecords = vi.fn(() => [] as IntersectionObserverEntry[]);
+  root = null;
+  rootMargin = "";
+  thresholds: number[] = [];
+  constructor(cb: IOCallback) {
+    this.cb = cb;
+    FakeIO.last = this;
+  }
+  trigger(els: Element[]) {
+    const entries = els.map(
+      (el) =>
+        ({
+          target: el,
+          isIntersecting: true,
+          intersectionRatio: 1,
+          boundingClientRect: new DOMRect(),
+          intersectionRect: new DOMRect(),
+          rootBounds: new DOMRect(),
+          time: 0,
+        }) as unknown as IntersectionObserverEntry,
+    );
+    this.cb(entries, this as unknown as IntersectionObserver);
+  }
+}
 
 function makeSession(overrides: Partial<SessionInfo> = {}): SessionInfo {
   return {
@@ -190,5 +226,61 @@ describe("SessionPicker", () => {
       />,
     );
     expect(screen.queryByText(/Discovering sessions/)).not.toBeInTheDocument();
+  });
+
+  describe("viewport-aware visibility tracking", () => {
+    beforeEach(() => {
+      FakeIO.last = null;
+      (globalThis as { IntersectionObserver: unknown }).IntersectionObserver = FakeIO;
+      vi.useFakeTimers();
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("observes each session card and reports visible paths via onVisiblePathsChange", () => {
+      const onVisible = vi.fn();
+      const sessions = [
+        makeSession({ path: "/a.jsonl", session_id: "a", first_message: "alpha" }),
+        makeSession({ path: "/b.jsonl", session_id: "b", first_message: "beta" }),
+      ];
+      render(
+        <SessionPicker
+          sessions={sessions}
+          loading={false}
+          searchQuery=""
+          selectedIndex={0}
+          onSelect={vi.fn()}
+          onSearchChange={vi.fn()}
+          onVisiblePathsChange={onVisible}
+        />,
+      );
+      expect(FakeIO.last).not.toBeNull();
+      expect(FakeIO.last!.observed).toHaveLength(2);
+
+      act(() => {
+        FakeIO.last!.trigger(FakeIO.last!.observed);
+        vi.advanceTimersByTime(150);
+      });
+      expect(onVisible).toHaveBeenCalledExactlyOnceWith(
+        expect.arrayContaining(["/a.jsonl", "/b.jsonl"]),
+      );
+    });
+
+    it("works without onVisiblePathsChange (no-op observer)", () => {
+      const sessions = [makeSession()];
+      expect(() =>
+        render(
+          <SessionPicker
+            sessions={sessions}
+            loading={false}
+            searchQuery=""
+            selectedIndex={0}
+            onSelect={vi.fn()}
+            onSearchChange={vi.fn()}
+          />,
+        ),
+      ).not.toThrow();
+    });
   });
 });

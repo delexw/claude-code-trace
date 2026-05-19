@@ -312,6 +312,7 @@ export function App() {
             onSelect={handleSelectSession}
             onSearchChange={picker.setSearchQuery}
             onSelectIndex={setPickerSelectedIndex}
+            onVisiblePathsChange={picker.refresh}
           />
         );
 
