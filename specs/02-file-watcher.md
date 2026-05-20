@@ -125,7 +125,7 @@ sequenceDiagram
     WT ->> WT: watch each parent\n(Recursive)
 
     loop file events
-        WT ->> WT: filter .jsonl files
+        WT ->> WT: filter: Create events (any)\nOR Modify/Remove of .jsonl files
         WT ->> WT: debounce 1 000 ms
         WT -->> TK: signal
         TK -->> CL: emit "picker-refresh"\n(empty payload)

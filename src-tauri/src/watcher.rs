@@ -264,6 +264,24 @@ pub fn start_session_watcher(
     }
 }
 
+/// Filter for picker watcher events.
+/// Triggers on any Create event (new project directory or new session file) and
+/// on Modify/Remove events that target a `.jsonl` file.
+/// Keeping Create broad is intentional: when Claude Code starts a session in a
+/// brand-new project, the OS may deliver a single directory-creation event
+/// before the JSONL file appears, and we must not miss that signal.
+fn picker_event_filter(event: &notify::Event) -> bool {
+    if matches!(event.kind, notify::EventKind::Create(_)) {
+        return true;
+    }
+    event.paths.iter().any(|p| {
+        p.file_name()
+            .and_then(|n| n.to_str())
+            .map(|n| n.ends_with(".jsonl"))
+            .unwrap_or(false)
+    })
+}
+
 /// Start watching project directories for new/changed sessions.
 /// When changes are detected the watcher broadcasts a lightweight `picker-refresh`
 /// signal with no payload. Clients are responsible for fetching the updated
@@ -312,17 +330,7 @@ pub fn start_picker_watcher(
             }
         }
 
-        run_debounce_loop(
-            rx,
-            |event| {
-                event.paths.iter().any(|p| {
-                    let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                    name.ends_with(".jsonl")
-                })
-            },
-            signal_tx,
-            thread_stop_rx,
-        );
+        run_debounce_loop(rx, picker_event_filter, signal_tx, thread_stop_rx);
         // watcher dropped here → OS watcher fd released
     });
 
@@ -392,6 +400,50 @@ mod tests {
         handle
             .join()
             .expect("debounce thread should exit when stop sender is dropped");
+    }
+
+    /// picker_event_filter triggers on Create events regardless of path extension.
+    #[test]
+    fn picker_filter_triggers_on_create_events() {
+        // New project directory (no .jsonl extension)
+        let mut event =
+            notify::Event::new(notify::EventKind::Create(notify::event::CreateKind::Folder));
+        event.paths = vec![std::path::PathBuf::from(
+            "/home/.claude/projects/-Users-yang-new-project",
+        )];
+        assert!(picker_event_filter(&event), "Create(Folder) must trigger");
+
+        // Any create — some platforms report CreateKind::Any
+        let mut event =
+            notify::Event::new(notify::EventKind::Create(notify::event::CreateKind::Any));
+        event.paths = vec![std::path::PathBuf::from(
+            "/home/.claude/projects/-Users-yang-new-project",
+        )];
+        assert!(picker_event_filter(&event), "Create(Any) must trigger");
+    }
+
+    /// picker_event_filter triggers on Modify events only for .jsonl files.
+    #[test]
+    fn picker_filter_triggers_on_jsonl_modify() {
+        let mut event = notify::Event::new(notify::EventKind::Modify(
+            notify::event::ModifyKind::Data(notify::event::DataChange::Any),
+        ));
+        event.paths = vec![std::path::PathBuf::from(
+            "/home/.claude/projects/proj/session.jsonl",
+        )];
+        assert!(picker_event_filter(&event));
+    }
+
+    /// picker_event_filter ignores Modify events on non-.jsonl files.
+    #[test]
+    fn picker_filter_ignores_non_jsonl_modify() {
+        let mut event = notify::Event::new(notify::EventKind::Modify(
+            notify::event::ModifyKind::Data(notify::event::DataChange::Any),
+        ));
+        event.paths = vec![std::path::PathBuf::from(
+            "/home/.claude/projects/proj/settings.json",
+        )];
+        assert!(!picker_event_filter(&event));
     }
 
     /// WatcherHandle::stop() must not panic when called multiple times on a closed channel.

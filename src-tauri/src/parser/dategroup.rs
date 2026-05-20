@@ -74,7 +74,7 @@ pub fn group_sessions_by_date(sessions: &[SessionInfo]) -> Vec<DateGroup> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::{Duration, Utc};
+    use chrono::{Duration, Local, TimeZone, Utc};
 
     fn make_session(mod_time: DateTime<Utc>) -> SessionInfo {
         SessionInfo {
@@ -153,9 +153,14 @@ mod tests {
 
     #[test]
     fn multiple_sessions_same_category_grouped() {
-        let now = Utc::now();
-        let also_now = now - Duration::minutes(5);
-        let sessions = vec![make_session(now), make_session(also_now)];
+        // Anchor to noon today to avoid midnight boundary flakiness
+        let noon_utc = Local::now()
+            .date_naive()
+            .and_hms_opt(12, 0, 0)
+            .map(|dt| Local.from_local_datetime(&dt).unwrap().with_timezone(&Utc))
+            .unwrap_or_else(Utc::now);
+        let also_noon = noon_utc - Duration::minutes(5);
+        let sessions = vec![make_session(noon_utc), make_session(also_noon)];
         let groups = group_sessions_by_date(&sessions);
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].category, DateCategory::Today);
