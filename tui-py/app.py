@@ -86,7 +86,6 @@ class CCTraceApp(App):
 
     CSS_PATH = "cctrace.tcss"
     TITLE = "cctrace"
-    DARK = True
 
     # ---- Global bindings (priority=True intercepts before focused widgets) ----
     # Global bindings — always visible in Footer regardless of focused widget.

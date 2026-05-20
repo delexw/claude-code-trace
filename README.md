@@ -10,7 +10,7 @@
 [![React](https://img.shields.io/badge/react-19-61DAFB?logo=react&logoColor=white)](https://react.dev/)
 [![Tauri](https://img.shields.io/badge/tauri-v2-24C8D8?logo=tauri&logoColor=white)](https://v2.tauri.app/)
 [![Python](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
-[![Textual](https://img.shields.io/badge/textual-0.80%2B-5A4FCF?logo=textualize&logoColor=white)](https://textual.textualize.io/)
+[![Textual](https://img.shields.io/badge/textual-8.2%2B-5A4FCF?logo=textualize&logoColor=white)](https://textual.textualize.io/)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-blue)](https://github.com/delexw/claude-code-trace/releases)
 
 **Claude Code Trace** is a **Claude Code session log viewer** for local JSONL files stored in `~/.claude/projects/`.
