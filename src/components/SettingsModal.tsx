@@ -64,7 +64,7 @@ export function SettingsModal({ onClose, onSaved }: SettingsModalProps) {
     (e: React.KeyboardEvent) => {
       if (e.key === "Enter") {
         e.preventDefault();
-        handleSave();
+        void handleSave();
       }
     },
     [handleSave],
