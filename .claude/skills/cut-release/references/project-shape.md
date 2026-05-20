@@ -15,21 +15,25 @@ codebase, this file points at the source of truth rather than repeating it.
 
 ## Version-bearing files (skill-specific rule)
 
-Four files must agree on the next-version string. Nothing in the codebase enforces this
+Three files must agree on the next-version string. Nothing in the codebase enforces this
 sync — the skill does.
 
-| File                        | Owns                                 | Bumps with                                 |
-| --------------------------- | ------------------------------------ | ------------------------------------------ |
-| `package.json` (root)       | Node/TS workspace + binary entry     | the Rust crate (lockstep)                  |
-| `src-tauri/Cargo.toml`      | Rust crate version                   | root `package.json` (lockstep)             |
-| `src-tauri/tauri.conf.json` | Tauri bundle filenames + app version | the Rust crate (lockstep)                  |
-| `tui/package.json`          | Terminal UI subpackage               | independently; bumps when TUI code changes |
+| File                        | Owns                                 | Bumps with                     |
+| --------------------------- | ------------------------------------ | ------------------------------ |
+| `package.json` (root)       | Node/TS workspace + binary entry     | the Rust crate (lockstep)      |
+| `src-tauri/Cargo.toml`      | Rust crate version                   | root `package.json` (lockstep) |
+| `src-tauri/tauri.conf.json` | Tauri bundle filenames + app version | the Rust crate (lockstep)      |
 
 Root + Cargo + `tauri.conf.json` move together because the desktop binary the user installs
 is built from all three — `tauri.conf.json`'s `version` field is what `tauri-action`
 templates into the released artifact filenames (`Claude.Code.Trace_<version>_*.dmg`, etc.).
 Missing this file silently ships a release whose artifacts are stamped with the previous
-version. `tui/package.json` tracks separately because it's shipped as its own npm package.
+version.
+
+The TUI used to live under `tui/` with its own `package.json` that tracked independently.
+That was migrated to a Python package under `tui-py/` which has no version manifest
+(only `requirements.txt` + `ruff.toml`). If a versioned manifest is ever re-introduced
+to `tui-py/`, add it to the lockstep set and update the skill's Phase 3 step.
 
 ## Lockfile regen after a version bump
 
@@ -47,12 +51,24 @@ moved.
 
 ## Release pipeline (delegated to CI)
 
-`.github/workflows/release.yml` reads `CHANGELOG.md`, extracts the section matching the
-pushed tag's version, attaches it to the auto-built draft release, and a final
-`publish` job flips the draft to public. See Phase 7 for the verification flow.
+`.github/workflows/release.yml` is the source of truth. Its job graph for `v*` tag
+pushes:
 
-This is the source of truth — if the pipeline changes, edit the workflow and update
-Phase 7's narrative, not this file.
+1. `guard` — refuses to run if a non-draft GitHub release for the tag already exists.
+   This is the duplicate-release defence-in-depth complement to the skill's Phase 1
+   preflight; if a stale tag was pushed, the CI aborts before any artifact upload.
+2. `notes` — slices `CHANGELOG.md` for the version's section and exposes it as a
+   workflow output. Fails if the heading isn't in the exact `## [X.Y.Z] — YYYY-MM-DD`
+   format.
+3. `build-macos` / `build-linux` / `build-windows` — three parallel `tauri-action` runs
+   each creating / updating a draft release with platform artifacts.
+4. `publish` — flips the draft to public and marks it latest.
+
+`workflow_dispatch` mode is a dry-run for the notes job only; nothing is built or
+published. Use it to verify a CHANGELOG section parses correctly before tagging.
+
+If the pipeline changes, edit the workflow and update Phase 7's narrative, not this
+file.
 
 ## GitHub repo identity
 

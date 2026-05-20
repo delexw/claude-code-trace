@@ -1,53 +1,38 @@
 # Phase 9 — Clean up
 
-Goal: remove the local release branch and any stash entry, leaving the working tree on
-`main` in a clean state.
-
-Ask the user before deleting anything that contains work not already on `origin/main` or
-on the tag.
+Goal: remove the local release branch and emit a final summary. Fully automated.
 
 ## Step 9.1 — Verify the release branch is fully captured
 
 ```bash
-git log --oneline release/<version> ^main ^vX.Y.Z
+git log --oneline "release/v$NEXT_VERSION" "^main" "^v$NEXT_VERSION"
 ```
 
-If this prints nothing, every commit on `release/<version>` is already reachable from
-either `main` or the `vX.Y.Z` tag, and the branch is safe to delete.
+Empty output = every commit on the release branch is reachable from `main` or the
+`v$NEXT_VERSION` tag, so the branch is safe to delete.
 
-If it prints commits, **stop**. Something on the branch isn't preserved. Investigate
-before deleting.
+If this prints commits, **abort** — something on the branch isn't preserved. Do not
+delete. Surface the orphan commits so the user can investigate.
 
 ## Step 9.2 — Delete the local branch
 
 ```bash
-git branch -D release/<version>
+git branch -D "release/v$NEXT_VERSION"
 ```
 
-Use `-D` (force) rather than `-d` because the branch isn't merged into main in the
-traditional sense — its commit was cherry-picked, not merged. The `-d` would refuse.
+Use `-D` (force) because the branch isn't merged in the traditional sense — its commit
+is reachable via the tag and via main, but git's `-d` check doesn't always recognize
+that.
 
-## Step 9.3 — Drop the stash
+## Step 9.3 — Final report
 
-If you used `git stash push` in Phase 2 and have already reapplied everything you
-needed:
+Emit a single summary block (no follow-up questions). Include:
 
-```bash
-git stash drop
-```
-
-This removes the saved stash entry. Skip if you still want a backup of the in-flight
-work in case something needs to be reproduced.
-
-## Step 9.4 — Final report to the user
-
-Summarise:
-
-- Tag pushed: `vX.Y.Z`
-- Release URL: from `gh release view vX.Y.Z --json url --jq '.url'`
-- Commits in the release: count and one-liner topic
-- Main updated: yes/no (Phase 8 outcome)
-- Any follow-ups: e.g. parser fixes that were skipped from this release and will need a
-  future tag.
+- Tag: `v$NEXT_VERSION`
+- Release URL: from `gh release view v$NEXT_VERSION --json url --jq '.url'`
+- Commit count in the release (Phase 1's number)
+- Top-level theme (one short sentence)
+- `origin/main` HEAD short SHA + subject (proves the release commit landed)
+- Pipeline conclusion (5/5 green, or list the failing job)
 
 That's the end of the workflow.

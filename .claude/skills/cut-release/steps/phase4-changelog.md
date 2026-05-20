@@ -27,8 +27,8 @@ For each chosen commit in `$SUBSET`:
    not summarize the commit message verbatim.
 3. End the bullet with a commit link: ``([`<sha7>`](https://github.com/delexw/claude-code-trace/commit/<sha>))``
 
-Skip `chore:` / `docs:` / `test:` / `ci:` unless the user asks; they clutter
-user-facing CHANGELOGs.
+Always skip `chore:` / `docs:` / `test:` / `ci:` — they clutter user-facing CHANGELOGs.
+The skill is non-interactive.
 
 ## Step 4.2 — Format
 

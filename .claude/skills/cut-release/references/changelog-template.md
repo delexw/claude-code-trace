@@ -57,8 +57,9 @@ maintainer — explain visible impact, not implementation.
 - **Breaking Changes** (new bucket, comes first, before Added) for major releases. Lead
   with what broke and how the user migrates.
 
-Skip `chore:` / `docs:` / `test:` / `ci:` unless the user specifically asks. They
-clutter the CHANGELOG without informing users.
+Always skip `chore:` / `docs:` / `test:` / `ci:` — they clutter the CHANGELOG without
+informing users. The skill is non-interactive; never include these even if the count
+looks short.
 
 ## Linking
 

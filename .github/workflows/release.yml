@@ -12,8 +12,47 @@ on:
         type: string
 
 jobs:
+  guard:
+    name: Refuse duplicate published release
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    permissions:
+      contents: read
+    steps:
+      - name: Check that no published release already exists for this tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          # If a release exists for this tag and is NOT a draft, abort. A
+          # draft release with the same name is fine — tauri-action will
+          # update it. A published release with the same tag means a prior
+          # successful run already shipped this version; re-running would
+          # either silently no-op or overwrite the published artifacts.
+          STATE=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft' 2>/dev/null || echo "missing")
+          case "$STATE" in
+            missing)
+              echo "No existing release for $TAG — proceeding."
+              ;;
+            true)
+              echo "Existing draft release for $TAG — tauri-action will update it. Proceeding."
+              ;;
+            false)
+              echo "::error title=Duplicate release::A published release for $TAG already exists. Refusing to re-release the same version."
+              echo "::error::To intentionally re-release, first delete the existing release: gh release delete $TAG --yes --cleanup-tag"
+              exit 1
+              ;;
+            *)
+              echo "::error::Unexpected gh release view output: $STATE"
+              exit 1
+              ;;
+          esac
+
   notes:
     name: Extract release notes from CHANGELOG
+    needs: guard
+    if: always() && (needs.guard.result == 'success' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     outputs:
       body: ${{ steps.extract.outputs.body }}

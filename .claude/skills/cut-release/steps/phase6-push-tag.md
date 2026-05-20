@@ -1,48 +1,31 @@
-# Phase 6 — Push the tag (confirmation gate)
+# Phase 6 — Push the tag
 
 Goal: push the local tag to `origin` so the GitHub Actions release pipeline runs and
-builds the macOS / Linux / Windows artifacts.
+builds the macOS / Linux / Windows artifacts. No interactive confirmation — the
+preflight in Phase 1 already verified the version isn't a duplicate; this phase verifies
+that nothing changed between Phase 1 and now.
 
-This is the first irreversible step. Stop and confirm with the user before pushing.
+## Step 6.1 — Final duplicate-version preflight
 
-## Step 6.1 — Show the user what's about to happen
-
-Present three things:
-
-1. **Tag name and target commit**:
-
-   ```bash
-   git log -1 vX.Y.Z
-   ```
-
-2. **Commit range in the release** (so they can verify scope):
-
-   ```bash
-   git log --oneline "$LAST_TAG"..vX.Y.Z
-   ```
-
-3. **CHANGELOG entry for the new version** — read the section back to them.
-
-## Step 6.2 — Ask for explicit approval
-
-A clear yes/no question:
-
-> "Push tag `vX.Y.Z` to `origin`? This triggers the GitHub Actions release pipeline,
-> which builds the artifacts and creates a draft release. Cancelling later requires
-> manually deleting the draft and the remote tag."
-
-Wait for the user's response. Do not push without a clear "yes".
-
-If they want changes (different CHANGELOG wording, different scope, different version),
-loop back to the relevant earlier phase and rebuild. Local tags and branches make this
-cheap; pushed tags do not.
-
-## Step 6.3 — Push
-
-On approval:
+A second check matters because Phase 1's verdict can become stale: another release run
+could have raced this one between Phase 1 and Phase 6 (e.g. on a CI runner or a parallel
+session).
 
 ```bash
-git push origin vX.Y.Z
+git fetch --tags --quiet origin
+if git ls-remote --tags origin "refs/tags/v$NEXT_VERSION" | grep -q "v$NEXT_VERSION$"; then
+  echo "Error: v$NEXT_VERSION appeared on origin between Phase 1 and Phase 6. Aborting to avoid clobbering the existing tag."
+  exit 1
+fi
+```
+
+If this trips, abort — surface the conflicting remote SHA and let the user resolve.
+Never `--force` to recover.
+
+## Step 6.2 — Push the tag
+
+```bash
+git push origin "v$NEXT_VERSION"
 ```
 
 The release workflow starts on GitHub within seconds. Confirm by:
@@ -51,7 +34,9 @@ The release workflow starts on GitHub within seconds. Confirm by:
 gh run list --workflow=release.yml --limit=1
 ```
 
-You should see a queued or in-progress run for the tag.
+You should see a queued or in-progress run for the tag. If the run is not found within
+~10 seconds, the workflow file may not be on the default branch — check
+`.github/workflows/release.yml` exists on `main` and the `on: push: tags: [v*]` trigger
+is intact.
 
-Proceed to Phase 7. (You can do Phase 7 in parallel with the build — but the publish
-step requires the build to finish.)
+Proceed to Phase 7.

@@ -4,36 +4,28 @@ Goal: bump every version-bearing file to `$NEXT_VERSION` and regenerate the two
 lockfiles.
 
 Refer to `${CLAUDE_SKILL_DIR}/references/project-shape.md` for the rules on which files
-move in lockstep and which move independently.
+move in lockstep.
 
-## Step 3.1 — Bump root + Cargo + Tauri config (always lockstep)
+## Step 3.1 — Bump root + Cargo + Tauri config (lockstep)
 
-```bash
-# Root package.json
-# Edit: "version": "<old>" → "version": "<NEXT_VERSION>"
+Use the Edit tool with precise `old_string`/`new_string` (not sed):
 
-# src-tauri/Cargo.toml
-# Edit: version = "<old>" → version = "<NEXT_VERSION>"
+- `package.json` — top-level `"version"` field
+- `src-tauri/Cargo.toml` — `[package].version` line
+- `src-tauri/tauri.conf.json` — top-level `"version"` field
 
-# src-tauri/tauri.conf.json
-# Edit: "version": "<old>" → "version": "<NEXT_VERSION>"
-```
+All three must end up at `$NEXT_VERSION`. `tauri.conf.json` is the one `tauri-action`
+reads when stamping artifact filenames at build time
+(`Claude.Code.Trace_<version>_*.dmg`, etc.). Skipping it produces a release whose
+artifacts are stamped with the previous version.
 
-Use the Edit tool with `old_string`/`new_string` rather than sed — safer for surrounding
-context.
+## Step 3.2 — TUI package (currently no version manifest)
 
-`tauri.conf.json` is the field `tauri-action` reads when stamping artifact filenames at
-build time (`Claude.Code.Trace_<version>_*.dmg`, etc.). Skipping it produces a release
-whose artifacts are still named with the previous version — the symptom seen on v0.5.1.
+The TUI lives under `tui-py/` and is a Python package without a `pyproject.toml` /
+`package.json` carrying a version string. Nothing to bump here.
 
-## Step 3.2 — Bump TUI version
-
-If the chosen subset contains any commit that modifies files under `tui/`, bump
-`tui/package.json` by the same tier as the main release (patch / minor / major).
-
-If the subset has **no** TUI changes, bump TUI only at the patch level — it keeps the
-lockfile consistent without claiming a feature it doesn't have. Alternatively skip the
-TUI bump entirely and mention this in the CHANGELOG.
+If a TUI manifest with a version is ever added back, bump it in lockstep with the root
+package and update this step.
 
 ## Step 3.3 — Regenerate lockfiles
 
@@ -42,14 +34,15 @@ npm install --package-lock-only
 ( cd src-tauri && cargo check --offline )
 ```
 
-These commands write the new local-workspace version into the lockfiles. Confirm the
-diffs are small and only touch the version strings:
+These commands write the new local-workspace version into the lockfiles. Then verify the
+diff is small and only touches version strings:
 
 ```bash
-git diff package-lock.json src-tauri/Cargo.lock | head -30
+git diff --stat -- package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json package-lock.json src-tauri/Cargo.lock
 ```
 
-Large diffs suggest the lockfile was stale or has unrelated deps changes — investigate
-before continuing.
+Expect roughly 6 files changed and around 6 insertions / 6 deletions. A large diff
+suggests the lockfile was stale or has unrelated dep changes — investigate before
+continuing.
 
 Proceed to Phase 4.
