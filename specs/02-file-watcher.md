@@ -125,12 +125,13 @@ sequenceDiagram
     WT ->> WT: watch each parent\n(Recursive)
 
     loop file events
-        WT ->> WT: filter: Create events (any)\nOR Modify/Remove of .jsonl files
+        WT ->> WT: filter: any non-empty event\n(broad — macOS FSEvents may coalesce\nnew-dir creates as parent Modify)
         WT ->> WT: debounce 1 000 ms
         WT -->> TK: signal
         TK -->> CL: emit "picker-refresh"\n(empty payload)
     end
 
+    CL ->> CL: call get_project_dirs to pick up\nnewly created project folders
     CL ->> CL: call GET /api/sessions\nto refresh list
 ```
 

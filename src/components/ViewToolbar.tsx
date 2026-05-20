@@ -55,7 +55,11 @@ function RightButtons({ onOpenSettings }: { onOpenSettings: () => void }) {
       {isTauri && (
         <button
           className="view-toolbar__btn"
-          onClick={() => invoke("switch_to_browser").catch(() => {})}
+          onClick={async () => {
+            try {
+              await invoke("switch_to_browser");
+            } catch {}
+          }}
           title="Open in browser and hide this window"
         >
           Open in Browser
