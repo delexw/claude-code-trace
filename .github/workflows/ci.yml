@@ -28,8 +28,18 @@ jobs:
         with:
           workspaces: src-tauri
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: tui-py/requirements.txt
+
       - name: Install dependencies
-        run: npm ci && cd tui && npm ci
+        run: npm ci
+
+      - name: Install Python TUI dependencies
+        run: pip install -r tui-py/requirements.txt
 
       - name: TypeScript type check
         run: npx tsc --noEmit
@@ -51,3 +61,13 @@ jobs:
 
       - name: Rust tests
         run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Python TUI lint
+        run: ruff check tui-py
+
+      - name: Python TUI format check
+        run: ruff format --check tui-py
+
+      - name: Python TUI tests
+        run: pytest
+        working-directory: tui-py
