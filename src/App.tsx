@@ -82,14 +82,17 @@ export function App() {
     if (discoveredRef.current) return;
     discoveredRef.current = true;
     const discover = async () => {
-      let hasConfig = false;
+      let dirExists = false;
       try {
-        const settings = await invoke<{ projects_dir: string | null }>("get_settings");
-        hasConfig = settings.projects_dir != null;
+        const settings = await invoke<{
+          projects_dir: string | null;
+          effective_dir_exists: boolean;
+        }>("get_settings");
+        dirExists = settings.effective_dir_exists;
       } catch {
         // no settings file yet
       }
-      if (!hasConfig) {
+      if (!dirExists) {
         setShowSettings(true);
         return;
       }

@@ -18,12 +18,12 @@ fi
 
 ERRORS=""
 
-# --- Format check ---
+# --- JS/TS Format check ---
 FMT_OUTPUT=$(npm run fmt:check 2>&1) || {
   ERRORS="Format issues found. Run: npm run fmt, do not ask user for options, ⚠️  STAGE THE FIXED FILES in a SEPARATE Bash tool call: git add <files>\nThen retry the commit in another Bash tool call.\n\n$FMT_OUTPUT"
 }
 
-# --- Lint check ---
+# --- JS/TS Lint check ---
 LINT_OUTPUT=$(npm run lint 2>&1)
 LINT_EXIT=$?
 if [ $LINT_EXIT -ne 0 ] || echo "$LINT_OUTPUT" | grep -qE "[1-9][0-9]* warnings? "; then
@@ -31,6 +31,24 @@ if [ $LINT_EXIT -ne 0 ] || echo "$LINT_OUTPUT" | grep -qE "[1-9][0-9]* warnings?
     ERRORS="$ERRORS\n\nLint issues:\n$LINT_OUTPUT"
   else
     ERRORS="Lint issues found. Fix each issue properly at the root cause — do NOT add eslint-disable comments or suppress rules. ⚠️  STAGE THE FIXED FILES in a SEPARATE Bash tool call: git add <files>\nThen retry the commit in another Bash tool call.\n\n$LINT_OUTPUT"
+  fi
+fi
+
+# --- Python format + lint check (only when tui-py files are staged) ---
+PY_STAGED=$(printf '%s\n' "$STAGED" | grep '^tui-py/.*\.py$' || true)
+if [ -n "$PY_STAGED" ]; then
+  PY_FMT_OUTPUT=$(ruff format --check tui-py/ 2>&1)
+  PY_FMT_EXIT=$?
+  if [ $PY_FMT_EXIT -ne 0 ]; then
+    PY_FMT_MSG="Python format issues found. Run: cd tui-py && ruff format . — ⚠️  STAGE THE FIXED FILES in a SEPARATE Bash tool call, then retry.\n\n$PY_FMT_OUTPUT"
+    ERRORS="${ERRORS:+$ERRORS\n\n}$PY_FMT_MSG"
+  fi
+
+  PY_LINT_OUTPUT=$(ruff check tui-py/ 2>&1)
+  PY_LINT_EXIT=$?
+  if [ $PY_LINT_EXIT -ne 0 ]; then
+    PY_LINT_MSG="Python lint issues found. Fix at the root cause — do NOT add noqa comments unless genuinely necessary. ⚠️  STAGE THE FIXED FILES in a SEPARATE Bash tool call, then retry.\n\n$PY_LINT_OUTPUT"
+    ERRORS="${ERRORS:+$ERRORS\n\n}$PY_LINT_MSG"
   fi
 fi
 

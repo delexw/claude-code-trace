@@ -14,3 +14,8 @@ updates:
     directory: /src-tauri
     schedule:
       interval: weekly
+
+  - package-ecosystem: pip
+    directory: /tui-py
+    schedule:
+      interval: weekly

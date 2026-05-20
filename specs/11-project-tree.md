@@ -126,5 +126,5 @@ flowchart TD
 ## Related Specs
 
 - [05-frontend-web.md](05-frontend-web.md) — `ProjectTree` React component (web)
-- [06-tui.md](06-tui.md) — `ProjectTree` Ink component (TUI)
+- [06-tui.md](06-tui.md) — `ProjectTree` Textual widget (TUI)
 - [07-data-types.md](07-data-types.md) — `SessionInfo` and `ProjectNode` types

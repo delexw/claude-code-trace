@@ -2,8 +2,8 @@
 
 **Locations**:
 `src/components/DetailItem.tsx`, `src/components/MessageItem.tsx`, `src/components/Icons.tsx`,
-`tui/src/components/DetailView.tsx`, `tui/src/components/MessageList.tsx`,
-`tui/src/lib/items.ts`, `tui/src/lib/icons.ts`,
+`tui-py/widgets/detail_view.py`, `tui-py/widgets/message_list.py`,
+`tui-py/items.py`, `tui-py/theme.py`,
 `src/hooks/useScrollToSelected.ts`, `src/hooks/useAutoScroll.ts`.
 
 Every `DisplayItem` in a session carries an `item_type` discriminant. Web and TUI both dispatch
@@ -38,7 +38,7 @@ flowchart LR
 ## Item Type → Visual Mapping
 
 The three "introspection" functions are mirrored between web (`DetailItem.tsx`) and TUI
-(`tui/src/lib/items.ts`). Same logic, different glyph/icon vocabulary.
+(`tui-py/items.py`). Same logic, different glyph/icon vocabulary.
 
 | `item_type`       | Name source                        | Summary source                                            | Web icon (`react-icons`)                        | TUI icon (Unicode) |
 | ----------------- | ---------------------------------- | --------------------------------------------------------- | ----------------------------------------------- | ------------------ |

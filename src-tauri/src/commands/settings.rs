@@ -12,6 +12,10 @@ pub struct SettingsResponse {
     pub projects_dir: Option<String>,
     /// The platform default path (e.g. ~/.claude/projects). Always present.
     pub default_dir: String,
+    /// The resolved effective path (configured > CLAUDE_PROJECTS_DIR env > default).
+    pub effective_dir: String,
+    /// Whether the effective directory actually exists on disk.
+    pub effective_dir_exists: bool,
 }
 
 pub fn platform_default_dir() -> String {
@@ -25,17 +29,22 @@ pub fn platform_default_dir() -> String {
         .unwrap_or_default()
 }
 
-fn build_response(settings: &crate::settings::Settings) -> SettingsResponse {
+pub fn build_response_pub(settings: &crate::settings::Settings) -> SettingsResponse {
+    let effective = crate::parser::session::claude_projects_dir(settings.projects_dir.as_deref())
+        .unwrap_or_else(|_| std::path::PathBuf::from(platform_default_dir()));
+    let effective_dir_exists = effective.exists();
     SettingsResponse {
         projects_dir: settings.projects_dir.clone(),
         default_dir: platform_default_dir(),
+        effective_dir: effective.to_string_lossy().to_string(),
+        effective_dir_exists,
     }
 }
 
 #[tauri::command]
 pub async fn get_settings(state: State<'_, Arc<AppState>>) -> Result<SettingsResponse, String> {
     let guard = state.settings.lock().map_err(|e| e.to_string())?;
-    Ok(build_response(&guard))
+    Ok(build_response_pub(&guard))
 }
 
 #[tauri::command]
@@ -56,5 +65,5 @@ pub async fn set_projects_dir(
     let mut guard = state.settings.lock().map_err(|e| e.to_string())?;
     guard.projects_dir = path;
     crate::settings::save_settings(&guard)?;
-    Ok(build_response(&guard))
+    Ok(build_response_pub(&guard))
 }

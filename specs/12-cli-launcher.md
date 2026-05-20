@@ -15,7 +15,7 @@ flowchart TD
     START --> ARG{flags?}
     ARG -->|"--app (default)"| DESKTOP["Tauri desktop app\n(tauri dev / tauri bundle)"]
     ARG -->|"--web"| WEB["Browser mode\n(Vite + Rust HTTP)"]
-    ARG -->|"--tui"| TUI["Terminal UI\n(Ink/React)"]
+    ARG -->|"--tui"| TUI["Terminal UI\n(Python / Textual)"]
     ARG -->|"--headless"| HEADLESS["API only\n(no frontend)"]
     ARG -->|"install"| SVCINSTALL["Service installer\n(OS-level)"]
 ```
@@ -53,7 +53,7 @@ sequenceDiagram
 sequenceDiagram
     participant CLI as cctrace --tui
     participant BE as Rust Backend (11423)
-    participant BUILD as TUI build
+    participant DEPS as pip install
     participant WAIT as wait-for-backend.mjs
     participant TUI as TUI process
 
@@ -62,15 +62,15 @@ sequenceDiagram
         CLI ->> BE: spawn headless backend\n(tauri dev --headless)
     end
 
-    CLI ->> BUILD: npm run build (tui/)
-    BUILD -->> CLI: dist/tui/src/cli.js
+    CLI ->> DEPS: pip install -r tui-py/requirements.txt --quiet
+    DEPS -->> CLI: textual + httpx + ... installed
 
     CLI ->> WAIT: node bin/wait-for-backend.mjs
     WAIT ->> BE: poll GET /api/settings\n(every 200 ms, up to 30 s)
     BE -->> WAIT: 200 OK
     WAIT -->> CLI: backend ready
 
-    CLI ->> TUI: node dist/tui/src/cli.js\n(stdio: inherit)
+    CLI ->> TUI: python3 tui-py/main.py\n(stdio: inherit)
 
     Note over CLI,TUI: graceful shutdown
     TUI ->> CLI: exit signal

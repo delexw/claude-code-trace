@@ -1,0 +1,95 @@
+/* Claude Code Trace TUI — Textual CSS */
+
+Screen {
+    background: $background;
+    color: $text;
+}
+
+/* ---- Root layout ---- */
+
+#main-area {
+    layout: horizontal;
+    height: 1fr;
+}
+
+/* ---- ProjectTree ---- */
+
+ProjectTree {
+    width: 30;
+    min-width: 28;
+    border: round $border;
+}
+
+ProjectTree Tree {
+    background: transparent;
+}
+
+ProjectTree Tree > .tree--guides {
+    color: $border;
+}
+
+ProjectTree Tree > .tree--guides-hover {
+    color: $text-muted;
+}
+
+ProjectTree Tree > .tree--guides-selected {
+    color: $border;
+}
+
+ProjectTree Tree > .tree--cursor,
+ProjectTree Tree:focus > .tree--cursor {
+    background: $accent 50%;
+    color: $text;
+}
+
+/* ---- ContentSwitcher / views ---- */
+
+ContentSwitcher {
+    height: 100%;
+    width: 1fr;
+}
+
+/* SessionPicker / MessageList highlight styling lives in HighlightListView
+ * (widgets/highlight_list.py) so all three list pages stay in sync. */
+
+/* ---- DetailView ---- */
+
+DetailView {
+    height: 100%;
+    layout: vertical;
+}
+
+#items-list {
+    height: 1fr;
+    padding: 0 1;
+}
+
+/* ---- TeamBoard ---- */
+
+TeamBoard {
+    height: 100%;
+    overflow-y: auto;
+    padding: 1 2;
+}
+
+/* ---- DebugViewer (DataTable) ---- */
+
+DebugViewer {
+    height: 100%;
+}
+
+DataTable > .datatable--header {
+    color: $text-muted;
+}
+
+DataTable > .datatable--cursor,
+DataTable:focus > .datatable--cursor {
+    background: $accent 50%;
+    color: $text;
+}
+
+/* ---- Static text widgets ---- */
+
+Static {
+    background: transparent;
+}

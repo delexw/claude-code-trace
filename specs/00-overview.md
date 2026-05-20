@@ -22,7 +22,7 @@ graph TB
     subgraph Frontends
         TAURI["Tauri Desktop\n(WebView + IPC)"]
         WEB["Browser\n(Vite / HTTP)"]
-        TUI["Terminal UI\n(Ink / React)"]
+        TUI["Terminal UI\n(Python / Textual)"]
     end
 
     JSONL -->|"FS events"| RUST
@@ -44,7 +44,7 @@ graph TB
 | HTTP API           | `src-tauri/src/http_api.rs` | REST + SSE for browser and TUI                   |
 | Frontend Converter | `src-tauri/src/convert.rs`  | Internal → JSON-serialisable display types       |
 | Web Frontend       | `src/`                      | React components, hooks, keyboard navigation     |
-| TUI                | `tui/`                      | Ink/React terminal rendering                     |
+| TUI                | `tui-py/`                   | Python / Textual terminal rendering              |
 | Shared             | `shared/`                   | Types, project tree builder, format helpers      |
 | CLI Launcher       | `bin/cctrace.mjs`           | Mode selector (desktop / web / tui / headless)   |
 
@@ -91,7 +91,7 @@ flowchart LR
 | 03  | [03-state-management.md](03-state-management.md)   | AppState, session cache, SSE broadcast                              |
 | 04  | [04-http-api.md](04-http-api.md)                   | REST endpoints, SSE contract, Tauri IPC mirror                      |
 | 05  | [05-frontend-web.md](05-frontend-web.md)           | React hooks and components (web/desktop)                            |
-| 06  | [06-tui.md](06-tui.md)                             | Terminal UI (Ink/React), keyboard routing, windowing                |
+| 06  | [06-tui.md](06-tui.md)                             | Terminal UI (Python / Textual), shared list base, async populate    |
 | 07  | [07-data-types.md](07-data-types.md)               | Shared TypeScript types, Rust serialisation                         |
 | 08  | [08-session-lifecycle.md](08-session-lifecycle.md) | End-to-end session loading, live update, truncation                 |
 | 09  | [09-subagent-linking.md](09-subagent-linking.md)   | Four-phase subagent linking algorithm                               |

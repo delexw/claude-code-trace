@@ -154,17 +154,19 @@ switch (mode) {
       });
     }
 
-    // Build TUI if needed, wait for backend, then start TUI
-    execSync("npm run build", { stdio: "inherit", cwd: resolve(root, "tui") });
-    // wait-for-backend.mjs lives in bin/, not tui/
+    // Install Python dependencies, wait for backend, then start TUI
+    execSync("pip install -r requirements.txt --quiet", {
+      stdio: "inherit",
+      cwd: resolve(root, "tui-py"),
+    });
     execSync("node wait-for-backend.mjs", {
       stdio: "inherit",
       cwd: resolve(root, "bin"),
     });
 
-    const tui = spawn("node", ["dist/tui/src/cli.js"], {
+    const tui = spawn("python3", ["main.py"], {
       stdio: "inherit",
-      cwd: resolve(root, "tui"),
+      cwd: resolve(root, "tui-py"),
     });
 
     tui.on("exit", (code) => {

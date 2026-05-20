@@ -9,11 +9,13 @@
 [![Rust](https://img.shields.io/badge/rust-1.77.2%2B-orange?logo=rust)](https://www.rust-lang.org/)
 [![React](https://img.shields.io/badge/react-19-61DAFB?logo=react&logoColor=white)](https://react.dev/)
 [![Tauri](https://img.shields.io/badge/tauri-v2-24C8D8?logo=tauri&logoColor=white)](https://v2.tauri.app/)
+[![Python](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![Textual](https://img.shields.io/badge/textual-0.80%2B-5A4FCF?logo=textualize&logoColor=white)](https://textual.textualize.io/)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-blue)](https://github.com/delexw/claude-code-trace/releases)
 
 **Claude Code Trace** is a **Claude Code session log viewer** for local JSONL files stored in `~/.claude/projects/`.
 
-Browse, tail, and inspect Claude Code conversations in real time. Claude Code Trace renders Claude Code JSONL session files as readable conversations with expandable tool calls, token counts, timestamps, MCP tool call detection, and live log tailing. It also helps you find sessions by user message. It runs as a **native desktop app** for macOS, Linux, and Windows, or a **web app**.
+Browse, tail, and inspect Claude Code conversations in real time. Claude Code Trace renders Claude Code JSONL session files as readable conversations with expandable tool calls, token counts, timestamps, MCP tool call detection, and live log tailing. It also helps you find sessions by user message. It runs as a **GUI app** for macOS, Linux, and Windows, a **Web app** or a **TUI**.
 
 Use Claude Code Trace when you want to:
 

@@ -124,7 +124,7 @@ pattern but have an empty server or tool segment (e.g. `mcp____tool`) are reject
 ## Icon Mapping (Frontend)
 
 Each category maps to an icon displayed in the UI. Icons are defined in `src/components/Icons.tsx`
-for the web frontend and `tui/src/lib/icons.ts` for the TUI.
+for the web frontend and `tui-py/items.py` + `tui-py/theme.py` for the TUI.
 
 | Category | Web icon  | TUI unicode |
 | -------- | --------- | ----------- |

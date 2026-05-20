@@ -244,12 +244,17 @@ and nests worktree sessions under their parent project.
 flowchart LR
     SHARED["shared/types.ts"]
     SHARED --> WEB["src/ (web frontend)\nimport from '../../shared/types'"]
-    SHARED --> TUI["tui/src/ (TUI)\nimport from '../../../shared/types'"]
     SHARED --> TESTS["*.test.ts\nimport shared"]
+    PYTYPES["tui-py/data_types.py\n(Python dataclasses\nmirroring the same JSON)"]
 
     RUST["src-tauri/src/convert.rs\n(Rust source of truth)"] -->|"serde serialise\nmatching field names"| JSON["JSON over\nTauri IPC / HTTP"]
     JSON -->|"consumed as"| SHARED
+    JSON -->|"consumed as"| PYTYPES
 ```
+
+The Python TUI does not import from `shared/types.ts`; it has its own
+dataclasses in `tui-py/data_types.py` that mirror the same JSON shape. The
+field names match the Rust source via the same JSON serialisation.
 
 The Rust structs in `convert.rs` are the canonical definitions. The TypeScript types in
 `shared/types.ts` must stay in sync manually — there is no auto-generation step.

@@ -2466,6 +2466,14 @@ body {
   color: var(--text-dim);
 }
 
+.settings-modal__hint--effective {
+  color: var(--ongoing);
+}
+
+.settings-modal__hint--missing {
+  color: var(--error);
+}
+
 .settings-modal__error {
   margin: 0;
   font-size: 12px;

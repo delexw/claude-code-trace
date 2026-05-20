@@ -156,11 +156,7 @@ async fn api_get_settings(State(state): State<Arc<HttpState>>) -> Response {
             return err_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
         }
     };
-    let default_dir = crate::commands::settings::platform_default_dir();
-    ok_json(&crate::commands::settings::SettingsResponse {
-        projects_dir: guard.projects_dir.clone(),
-        default_dir,
-    })
+    ok_json(&crate::commands::settings::build_response_pub(&guard))
 }
 
 #[derive(Deserialize)]
@@ -200,11 +196,7 @@ async fn api_set_projects_dir(
     if let Err(e) = crate::settings::save_settings(&guard) {
         return err_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e);
     }
-    let default_dir = crate::commands::settings::platform_default_dir();
-    ok_json(&crate::commands::settings::SettingsResponse {
-        projects_dir: guard.projects_dir.clone(),
-        default_dir,
-    })
+    ok_json(&crate::commands::settings::build_response_pub(&guard))
 }
 
 // ---------------------------------------------------------------------------

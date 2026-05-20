@@ -1,0 +1,14 @@
+line-length = 100
+target-version = "py311"
+
+[lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "PIE", "RET", "SIM"]
+ignore = [
+  "E501", # line too long — formatter handles it
+  "B008", # do not perform function calls in default arguments
+  "SIM108", # use ternary instead of if-else — readability preference
+]
+
+[format]
+quote-style = "double"
+indent-style = "space"

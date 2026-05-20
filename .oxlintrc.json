@@ -57,23 +57,6 @@
       "rules": {
         "no-restricted-imports": "off"
       }
-    },
-    {
-      "files": ["tui/**/*.ts", "tui/**/*.tsx"],
-      "rules": {
-        "no-restricted-imports": [
-          "error",
-          {
-            "paths": [
-              {
-                "name": "react",
-                "importNames": ["default"],
-                "message": "Not needed with react-jsx transform. Use named imports."
-              }
-            ]
-          }
-        ]
-      }
     }
   ]
 }
