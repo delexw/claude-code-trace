@@ -17,8 +17,6 @@ from widgets.detail_view import DetailView
 
 
 class _DVApp(App):
-    CSS_PATH = "/Users/yang.liu/Envato/others/tail-claude-gui/tui-py/cctrace.tcss"
-
     def compose(self) -> ComposeResult:
         yield DetailView(id="detail")
 
