@@ -25,7 +25,7 @@ function releaseSource(): void {
 }
 
 /** Subscribe to SSE events from the Rust backend. Shares a single EventSource connection. */
-export function useSSE<T>(event: string, handler: (payload: T) => void) {
+export function useSSE<T>(event: string, handler: (payload: T) => void | Promise<void>) {
   const handlerRef = useRef(handler);
   handlerRef.current = handler;
 
@@ -33,7 +33,7 @@ export function useSSE<T>(event: string, handler: (payload: T) => void) {
     const source = acquireSource();
     const onMessage = (e: MessageEvent) => {
       try {
-        handlerRef.current(JSON.parse(e.data) as T);
+        void handlerRef.current(JSON.parse(e.data) as T);
       } catch {
         // ignore malformed events
       }

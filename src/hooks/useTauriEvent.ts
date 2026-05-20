@@ -5,7 +5,7 @@ import { listen, type UnlistenFn } from "../lib/listen";
  * Subscribe to a Tauri event with automatic setup/teardown and cancellation safety.
  * The handler is kept in a ref so it always sees fresh closures without re-subscribing.
  */
-export function useTauriEvent<T>(event: string, handler: (payload: T) => void) {
+export function useTauriEvent<T>(event: string, handler: (payload: T) => void | Promise<void>) {
   const handlerRef = useRef(handler);
   handlerRef.current = handler;
 
@@ -26,7 +26,7 @@ export function useTauriEvent<T>(event: string, handler: (payload: T) => void) {
       }
     };
 
-    setupListener();
+    void setupListener();
 
     return () => {
       cancelled = true;
