@@ -265,21 +265,14 @@ pub fn start_session_watcher(
 }
 
 /// Filter for picker watcher events.
-/// Triggers on any Create event (new project directory or new session file) and
-/// on Modify/Remove events that target a `.jsonl` file.
-/// Keeping Create broad is intentional: when Claude Code starts a session in a
-/// brand-new project, the OS may deliver a single directory-creation event
-/// before the JSONL file appears, and we must not miss that signal.
+/// Accepts any non-empty event. The projects directory is Claude-specific so
+/// any filesystem activity there is relevant. The 1-second debounce and the
+/// server-side sessions cache prevent excessive rescans.
+/// We intentionally do NOT filter by event kind or extension: macOS FSEvents
+/// may deliver Modify events on the parent directory rather than Create events
+/// on newly created project folders or session files.
 fn picker_event_filter(event: &notify::Event) -> bool {
-    if matches!(event.kind, notify::EventKind::Create(_)) {
-        return true;
-    }
-    event.paths.iter().any(|p| {
-        p.file_name()
-            .and_then(|n| n.to_str())
-            .map(|n| n.ends_with(".jsonl"))
-            .unwrap_or(false)
-    })
+    !event.paths.is_empty()
 }
 
 /// Start watching project directories for new/changed sessions.
@@ -402,10 +395,10 @@ mod tests {
             .expect("debounce thread should exit when stop sender is dropped");
     }
 
-    /// picker_event_filter triggers on Create events regardless of path extension.
+    /// picker_event_filter accepts any event with a non-empty paths list.
     #[test]
-    fn picker_filter_triggers_on_create_events() {
-        // New project directory (no .jsonl extension)
+    fn picker_filter_accepts_any_non_empty_event() {
+        // New project directory (macOS FSEvents: may be Create or Modify on parent)
         let mut event =
             notify::Event::new(notify::EventKind::Create(notify::event::CreateKind::Folder));
         event.paths = vec![std::path::PathBuf::from(
@@ -413,36 +406,32 @@ mod tests {
         )];
         assert!(picker_event_filter(&event), "Create(Folder) must trigger");
 
-        // Any create — some platforms report CreateKind::Any
-        let mut event =
-            notify::Event::new(notify::EventKind::Create(notify::event::CreateKind::Any));
-        event.paths = vec![std::path::PathBuf::from(
-            "/home/.claude/projects/-Users-yang-new-project",
-        )];
-        assert!(picker_event_filter(&event), "Create(Any) must trigger");
-    }
-
-    /// picker_event_filter triggers on Modify events only for .jsonl files.
-    #[test]
-    fn picker_filter_triggers_on_jsonl_modify() {
+        // Modify on a .jsonl session file
         let mut event = notify::Event::new(notify::EventKind::Modify(
             notify::event::ModifyKind::Data(notify::event::DataChange::Any),
         ));
         event.paths = vec![std::path::PathBuf::from(
             "/home/.claude/projects/proj/session.jsonl",
         )];
-        assert!(picker_event_filter(&event));
-    }
+        assert!(picker_event_filter(&event), "Modify(.jsonl) must trigger");
 
-    /// picker_event_filter ignores Modify events on non-.jsonl files.
-    #[test]
-    fn picker_filter_ignores_non_jsonl_modify() {
+        // Modify on a non-.jsonl file — accepted because we do not filter by extension
         let mut event = notify::Event::new(notify::EventKind::Modify(
             notify::event::ModifyKind::Data(notify::event::DataChange::Any),
         ));
         event.paths = vec![std::path::PathBuf::from(
             "/home/.claude/projects/proj/settings.json",
         )];
+        assert!(
+            picker_event_filter(&event),
+            "Modify(non-jsonl) must also trigger — filter is intentionally broad"
+        );
+    }
+
+    /// picker_event_filter rejects events with no paths.
+    #[test]
+    fn picker_filter_rejects_empty_paths() {
+        let event = notify::Event::new(notify::EventKind::Any);
         assert!(!picker_event_filter(&event));
     }
 

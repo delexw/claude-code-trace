@@ -77,14 +77,18 @@ export function usePicker(selectedProject: string | null = null) {
     });
   }, []);
 
-  // The backend emits a lightweight signal (no payload). Re-fetch via
-  // discover_sessions, which is coalesced by a short-lived server-side cache.
-  useTauriEvent<unknown>("picker-refresh", () => {
-    const dirs = projectDirsRef.current;
-    if (!dirs) return;
-    fetchSessions(dirs).catch((err) => {
-      console.error("Failed to refresh sessions:", err);
-    });
+  // The backend emits a lightweight signal (no payload). Re-fetch project dirs
+  // first so newly created project folders are discovered, then fetch sessions.
+  useTauriEvent<unknown>("picker-refresh", async () => {
+    try {
+      const freshDirs = await invoke<string[]>("get_project_dirs");
+      projectDirsRef.current = freshDirs;
+      await fetchSessions(freshDirs);
+    } catch {
+      // Fallback: use stale dirs so existing sessions still refresh.
+      const dirs = projectDirsRef.current;
+      if (dirs) fetchSessions(dirs).catch(console.error);
+    }
   });
 
   // Cleanup on unmount

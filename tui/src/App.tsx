@@ -100,17 +100,16 @@ export function App() {
     };
   }, []);
 
-  // The backend emits "picker-refresh" with an empty payload; re-fetch the
-  // session list using the dirs we discovered earlier.
+  // The backend emits "picker-refresh" with an empty payload; re-fetch project
+  // dirs first so newly created project folders are discovered, then fetch sessions.
   useSSE<unknown>(
     "picker-refresh",
-    useCallback(() => {
-      const dirs = projectDirsRef.current;
-      if (!dirs) return;
-      api
-        .discoverSessions(dirs)
-        .then((list) => setAllSessions(list))
-        .catch(() => {});
+    useCallback(async () => {
+      const freshDirs = await api.getProjectDirs().catch(() => projectDirsRef.current);
+      if (!freshDirs) return;
+      projectDirsRef.current = freshDirs;
+      const list = await api.discoverSessions(freshDirs).catch(() => null);
+      if (list) setAllSessions(list);
     }, []),
   );
 
@@ -190,7 +189,7 @@ export function App() {
 
   const handleSelectSession = useCallback(
     (s: SessionInfo) => {
-      loadSession(s.path);
+      void loadSession(s.path);
       setView("list");
       setSidebarFocused(false);
     },
@@ -222,7 +221,7 @@ export function App() {
     meta: boolean;
   };
   const inputHandlerRef = useRef<(input: string, key: Key) => void>(() => {});
-  inputHandlerRef.current = (input: string, key: Key) => {
+  inputHandlerRef.current = async (input: string, key: Key) => {
     // Sidebar navigation
     if (sidebarFocused && view === "picker") {
       if (input === "j" || key.downArrow) {
@@ -284,12 +283,10 @@ export function App() {
           if (teams.length > 0) setView("team");
         } else if (input === "d") {
           if (sessionPath) {
-            api
-              .getDebugLog(sessionPath)
-              .then(setDebugEntries)
-              .catch(() => {});
             setDebugSelected(0);
             setView("debug");
+            const entries = await api.getDebugLog(sessionPath).catch(() => null);
+            if (entries) setDebugEntries(entries);
           }
         } else if (input === "q" || key.escape) {
           setView("picker");
@@ -445,7 +442,7 @@ export function App() {
   };
   // Stable function reference — never changes, so Ink's useInput effect never re-subscribes.
   const stableHandler = useCallback((input: string, key: Key) => {
-    inputHandlerRef.current(input, key);
+    void inputHandlerRef.current(input, key);
   }, []);
   useInput(stableHandler);
 

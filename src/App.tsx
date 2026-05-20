@@ -69,7 +69,7 @@ export function App() {
     try {
       const dirs = await invoke<string[]>("get_project_dirs");
       if (dirs.length > 0) {
-        discoverSessions(dirs);
+        await discoverSessions(dirs);
       }
     } catch (err) {
       console.error("Failed to get project dirs:", err);
@@ -93,7 +93,7 @@ export function App() {
         setShowSettings(true);
         return;
       }
-      loadProjectDirs();
+      await loadProjectDirs();
     };
     discover();
   }, [loadProjectDirs]);
@@ -109,7 +109,7 @@ export function App() {
   // Handle session selection from picker
   const handleSelectSession = useCallback(
     (sessionInfo: SessionInfo) => {
-      loadSession(sessionInfo.path);
+      void loadSession(sessionInfo.path);
       setView("list");
       setSelectedMessage(0);
       clearExpanded();
@@ -158,7 +158,7 @@ export function App() {
 
   const openDebug = useCallback(() => {
     if (sessionPath) {
-      loadDebugLog(sessionPath);
+      void loadDebugLog(sessionPath);
       setView("debug");
     }
   }, [sessionPath, loadDebugLog]);

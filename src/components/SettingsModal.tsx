@@ -19,14 +19,16 @@ export function SettingsModal({ onClose, onSaved }: SettingsModalProps) {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    invoke<SettingsResponse>("get_settings")
-      .then((res) => {
+    const load = async () => {
+      try {
+        const res = await invoke<SettingsResponse>("get_settings");
         setDefaultDir(res.default_dir);
         setProjectsDir(res.projects_dir ?? res.default_dir);
-      })
-      .catch((err) => {
+      } catch (err) {
         console.error("Failed to load settings:", err);
-      });
+      }
+    };
+    load();
   }, []);
 
   const handleSave = useCallback(async () => {
