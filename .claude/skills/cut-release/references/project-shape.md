@@ -15,17 +15,21 @@ codebase, this file points at the source of truth rather than repeating it.
 
 ## Version-bearing files (skill-specific rule)
 
-Three files must agree on the next-version string. Nothing in the codebase enforces this
+Four files must agree on the next-version string. Nothing in the codebase enforces this
 sync — the skill does.
 
-| File                   | Owns                             | Bumps with                                 |
-| ---------------------- | -------------------------------- | ------------------------------------------ |
-| `package.json` (root)  | Node/TS workspace + binary entry | the Rust crate (lockstep)                  |
-| `src-tauri/Cargo.toml` | Rust crate version               | root `package.json` (lockstep)             |
-| `tui/package.json`     | Terminal UI subpackage           | independently; bumps when TUI code changes |
+| File                        | Owns                                 | Bumps with                                 |
+| --------------------------- | ------------------------------------ | ------------------------------------------ |
+| `package.json` (root)       | Node/TS workspace + binary entry     | the Rust crate (lockstep)                  |
+| `src-tauri/Cargo.toml`      | Rust crate version                   | root `package.json` (lockstep)             |
+| `src-tauri/tauri.conf.json` | Tauri bundle filenames + app version | the Rust crate (lockstep)                  |
+| `tui/package.json`          | Terminal UI subpackage               | independently; bumps when TUI code changes |
 
-Root + Cargo move together because the desktop binary the user installs is built from
-both. `tui/package.json` tracks separately because it's shipped as its own npm package.
+Root + Cargo + `tauri.conf.json` move together because the desktop binary the user installs
+is built from all three — `tauri.conf.json`'s `version` field is what `tauri-action`
+templates into the released artifact filenames (`Claude.Code.Trace_<version>_*.dmg`, etc.).
+Missing this file silently ships a release whose artifacts are stamped with the previous
+version. `tui/package.json` tracks separately because it's shipped as its own npm package.
 
 ## Lockfile regen after a version bump
 
