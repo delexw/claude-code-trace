@@ -4,9 +4,60 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to dry-run, e.g. 0.5.1 (no v prefix). Only the notes job runs; nothing is built or published."
+        required: true
+        type: string
 
 jobs:
+  notes:
+    name: Extract release notes from CHANGELOG
+    runs-on: ubuntu-latest
+    outputs:
+      body: ${{ steps.extract.outputs.body }}
+      version: ${{ steps.extract.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - id: extract
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          if [ -n "$INPUT_VERSION" ]; then
+            VERSION="$INPUT_VERSION"
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          echo "Resolving CHANGELOG section for v$VERSION"
+          BODY=$(awk -v ver="$VERSION" '
+            $0 ~ "^## \\[" ver "\\]" { inside=1; print; next }
+            inside && /^## \[/ { exit }
+            inside { print }
+          ' CHANGELOG.md 2>/dev/null || true)
+          if [ -z "$BODY" ]; then
+            echo "::error file=CHANGELOG.md::No CHANGELOG section found for version $VERSION. Add a '## [$VERSION] — YYYY-MM-DD' heading before tagging."
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          {
+            echo 'body<<RELEASE_NOTES_EOF'
+            printf '%s\n' "$BODY"
+            echo RELEASE_NOTES_EOF
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "## Release notes preview for v$VERSION"
+            echo
+            echo '```markdown'
+            printf '%s\n' "$BODY"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
   build-macos:
+    needs: notes
+    if: github.event_name == 'push'
     runs-on: macos-latest
     permissions:
       contents: write
@@ -37,11 +88,13 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: ${{ github.ref_name }}
-          releaseBody: "See the assets below to download the app."
+          releaseBody: ${{ needs.notes.outputs.body }}
           releaseDraft: true
           prerelease: false
 
   build-linux:
+    needs: notes
+    if: github.event_name == 'push'
     runs-on: ubuntu-22.04
     permissions:
       contents: write
@@ -77,11 +130,13 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: ${{ github.ref_name }}
-          releaseBody: "See the assets below to download the app."
+          releaseBody: ${{ needs.notes.outputs.body }}
           releaseDraft: true
           prerelease: false
 
   build-windows:
+    needs: notes
+    if: github.event_name == 'push'
     runs-on: windows-latest
     permissions:
       contents: write
@@ -112,6 +167,23 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: ${{ github.ref_name }}
-          releaseBody: "See the assets below to download the app."
+          releaseBody: ${{ needs.notes.outputs.body }}
           releaseDraft: true
           prerelease: false
+
+  publish:
+    name: Publish release (flip draft → public)
+    needs: [build-macos, build-linux, build-windows]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release edit "${{ github.ref_name }}" \
+            --repo "${{ github.repository }}" \
+            --draft=false \
+            --latest
