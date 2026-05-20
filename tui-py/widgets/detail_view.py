@@ -145,10 +145,13 @@ def _render_item_body(item: DisplayItem) -> str:
             if item.tool_input:
                 parts.append("**Input**")
                 parts.append(_md_json(item.tool_input))
-            if item.tool_result:
+            if item.tool_result or item.tool_result_json:
                 label = "**Error**" if item.tool_error else "**Result**"
                 parts.append(label)
-                parts.append(_md_json(item.tool_result))
+                if item.tool_result_json:
+                    parts.append(f"```json\n{item.tool_result_json}\n```")
+                else:
+                    parts.append(_md_json(item.tool_result))
             return "\n\n".join(parts)
         case "Subagent":
             parts = []

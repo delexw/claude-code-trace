@@ -20,6 +20,29 @@ import {
   PanelChevronIcon,
 } from "./Icons";
 
+function ToolResultBody({ result, resultJson }: { result: string; resultJson: string }) {
+  if (resultJson) {
+    return (
+      <div className="detail-item__json">
+        <pre>
+          <code>{resultJson}</code>
+        </pre>
+      </div>
+    );
+  }
+  const formatted = formatJson(result);
+  if (formatted !== result) {
+    return (
+      <div className="detail-item__json">
+        <pre>
+          <code>{formatted}</code>
+        </pre>
+      </div>
+    );
+  }
+  return <>{result}</>;
+}
+
 interface DetailItemProps {
   item: DisplayItem;
   index: number;
@@ -191,13 +214,13 @@ function DetailItemBody({ item }: { item: DisplayItem }) {
               </div>
             </div>
           )}
-          {item.tool_result && (
+          {(item.tool_result || item.tool_result_json) && (
             <div className="detail-item__section detail-item__section--output">
               <div className="detail-item__section-title">Output</div>
               <div
                 className={`detail-item__text${item.tool_error ? " detail-item__text--error" : ""}`}
               >
-                {item.tool_result}
+                <ToolResultBody result={item.tool_result} resultJson={item.tool_result_json} />
               </div>
             </div>
           )}

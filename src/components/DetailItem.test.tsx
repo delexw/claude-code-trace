@@ -202,6 +202,54 @@ describe("DetailItem", () => {
     expect(screen.getByText("file content here")).toBeInTheDocument();
   });
 
+  it("pretty-prints JSON tool_result as a code block", () => {
+    const { container } = render(
+      <DetailItem
+        item={makeItem({ tool_input: "", tool_result: '{"a":1,"b":2}' })}
+        index={0}
+        isSelected={false}
+        isExpanded={true}
+        onToggle={vi.fn()}
+        onToggleExpand={vi.fn()}
+        onSelect={vi.fn()}
+      />,
+    );
+    const code = container.querySelector(".detail-item__json code");
+    expect(code).toBeInTheDocument();
+    expect(code?.textContent).toContain('"a": 1');
+  });
+
+  it("uses tool_result_json as pre-formatted JSON when available", () => {
+    const { container } = render(
+      <DetailItem
+        item={makeItem({ tool_input: "", tool_result: "", tool_result_json: '{\n  "x": 42\n}' })}
+        index={0}
+        isSelected={false}
+        isExpanded={true}
+        onToggle={vi.fn()}
+        onToggleExpand={vi.fn()}
+        onSelect={vi.fn()}
+      />,
+    );
+    expect(container.querySelector(".detail-item__json code")?.textContent).toBe('{\n  "x": 42\n}');
+  });
+
+  it("shows plain text tool_result without code block when not JSON", () => {
+    const { container } = render(
+      <DetailItem
+        item={makeItem({ tool_input: "", tool_result: "plain output text" })}
+        index={0}
+        isSelected={false}
+        isExpanded={true}
+        onToggle={vi.fn()}
+        onToggleExpand={vi.fn()}
+        onSelect={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("plain output text")).toBeInTheDocument();
+    expect(container.querySelector(".detail-item__json")).not.toBeInTheDocument();
+  });
+
   it("shows thinking body with italic text when expanded", () => {
     const { container } = render(
       <DetailItem
