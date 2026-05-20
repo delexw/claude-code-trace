@@ -28,7 +28,7 @@ export function SettingsModal({ onClose, onSaved }: SettingsModalProps) {
         console.error("Failed to load settings:", err);
       }
     };
-    load();
+    void load();
   }, []);
 
   const handleSave = useCallback(async () => {

@@ -95,7 +95,7 @@ export function App() {
       }
       await loadProjectDirs();
     };
-    discover();
+    void discover();
   }, [loadProjectDirs]);
 
   // Sync session watcher's ongoing status to picker (avoids race condition

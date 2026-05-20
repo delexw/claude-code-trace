@@ -93,7 +93,7 @@ export function App() {
         setPickerLoading(false);
       }
     };
-    attempt(10);
+    void attempt(10);
     return () => {
       cancelled = true;
       api.unwatchPicker().catch(() => {});
