@@ -14,8 +14,26 @@ updates:
     directory: /src-tauri
     schedule:
       interval: weekly
+    groups:
+      tauri:
+        patterns:
+          - "tauri*"
+      tower:
+        patterns:
+          - "tower*"
 
   - package-ecosystem: pip
     directory: /tui-py
     schedule:
       interval: weekly
+    groups:
+      testing:
+        patterns:
+          - "pytest*"
+      dev-tools:
+        patterns:
+          - "ruff"
+      runtime:
+        patterns:
+          - "textual"
+          - "httpx"
