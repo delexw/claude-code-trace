@@ -6,7 +6,7 @@ lockfiles.
 Refer to `${CLAUDE_SKILL_DIR}/references/project-shape.md` for the rules on which files
 move in lockstep and which move independently.
 
-## Step 3.1 — Bump root + Cargo (always lockstep)
+## Step 3.1 — Bump root + Cargo + Tauri config (always lockstep)
 
 ```bash
 # Root package.json
@@ -14,10 +14,17 @@ move in lockstep and which move independently.
 
 # src-tauri/Cargo.toml
 # Edit: version = "<old>" → version = "<NEXT_VERSION>"
+
+# src-tauri/tauri.conf.json
+# Edit: "version": "<old>" → "version": "<NEXT_VERSION>"
 ```
 
 Use the Edit tool with `old_string`/`new_string` rather than sed — safer for surrounding
 context.
+
+`tauri.conf.json` is the field `tauri-action` reads when stamping artifact filenames at
+build time (`Claude.Code.Trace_<version>_*.dmg`, etc.). Skipping it produces a release
+whose artifacts are still named with the previous version — the symptom seen on v0.5.1.
 
 ## Step 3.2 — Bump TUI version
 
