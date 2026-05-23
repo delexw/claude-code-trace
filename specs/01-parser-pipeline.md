@@ -67,19 +67,21 @@ Each JSONL line is decoded into an `Entry` struct that mirrors the raw Claude Co
 
 ### Key Fields
 
-| Field              | Description                                                     |
-| ------------------ | --------------------------------------------------------------- |
-| `uuid`             | Unique message identifier                                       |
-| `entry_type`       | Discriminant: `user`, `assistant`, `system`, `hook_event`, etc. |
-| `role`             | Same as `entry_type` for most messages                          |
-| `content`          | Message body (string or content-block array)                    |
-| `model`            | Model string (assistant messages only)                          |
-| `subtype`          | Hook subtype: `PreToolUse`, `PostToolUse`, `Stop`, …            |
-| `hookEvent`        | Hook event name                                                 |
-| `isCompactSummary` | Compaction boundary marker                                      |
-| `away_summary`     | Session-recap text                                              |
-| `forkedFrom`       | Pre-v2.1.118 fork reference                                     |
-| `tool_use_result`  | JSON object for tool results                                    |
+| Field              | Description                                                              |
+| ------------------ | ------------------------------------------------------------------------ |
+| `uuid`             | Unique message identifier                                                |
+| `entry_type`       | Discriminant: `user`, `assistant`, `system`, `hook_event`, etc.          |
+| `role`             | Same as `entry_type` for most messages                                   |
+| `content`          | Message body (string or content-block array)                             |
+| `model`            | Model string (assistant messages only)                                   |
+| `subtype`          | Hook subtype: `PreToolUse`, `PostToolUse`, `Stop`, …                     |
+| `hookEvent`        | Hook event name                                                          |
+| `isCompactSummary` | Compaction boundary marker                                               |
+| `away_summary`     | Session-recap text                                                       |
+| `forkedFrom`       | Pre-v2.1.118 fork reference                                              |
+| `tool_use_result`  | JSON object for tool results                                             |
+| `background_tasks` | v2.1.145+: running background task descriptors (Stop/SubagentStop hooks) |
+| `session_crons`    | v2.1.145+: registered session cron jobs (Stop/SubagentStop hooks)        |
 
 ```mermaid
 classDiagram

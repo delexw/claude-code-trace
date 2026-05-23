@@ -111,6 +111,13 @@ pub struct Entry {
     // notifications, window titles, or bells without a controlling terminal.
     #[serde(default, rename = "terminalSequence")]
     pub terminal_sequence: Option<String>,
+    // Present in Stop and SubagentStop hook input payloads (v2.1.145+). Claude Code includes
+    // currently-running background task descriptors and session-scoped cron jobs so hooks can
+    // inspect or block on them before the session exits.
+    #[serde(default, rename = "background_tasks")]
+    pub background_tasks: Option<Value>,
+    #[serde(default, rename = "session_crons")]
+    pub session_crons: Option<Value>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -619,6 +626,96 @@ mod tests {
             entry.terminal_sequence.is_none(),
             "terminalSequence must be None when absent"
         );
+    }
+
+    // --- Issue #106: v2.1.145+ Stop/SubagentStop gain background_tasks and session_crons ---
+
+    #[test]
+    fn parse_entry_captures_background_tasks_and_session_crons_v2_1_145() {
+        // v2.1.145+: Stop and SubagentStop hook input payloads include background_tasks
+        // (array of running task descriptors) and session_crons (array of registered cron jobs).
+        // Both must be captured as Value so callers can inspect them.
+        let line = json!({
+            "type": "system",
+            "subtype": "hook_progress",
+            "uuid": "stop-hook-uuid-145",
+            "timestamp": "2026-05-19T10:00:00Z",
+            "hookEvent": "Stop",
+            "hookName": "on-stop",
+            "background_tasks": [{"id": "task-1", "description": "running bg job"}],
+            "session_crons": [{"id": "cron-1", "schedule": "*/5 * * * *"}]
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry =
+            parse_entry(&bytes).expect("must parse Stop hook entry with new v2.1.145 fields");
+
+        let tasks = entry
+            .background_tasks
+            .expect("background_tasks must be captured");
+        assert!(tasks.is_array(), "background_tasks must be an array");
+        assert_eq!(tasks.as_array().unwrap().len(), 1);
+        assert_eq!(tasks[0].get("id").and_then(|v| v.as_str()), Some("task-1"));
+
+        let crons = entry.session_crons.expect("session_crons must be captured");
+        assert!(crons.is_array(), "session_crons must be an array");
+        assert_eq!(crons.as_array().unwrap().len(), 1);
+        assert_eq!(
+            crons[0].get("schedule").and_then(|v| v.as_str()),
+            Some("*/5 * * * *")
+        );
+    }
+
+    #[test]
+    fn parse_entry_background_tasks_and_session_crons_default_to_none_when_absent() {
+        // Stop/SubagentStop hook entries from before v2.1.145 have no background_tasks or
+        // session_crons fields — both must default to None.
+        let line = json!({
+            "type": "system",
+            "subtype": "hook_progress",
+            "uuid": "stop-hook-uuid-old",
+            "timestamp": "2026-05-01T10:00:00Z",
+            "hookEvent": "Stop",
+            "hookName": "on-stop"
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("must parse old Stop hook entry");
+        assert!(
+            entry.background_tasks.is_none(),
+            "background_tasks must be None when absent"
+        );
+        assert!(
+            entry.session_crons.is_none(),
+            "session_crons must be None when absent"
+        );
+    }
+
+    #[test]
+    fn parse_entry_subagent_stop_with_background_tasks_and_session_crons() {
+        // SubagentStop hook input also gains these fields in v2.1.145+.
+        let line = json!({
+            "type": "system",
+            "subtype": "hook_progress",
+            "uuid": "subagent-stop-uuid-145",
+            "timestamp": "2026-05-19T11:00:00Z",
+            "hookEvent": "SubagentStop",
+            "hookName": "on-subagent-stop",
+            "background_tasks": [],
+            "session_crons": [{"id": "c1"}, {"id": "c2"}]
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry =
+            parse_entry(&bytes).expect("must parse SubagentStop hook entry with new fields");
+
+        let tasks = entry
+            .background_tasks
+            .expect("background_tasks must be captured");
+        assert!(
+            tasks.as_array().unwrap().is_empty(),
+            "empty array must be preserved"
+        );
+
+        let crons = entry.session_crons.expect("session_crons must be captured");
+        assert_eq!(crons.as_array().unwrap().len(), 2);
     }
 
     // --- Issue #85: lone UTF-16 surrogate sanitization ---
