@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -369,16 +369,35 @@ fn build_subagent_process(
     }
 }
 
+/// Typed representation of a `.meta.json` sidecar file written by Claude Code
+/// alongside every session JSONL.
+///
+/// **Backwards-compatibility rule**: every field here MUST carry `#[serde(default)]`
+/// or be `Option<T>`. Claude Code's sidecar schema is in active flux — new fields
+/// are added regularly, and older session files simply omit them. A bare required
+/// field would cause a parse failure on any session written before that field was
+/// introduced. (This was the root cause of the `/insights` crash fixed in
+/// Claude Code v2.1.149.)
+#[derive(Debug, Deserialize, Default)]
+struct SidecarMeta {
+    #[serde(default, rename = "agentType")]
+    agent_type: String,
+    // Fields added in Claude Code v2.1.149+ (and any future additions) must
+    // follow the same pattern: `Option<T>` or `#[serde(default)]`.
+    #[serde(default, rename = "sessionTitle")]
+    session_title: Option<String>,
+    #[serde(default)]
+    model: Option<String>,
+    #[serde(default, rename = "gitBranch")]
+    git_branch: Option<String>,
+}
+
 /// Read agentType from a .meta.json file next to a subagent .jsonl.
 fn read_agent_type(meta_path: &str) -> String {
     fs::read_to_string(meta_path)
         .ok()
-        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
-        .and_then(|v| {
-            v.get("agentType")
-                .and_then(|a| a.as_str())
-                .map(String::from)
-        })
+        .and_then(|s| serde_json::from_str::<SidecarMeta>(&s).ok())
+        .map(|m| m.agent_type)
         .unwrap_or_default()
 }
 
@@ -1509,5 +1528,76 @@ mod tests {
             orphan.subagent_desc, "qa-web-test",
             "orphan should extract skill name from prompt"
         );
+    }
+
+    // Regression tests for issue #107: SidecarMeta must tolerate missing optional fields
+    // so that older sessions (written before new fields were introduced) continue to parse.
+
+    #[test]
+    fn sidecar_meta_minimal_json_parses_without_error() {
+        // Oldest possible meta file — only agentType, nothing else.
+        let json = r#"{"agentType":"general-purpose"}"#;
+        let m: SidecarMeta = serde_json::from_str(json).expect("must not fail on minimal meta");
+        assert_eq!(m.agent_type, "general-purpose");
+        assert!(m.session_title.is_none());
+        assert!(m.model.is_none());
+        assert!(m.git_branch.is_none());
+    }
+
+    #[test]
+    fn sidecar_meta_empty_object_parses_without_error() {
+        // Completely empty meta file (edge case from corrupted/truncated writes).
+        let json = r#"{}"#;
+        let m: SidecarMeta = serde_json::from_str(json).expect("empty meta must not fail");
+        assert_eq!(m.agent_type, "");
+        assert!(m.session_title.is_none());
+    }
+
+    #[test]
+    fn sidecar_meta_unknown_new_fields_are_ignored() {
+        // Simulates a future Claude Code version adding fields we have not yet mapped.
+        // serde must ignore unknown fields rather than failing.
+        let json = r#"{"agentType":"codex","unknownFutureField":42,"anotherNew":{"nested":true}}"#;
+        let m: SidecarMeta = serde_json::from_str(json).expect("unknown fields must not fail");
+        assert_eq!(m.agent_type, "codex");
+    }
+
+    #[test]
+    fn read_agent_type_returns_empty_for_missing_meta_file() {
+        let result = read_agent_type("/nonexistent/path/agent-abc.meta.json");
+        assert_eq!(result, "", "missing meta file must return empty string");
+    }
+
+    #[test]
+    fn read_agent_type_returns_empty_for_empty_object() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("agent-x.meta.json");
+        std::fs::write(&path, r#"{}"#).unwrap();
+        let result = read_agent_type(path.to_str().unwrap());
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn read_agent_type_parses_known_field() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("agent-y.meta.json");
+        std::fs::write(&path, r#"{"agentType":"explore"}"#).unwrap();
+        let result = read_agent_type(path.to_str().unwrap());
+        assert_eq!(result, "explore");
+    }
+
+    #[test]
+    fn read_agent_type_tolerates_extra_fields_from_new_claude_code_version() {
+        // Claude Code v2.1.149+ may add sessionTitle, model, gitBranch, etc.
+        // Parsers must not panic on these new optional fields.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("agent-z.meta.json");
+        std::fs::write(
+            &path,
+            r#"{"agentType":"general-purpose","sessionTitle":"My session","model":"claude-opus-4-7","gitBranch":"main","unknownFuture":true}"#,
+        )
+        .unwrap();
+        let result = read_agent_type(path.to_str().unwrap());
+        assert_eq!(result, "general-purpose");
     }
 }
