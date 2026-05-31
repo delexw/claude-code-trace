@@ -459,7 +459,7 @@ pub fn classify(e: Entry) -> Option<ClassifiedMsg> {
                 input_tokens: e.message.usage.input_tokens,
                 output_tokens: e.message.usage.output_tokens,
                 cache_read_tokens: e.message.usage.cache_read_input_tokens,
-                cache_creation_tokens: e.message.usage.cache_creation_input_tokens,
+                cache_creation_tokens: e.message.usage.effective_cache_creation_input_tokens(),
             },
             stop_reason,
             is_meta: false,

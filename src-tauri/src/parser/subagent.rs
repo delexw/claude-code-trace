@@ -8,7 +8,7 @@ use std::path::Path;
 
 use super::chunk::*;
 use super::classify::*;
-use super::entry::parse_entry;
+use super::entry::{cache_creation_from_value, parse_entry};
 
 /// Per-requestId token snapshot used for deduplication across JSONL files.
 #[derive(Clone, Default)]
@@ -1165,10 +1165,7 @@ pub fn scan_subagent_tokens_into(
                 .get("cache_read_input_tokens")
                 .and_then(|v| v.as_i64())
                 .unwrap_or(0);
-            let cc = usage
-                .get("cache_creation_input_tokens")
-                .and_then(|v| v.as_i64())
-                .unwrap_or(0);
+            let cc = cache_creation_from_value(usage);
             if inp + out + cr + cc == 0 {
                 continue;
             }
