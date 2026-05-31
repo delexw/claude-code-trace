@@ -118,6 +118,17 @@ pub struct Entry {
     pub background_tasks: Option<Value>,
     #[serde(default, rename = "session_crons")]
     pub session_crons: Option<Value>,
+    // Present in workflow lifecycle entries (v2.1.154+). Claude Code's dynamic workflow
+    // system writes workflow-start, workflow-progress, workflow-complete, workflow-cancelled,
+    // and workflow-error entries carrying these fields.
+    #[serde(default, rename = "workflowId")]
+    pub workflow_id: String,
+    #[serde(default, rename = "workflowName")]
+    pub workflow_name: String,
+    #[serde(default, rename = "workflowRunUrl")]
+    pub workflow_run_url: String,
+    #[serde(default, rename = "workflowStatus")]
+    pub workflow_status: String,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -687,6 +698,96 @@ mod tests {
             entry.session_crons.is_none(),
             "session_crons must be None when absent"
         );
+    }
+
+    // --- Issue #115: v2.1.154+ Dynamic Workflow fields ---
+
+    #[test]
+    fn parse_entry_captures_workflow_fields_v2_1_154() {
+        // v2.1.154+: workflow lifecycle entries carry workflowId, workflowName,
+        // workflowRunUrl, and workflowStatus at the top level.
+        let line = json!({
+            "type": "workflow-start",
+            "uuid": "wf-start-uuid-001",
+            "timestamp": "2026-05-28T10:00:00Z",
+            "workflowId": "wf-abc-123",
+            "workflowName": "my-workflow",
+            "workflowRunUrl": "https://example.com/workflows/wf-abc-123",
+            "workflowStatus": "running"
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("must parse workflow-start entry");
+        assert_eq!(entry.entry_type, "workflow-start");
+        assert_eq!(entry.workflow_id, "wf-abc-123");
+        assert_eq!(entry.workflow_name, "my-workflow");
+        assert_eq!(
+            entry.workflow_run_url,
+            "https://example.com/workflows/wf-abc-123"
+        );
+        assert_eq!(entry.workflow_status, "running");
+    }
+
+    #[test]
+    fn parse_entry_workflow_fields_default_to_empty_when_absent() {
+        // Regular entries from before v2.1.154 have no workflow fields — must default to "".
+        let line = json!({
+            "type": "user",
+            "uuid": "regular-uuid-no-wf",
+            "timestamp": "2026-05-28T10:00:00Z",
+            "message": {"role": "user", "content": "Hello"}
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("must parse regular entry");
+        assert_eq!(entry.workflow_id, "");
+        assert_eq!(entry.workflow_name, "");
+        assert_eq!(entry.workflow_run_url, "");
+        assert_eq!(entry.workflow_status, "");
+    }
+
+    #[test]
+    fn parse_entry_workflow_entry_with_unknown_fields_succeeds() {
+        // Workflow entries may carry additional fields not yet known. The parser must
+        // not reject them — no #[serde(deny_unknown_fields)] is set on Entry.
+        let line = json!({
+            "type": "workflow-progress",
+            "uuid": "wf-progress-uuid-001",
+            "timestamp": "2026-05-28T10:01:00Z",
+            "workflowId": "wf-xyz-999",
+            "workflowName": "my-workflow",
+            "workflowStatus": "running",
+            "futureWorkflowField": "some-value",
+            "nestedWorkflowData": {"agentCount": 10, "completedAgents": 3}
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry =
+            parse_entry(&bytes).expect("must parse workflow-progress despite unknown fields");
+        assert_eq!(entry.entry_type, "workflow-progress");
+        assert_eq!(entry.workflow_id, "wf-xyz-999");
+    }
+
+    #[test]
+    fn parse_entry_all_workflow_lifecycle_types_succeed() {
+        // All five workflow lifecycle types must parse without panicking or returning None.
+        for wf_type in &[
+            "workflow-start",
+            "workflow-progress",
+            "workflow-complete",
+            "workflow-cancelled",
+            "workflow-error",
+        ] {
+            let line = json!({
+                "type": wf_type,
+                "uuid": format!("uuid-{}", wf_type),
+                "timestamp": "2026-05-28T10:00:00Z",
+                "workflowId": "wf-123",
+                "workflowName": "test-workflow",
+                "workflowStatus": "running"
+            });
+            let bytes = serde_json::to_vec(&line).unwrap();
+            let entry = parse_entry(&bytes)
+                .unwrap_or_else(|| panic!("must parse {wf_type} entry without panicking"));
+            assert_eq!(entry.entry_type, *wf_type);
+        }
     }
 
     #[test]

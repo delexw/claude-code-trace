@@ -82,6 +82,10 @@ Each JSONL line is decoded into an `Entry` struct that mirrors the raw Claude Co
 | `tool_use_result`  | JSON object for tool results                                             |
 | `background_tasks` | v2.1.145+: running background task descriptors (Stop/SubagentStop hooks) |
 | `session_crons`    | v2.1.145+: registered session cron jobs (Stop/SubagentStop hooks)        |
+| `workflowId`       | v2.1.154+: workflow identifier on lifecycle entries                      |
+| `workflowName`     | v2.1.154+: workflow name on lifecycle entries                            |
+| `workflowRunUrl`   | v2.1.154+: workflow run URL on lifecycle entries                         |
+| `workflowStatus`   | v2.1.154+: workflow run status on lifecycle entries                      |
 
 ```mermaid
 classDiagram
@@ -125,12 +129,13 @@ flowchart TD
 
 ### Version-Compatibility Normalisations
 
-| Issue                                | Version      | Fix                                              |
-| ------------------------------------ | ------------ | ------------------------------------------------ |
-| Tool inputs JSON-encoded as strings  | pre-v2.1.92  | Deserialise inner string → object                |
-| Fork reference in `forkedFrom` field | pre-v2.1.118 | Map to synthetic `fork-context-ref`              |
-| Hook payload in content text         | all          | Regex extraction of teammate ID, color, protocol |
-| Large outputs written to disk        | v2.1.89+     | `RE_PERSISTED_OUTPUT_PATH` → file read           |
+| Issue                                | Version      | Fix                                                            |
+| ------------------------------------ | ------------ | -------------------------------------------------------------- |
+| Tool inputs JSON-encoded as strings  | pre-v2.1.92  | Deserialise inner string → object                              |
+| Fork reference in `forkedFrom` field | pre-v2.1.118 | Map to synthetic `fork-context-ref`                            |
+| Hook payload in content text         | all          | Regex extraction of teammate ID, color, protocol               |
+| Large outputs written to disk        | v2.1.89+     | `RE_PERSISTED_OUTPUT_PATH` → file read                         |
+| Dynamic Workflow lifecycle types     | v2.1.154+    | Add to `NOISE_ENTRY_TYPES`; capture workflow fields on `Entry` |
 
 ---
 
