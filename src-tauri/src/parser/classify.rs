@@ -1709,6 +1709,96 @@ mod tests {
         }
     }
 
+    // --- Issue #117: v2.1.152+ MessageDisplay hook event is handled by existing catch-alls ---
+
+    #[test]
+    fn classify_message_display_progress_entry_produces_hook_msg() {
+        // v2.1.152+: MessageDisplay fires as a progress/hook_progress entry.
+        // The generic hookEvent presence check rescues it without an explicit match arm.
+        let e = Entry {
+            entry_type: "progress".to_string(),
+            uuid: "uuid-msg-display-progress".to_string(),
+            timestamp: "2026-05-27T10:00:00Z".to_string(),
+            data: Some(json!({
+                "type": "hook_progress",
+                "hookEvent": "MessageDisplay",
+                "hookName": "my-display-hook",
+                "command": "echo transforming"
+            })),
+            ..Default::default()
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::Hook(h)) => {
+                assert_eq!(h.hook_event, "MessageDisplay");
+                assert_eq!(h.hook_name, "my-display-hook");
+            }
+            other => panic!(
+                "Expected Hook for MessageDisplay progress entry, got {:?}",
+                other
+            ),
+        }
+    }
+
+    #[test]
+    fn classify_message_display_system_hook_progress_entry_produces_hook_msg() {
+        // v2.1.152+: MessageDisplay may also arrive as type:"system", subtype:"hook_progress"
+        // in verbose/stream-json mode. The hook_progress subtype rescue must handle it.
+        let e = Entry {
+            entry_type: "system".to_string(),
+            uuid: "uuid-msg-display-sys".to_string(),
+            timestamp: "2026-05-27T10:01:00Z".to_string(),
+            subtype: "hook_progress".to_string(),
+            hook_event: "MessageDisplay".to_string(),
+            hook_name: "display-transform".to_string(),
+            ..Default::default()
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::Hook(h)) => {
+                assert_eq!(h.hook_event, "MessageDisplay");
+                assert_eq!(h.hook_name, "display-transform");
+            }
+            other => panic!(
+                "Expected Hook for system/hook_progress MessageDisplay entry, got {:?}",
+                other
+            ),
+        }
+    }
+
+    #[test]
+    fn classify_message_display_attachment_entry_produces_hook_msg() {
+        // v2.1.152+: MessageDisplay hook results surface as attachment entries.
+        // The generic attachment hookEvent rescue must handle it without an explicit arm.
+        let e = Entry {
+            entry_type: "attachment".to_string(),
+            uuid: "uuid-msg-display-att".to_string(),
+            timestamp: "2026-05-27T10:02:00Z".to_string(),
+            attachment: Some(json!({
+                "type": "hook_success",
+                "hookEvent": "MessageDisplay",
+                "hookName": "my-display-hook",
+                "stdout": "transformed message text"
+            })),
+            ..Default::default()
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::Hook(h)) => {
+                assert_eq!(h.hook_event, "MessageDisplay");
+                assert_eq!(h.hook_name, "my-display-hook");
+                let meta = h
+                    .metadata
+                    .expect("metadata must be captured for attachment hooks");
+                assert_eq!(
+                    meta.get("hookEvent").and_then(|v| v.as_str()),
+                    Some("MessageDisplay")
+                );
+            }
+            other => panic!(
+                "Expected Hook for MessageDisplay attachment entry, got {:?}",
+                other
+            ),
+        }
+    }
+
     // --- Issue #60: fork-context-ref entry (v2.1.118+) is silently dropped ---
 
     #[test]

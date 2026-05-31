@@ -56,6 +56,10 @@ pub struct Entry {
     // Top-level fields present in system/hook_progress entries (verbose/stream-json mode).
     #[serde(default)]
     pub subtype: String,
+    // hook_event is stored as a plain String (not an enum) so that new hook event names
+    // introduced by future Claude Code releases (e.g. MessageDisplay added in v2.1.152) are
+    // captured as-is rather than rejected. Callers that need to distinguish specific event
+    // types should match on the string value with a wildcard fallback arm.
     #[serde(default, rename = "hookEvent")]
     pub hook_event: String,
     #[serde(default, rename = "hookName")]
@@ -1034,6 +1038,48 @@ mod tests {
             "parse_entry must succeed with a valid surrogate pair"
         );
         assert_eq!(entry.unwrap().uuid, "emoji-valid-pair");
+    }
+
+    // --- Issue #117: v2.1.152+ MessageDisplay hook event compat ---
+
+    #[test]
+    fn parse_entry_captures_message_display_hook_event_as_string() {
+        // v2.1.152+: MessageDisplay is a new hook event name that surfaces in JSONL entries.
+        // hook_event is stored as a plain String so this new value is captured without rejection.
+        let line = json!({
+            "type": "system",
+            "subtype": "hook_progress",
+            "uuid": "msg-display-uuid-001",
+            "timestamp": "2026-05-27T10:00:00Z",
+            "hookEvent": "MessageDisplay",
+            "hookName": "my-display-hook"
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("must parse MessageDisplay hook entry");
+        assert_eq!(entry.hook_event, "MessageDisplay");
+        assert_eq!(entry.hook_name, "my-display-hook");
+    }
+
+    #[test]
+    fn parse_entry_message_display_as_attachment_is_captured() {
+        // MessageDisplay can also surface as an attachment entry (hook result).
+        let line = json!({
+            "type": "attachment",
+            "uuid": "msg-display-att-uuid",
+            "timestamp": "2026-05-27T11:00:00Z",
+            "attachment": {
+                "type": "hook_success",
+                "hookEvent": "MessageDisplay",
+                "hookName": "transform-hook"
+            }
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("must parse MessageDisplay attachment entry");
+        let att = entry.attachment.expect("attachment must be captured");
+        assert_eq!(
+            att.get("hookEvent").and_then(|v| v.as_str()),
+            Some("MessageDisplay")
+        );
     }
 
     #[test]
