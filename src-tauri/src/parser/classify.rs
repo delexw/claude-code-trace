@@ -130,6 +130,13 @@ const NOISE_ENTRY_TYPES: &[&str] = &[
     // duplicating the full parent conversation. The pointer has no message content — drop it
     // silently so it never appears in the conversation display.
     "fork-context-ref",
+    // v2.1.154+: Dynamic Workflow lifecycle entries carry workflow state but no displayable
+    // message content. Drop silently so they never appear in the conversation transcript.
+    "workflow-start",
+    "workflow-progress",
+    "workflow-complete",
+    "workflow-cancelled",
+    "workflow-error",
 ];
 
 const HARD_NOISE_TAGS: &[&str] = &["<local-command-caveat>", "<system-reminder>"];
@@ -1738,6 +1745,88 @@ mod tests {
         assert!(
             classify(e).is_none(),
             "fork-context-ref entry must be dropped even when message.role is set"
+        );
+    }
+
+    // --- Issue #115: v2.1.154+ Dynamic Workflow entry types ---
+
+    #[test]
+    fn classify_drops_all_workflow_lifecycle_entry_types_as_noise() {
+        // v2.1.154+: workflow-start, workflow-progress, workflow-complete, workflow-cancelled,
+        // and workflow-error are structural metadata with no displayable content; all must be
+        // silently dropped from the transcript.
+        for wf_type in &[
+            "workflow-start",
+            "workflow-progress",
+            "workflow-complete",
+            "workflow-cancelled",
+            "workflow-error",
+        ] {
+            let e = Entry {
+                entry_type: wf_type.to_string(),
+                uuid: format!("uuid-{wf_type}"),
+                timestamp: "2026-05-28T10:00:00Z".to_string(),
+                ..Default::default()
+            };
+            assert!(
+                classify(e).is_none(),
+                "workflow entry type={wf_type} must be silently dropped"
+            );
+        }
+    }
+
+    #[test]
+    fn classify_workflow_tool_use_in_assistant_message_is_extracted() {
+        // v2.1.154+: the Workflow tool appears as a tool_use block in assistant messages.
+        // extract_assistant_details must extract it without filtering by tool name.
+        let content = json!([{
+            "type": "tool_use",
+            "id": "toolu_workflow_001",
+            "name": "Workflow",
+            "input": {
+                "workflowName": "my-workflow",
+                "description": "Run background agents"
+            }
+        }]);
+        let mut e = make_entry("assistant", Some(content));
+        e.message.model = "claude-sonnet-4-20250514".to_string();
+        e.message.stop_reason = Some("tool_use".to_string());
+        match classify(e) {
+            Some(ClassifiedMsg::AI(ai)) => {
+                assert_eq!(ai.tool_calls.len(), 1);
+                assert_eq!(ai.tool_calls[0].name, "Workflow");
+                let block = ai
+                    .blocks
+                    .iter()
+                    .find(|b| b.block_type == "tool_use")
+                    .expect("must have tool_use block");
+                assert_eq!(block.tool_name, "Workflow");
+                let input = block.tool_input.as_ref().expect("input must be captured");
+                assert_eq!(
+                    input.get("workflowName").and_then(|v| v.as_str()),
+                    Some("my-workflow")
+                );
+            }
+            other => panic!("Expected AI with Workflow tool_use, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn classify_workflow_start_with_data_fields_is_still_dropped() {
+        // Even a workflow-start entry that carries workflowId / workflowName / workflowStatus
+        // fields must be silently dropped — it is structural metadata, not transcript content.
+        let e = Entry {
+            entry_type: "workflow-start".to_string(),
+            uuid: "uuid-wf-start-data".to_string(),
+            timestamp: "2026-05-28T10:00:00Z".to_string(),
+            workflow_id: "wf-123".to_string(),
+            workflow_name: "my-workflow".to_string(),
+            workflow_status: "running".to_string(),
+            ..Default::default()
+        };
+        assert!(
+            classify(e).is_none(),
+            "workflow-start with data fields must still be dropped"
         );
     }
 
