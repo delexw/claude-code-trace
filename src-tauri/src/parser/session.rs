@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use super::chunk::{build_chunks, Chunk};
 use super::classify::{classify, ClassifiedMsg};
 use super::debuglog::extract_hook_msgs;
-use super::entry::{parse_entry, Entry};
+use super::entry::{cache_creation_from_value, parse_entry, Entry};
 
 /// SessionInfo holds metadata about a discovered session file for the picker.
 #[derive(Debug, Clone, Serialize)]
@@ -665,10 +665,7 @@ pub(crate) fn scan_session_metadata(path: &str) -> SessionMetadata {
                             .get("cache_read_input_tokens")
                             .and_then(|v| v.as_i64())
                             .unwrap_or(0),
-                        cache_create: usage
-                            .get("cache_creation_input_tokens")
-                            .and_then(|v| v.as_i64())
-                            .unwrap_or(0),
+                        cache_create: cache_creation_from_value(usage),
                         model: model_str.to_string(),
                         has_stop_reason: has_stop,
                     };
@@ -1013,10 +1010,7 @@ impl IncrementalTokenScanner {
             .get("cache_read_input_tokens")
             .and_then(|v| v.as_i64())
             .unwrap_or(0);
-        let cc = usage
-            .get("cache_creation_input_tokens")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(0);
+        let cc = cache_creation_from_value(usage);
 
         if inp + output + cr + cc == 0 {
             return;
@@ -1445,6 +1439,27 @@ mod tests {
         let mut scanner = IncrementalTokenScanner::new();
         let totals = scanner.scan_new_bytes(path.to_str().unwrap());
         assert_eq!(totals.total_tokens, 75);
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn incremental_scanner_nested_cache_creation_format() {
+        // Verifies that the nested `cache_creation.input_tokens` format introduced in
+        // Claude Code v2.1.152 is counted correctly.
+        let tmp = env::temp_dir().join("tail-test-scanner-nested-cache");
+        std::fs::create_dir_all(&tmp).unwrap();
+        let path = tmp.join("session.jsonl");
+
+        let entry = r#"{"type":"assistant","uuid":"a1","requestId":"r1","message":{"model":"claude-sonnet-4-20250514","role":"assistant","content":[],"usage":{"input_tokens":100,"output_tokens":50,"cache_read_input_tokens":0,"cache_creation":{"input_tokens":300}},"stop_reason":"end_turn"}}"#;
+        std::fs::write(&path, format!("{entry}\n")).unwrap();
+
+        let mut scanner = IncrementalTokenScanner::new();
+        let totals = scanner.scan_new_bytes(path.to_str().unwrap());
+        assert_eq!(totals.input_tokens, 100);
+        assert_eq!(totals.output_tokens, 50);
+        assert_eq!(totals.cache_creation_tokens, 300);
+        assert_eq!(totals.total_tokens, 450);
 
         std::fs::remove_dir_all(&tmp).ok();
     }

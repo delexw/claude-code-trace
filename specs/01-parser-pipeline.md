@@ -129,13 +129,14 @@ flowchart TD
 
 ### Version-Compatibility Normalisations
 
-| Issue                                | Version      | Fix                                                            |
-| ------------------------------------ | ------------ | -------------------------------------------------------------- |
-| Tool inputs JSON-encoded as strings  | pre-v2.1.92  | Deserialise inner string → object                              |
-| Fork reference in `forkedFrom` field | pre-v2.1.118 | Map to synthetic `fork-context-ref`                            |
-| Hook payload in content text         | all          | Regex extraction of teammate ID, color, protocol               |
-| Large outputs written to disk        | v2.1.89+     | `RE_PERSISTED_OUTPUT_PATH` → file read                         |
-| Dynamic Workflow lifecycle types     | v2.1.154+    | Add to `NOISE_ENTRY_TYPES`; capture workflow fields on `Entry` |
+| Issue                                                                                     | Version      | Fix                                                                       |
+| ----------------------------------------------------------------------------------------- | ------------ | ------------------------------------------------------------------------- |
+| Tool inputs JSON-encoded as strings                                                       | pre-v2.1.92  | Deserialise inner string → object                                         |
+| Fork reference in `forkedFrom` field                                                      | pre-v2.1.118 | Map to synthetic `fork-context-ref`                                       |
+| Hook payload in content text                                                              | all          | Regex extraction of teammate ID, color, protocol                          |
+| Large outputs written to disk                                                             | v2.1.89+     | `RE_PERSISTED_OUTPUT_PATH` → file read                                    |
+| Dynamic Workflow lifecycle types                                                          | v2.1.154+    | Add to `NOISE_ENTRY_TYPES`; capture workflow fields on `Entry`            |
+| `cache_creation_input_tokens` always 0 when API uses nested `cache_creation.input_tokens` | v2.1.152+    | `cache_creation_from_value()` reads both flat and nested forms; takes max |
 
 ---
 

@@ -145,6 +145,15 @@ pub struct EntryMessage {
     pub usage: EntryUsage,
 }
 
+/// Nested cache-creation breakdown returned by the Anthropic API since Claude Code v2.1.152.
+/// The API may report cache writes as `usage.cache_creation.input_tokens` instead of (or in
+/// addition to) the flat `usage.cache_creation_input_tokens` field.
+#[derive(Debug, Deserialize, Default)]
+pub struct CacheCreationUsage {
+    #[serde(default)]
+    pub input_tokens: i64,
+}
+
 #[derive(Debug, Deserialize, Default)]
 pub struct EntryUsage {
     #[serde(default)]
@@ -153,8 +162,42 @@ pub struct EntryUsage {
     pub output_tokens: i64,
     #[serde(default)]
     pub cache_read_input_tokens: i64,
+    /// Flat format (pre-v2.1.152). May be 0 when the API uses the nested format.
     #[serde(default)]
     pub cache_creation_input_tokens: i64,
+    /// Nested format (v2.1.152+). Takes precedence when non-zero.
+    #[serde(default)]
+    pub cache_creation: Option<CacheCreationUsage>,
+}
+
+impl EntryUsage {
+    /// Returns the effective cache-creation token count, handling both the flat and nested
+    /// API formats. Takes the max so old sessions (flat only) and new sessions (nested only)
+    /// both read correctly.
+    pub fn effective_cache_creation_input_tokens(&self) -> i64 {
+        let nested = self
+            .cache_creation
+            .as_ref()
+            .map(|c| c.input_tokens)
+            .unwrap_or(0);
+        self.cache_creation_input_tokens.max(nested)
+    }
+}
+
+/// Extracts the effective cache-creation token count from a raw `usage` JSON value,
+/// handling both the flat `cache_creation_input_tokens` field and the nested
+/// `cache_creation.input_tokens` form introduced in Claude Code v2.1.152.
+pub(crate) fn cache_creation_from_value(usage: &Value) -> i64 {
+    let flat = usage
+        .get("cache_creation_input_tokens")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
+    let nested = usage
+        .get("cache_creation")
+        .and_then(|v| v.get("input_tokens"))
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
+    flat.max(nested)
 }
 
 impl Entry {
@@ -263,6 +306,50 @@ pub fn parse_entry(line: &[u8]) -> Option<Entry> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    // --- cache_creation_from_value / effective_cache_creation_input_tokens tests ---
+
+    #[test]
+    fn cache_creation_flat_format() {
+        let usage = json!({"cache_creation_input_tokens": 200});
+        assert_eq!(cache_creation_from_value(&usage), 200);
+    }
+
+    #[test]
+    fn cache_creation_nested_format() {
+        let usage = json!({"cache_creation": {"input_tokens": 300}});
+        assert_eq!(cache_creation_from_value(&usage), 300);
+    }
+
+    #[test]
+    fn cache_creation_both_formats_returns_max() {
+        // Both fields present: take the larger value.
+        let usage =
+            json!({"cache_creation_input_tokens": 100, "cache_creation": {"input_tokens": 300}});
+        assert_eq!(cache_creation_from_value(&usage), 300);
+    }
+
+    #[test]
+    fn cache_creation_neither_format_returns_zero() {
+        let usage = json!({"input_tokens": 50});
+        assert_eq!(cache_creation_from_value(&usage), 0);
+    }
+
+    #[test]
+    fn entry_usage_deserializes_nested_format() {
+        let json_str = r#"{"input_tokens":10,"output_tokens":5,"cache_read_input_tokens":0,"cache_creation":{"input_tokens":400}}"#;
+        let usage: EntryUsage = serde_json::from_str(json_str).unwrap();
+        assert_eq!(usage.cache_creation_input_tokens, 0);
+        assert_eq!(usage.effective_cache_creation_input_tokens(), 400);
+    }
+
+    #[test]
+    fn entry_usage_deserializes_flat_format() {
+        let json_str = r#"{"input_tokens":10,"output_tokens":5,"cache_read_input_tokens":0,"cache_creation_input_tokens":200}"#;
+        let usage: EntryUsage = serde_json::from_str(json_str).unwrap();
+        assert_eq!(usage.cache_creation_input_tokens, 200);
+        assert_eq!(usage.effective_cache_creation_input_tokens(), 200);
+    }
 
     // --- parse_entry tests ---
 
