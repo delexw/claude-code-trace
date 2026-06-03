@@ -137,6 +137,13 @@ fn resolve_live_chain_uuids(entries: &[Entry]) -> HashSet<String> {
     // Step 3: walk backward from live_tip via parentUuid links.
     // When parentUuid is empty but logicalParentUuid is set (compact_boundary entries),
     // follow logicalParentUuid instead so that pre-compaction messages are included.
+    //
+    // UUID gap assumption (v2.1.152+): if a MessageDisplay hook hides an assistant message
+    // entirely, Claude Code may omit that entry from the JSONL, leaving a gap in the
+    // parentUuid chain. The `_ => break` arm below handles this gracefully — the backward
+    // walk simply terminates at the gap rather than panicking. The pre-gap messages are
+    // excluded from the live set, which is a conservative but safe degradation: they appear
+    // as a dead-end branch and are suppressed rather than shown in the wrong order.
     let mut live_set: HashSet<String> = HashSet::new();
     let mut current = live_tip;
     loop {
