@@ -856,6 +856,83 @@ mod tests {
         assert_eq!(entry.workflow_id, "wf-xyz-999");
     }
 
+    // --- Issue #124: v2.1.166+ fallbackModel — parse-level compat ---
+
+    #[test]
+    fn parse_entry_assistant_with_null_content_succeeds() {
+        // v2.1.166+: fallback retry stub written before the successful response.
+        // The stub has message.content:null (or absent). parse_entry must not panic or
+        // return None — it should succeed so the caller (classify) can decide to drop it.
+        let line = json!({
+            "type": "assistant",
+            "uuid": "fallback-stub-null",
+            "timestamp": "2026-06-06T10:00:00Z",
+            "message": {
+                "role": "assistant",
+                "model": "claude-opus-4-7",
+                "content": null
+            }
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("must parse assistant stub with null content");
+        assert_eq!(entry.entry_type, "assistant");
+        assert_eq!(entry.message.model, "claude-opus-4-7");
+        assert!(
+            entry.message.content.is_none(),
+            "content must be None for null"
+        );
+    }
+
+    #[test]
+    fn parse_entry_assistant_with_empty_array_content_succeeds() {
+        // v2.1.166+: the stub may carry an empty array rather than null.
+        let line = json!({
+            "type": "assistant",
+            "uuid": "fallback-stub-empty-arr",
+            "timestamp": "2026-06-06T10:00:01Z",
+            "message": {
+                "role": "assistant",
+                "model": "claude-opus-4-7",
+                "content": []
+            }
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry =
+            parse_entry(&bytes).expect("must parse assistant stub with empty-array content");
+        assert_eq!(entry.entry_type, "assistant");
+        assert_eq!(entry.message.model, "claude-opus-4-7");
+        match entry.message.content {
+            Some(serde_json::Value::Array(arr)) => {
+                assert!(arr.is_empty(), "content must be an empty array");
+            }
+            other => panic!("expected Some(Array([])), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_entry_assistant_fallback_model_differs_from_prior_entry() {
+        // v2.1.166+: sessions using fallbackModel will have assistant entries whose
+        // message.model does not match the session's primary model. Each entry's model
+        // must be captured as-is without being normalised or overwritten.
+        let line = json!({
+            "type": "assistant",
+            "uuid": "fallback-success-uuid",
+            "timestamp": "2026-06-06T10:00:02Z",
+            "message": {
+                "role": "assistant",
+                "model": "claude-haiku-4-5",
+                "content": [{"type": "text", "text": "Fallback response"}],
+                "stop_reason": "end_turn"
+            }
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("must parse fallback response entry");
+        assert_eq!(
+            entry.message.model, "claude-haiku-4-5",
+            "fallback model must be captured verbatim"
+        );
+    }
+
     #[test]
     fn parse_entry_all_workflow_lifecycle_types_succeed() {
         // All five workflow lifecycle types must parse without panicking or returning None.
