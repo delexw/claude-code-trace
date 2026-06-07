@@ -187,12 +187,14 @@ pub fn classify(e: Entry) -> Option<ClassifiedMsg> {
                     .get("command")
                     .map(resolve_hook_output)
                     .unwrap_or_default();
+                // v2.1.163+: hookSpecificOutput may be nested inside data for progress entries.
+                let metadata = data.get("hookSpecificOutput").cloned();
                 return Some(ClassifiedMsg::Hook(HookMsg {
                     timestamp: ts,
                     hook_event,
                     hook_name,
                     command,
-                    metadata: None,
+                    metadata,
                 }));
             }
         }
@@ -224,32 +226,38 @@ pub fn classify(e: Entry) -> Option<ClassifiedMsg> {
                     .and_then(|v| v.as_str())
                     .unwrap_or("")
                     .to_string();
+                // v2.1.163+: hookSpecificOutput carries additionalContext from the hook result.
+                let metadata = e.hook_specific_output.clone();
                 return Some(ClassifiedMsg::Hook(HookMsg {
                     timestamp: ts,
                     hook_event: "Stop".to_string(),
                     hook_name,
                     command: String::new(),
-                    metadata: None,
+                    metadata,
                 }));
             }
             // hook_progress: written in verbose/stream-json mode for mid-session hooks.
             "hook_progress" => {
+                // v2.1.163+: hookSpecificOutput carries additionalContext from the hook result.
+                let metadata = e.hook_specific_output.clone();
                 return Some(ClassifiedMsg::Hook(HookMsg {
                     timestamp: ts,
                     hook_event: e.hook_event.clone(),
                     hook_name: e.hook_name.clone(),
                     command: String::new(),
-                    metadata: None,
+                    metadata,
                 }));
             }
             // hookEvent present on any system entry (forward-compat for future hook types).
             _ if !e.hook_event.is_empty() => {
+                // v2.1.163+: hookSpecificOutput carries additionalContext from the hook result.
+                let metadata = e.hook_specific_output.clone();
                 return Some(ClassifiedMsg::Hook(HookMsg {
                     timestamp: ts,
                     hook_event: e.hook_event.clone(),
                     hook_name: e.hook_name.clone(),
                     command: String::new(),
-                    metadata: None,
+                    metadata,
                 }));
             }
             _ => {}
@@ -1918,6 +1926,166 @@ mod tests {
             classify(e).is_none(),
             "workflow-start with data fields must still be dropped"
         );
+    }
+
+    // --- Issue #125: v2.1.163+ hookSpecificOutput.additionalContext is surfaced in metadata ---
+
+    #[test]
+    fn classify_stop_hook_summary_with_hook_specific_output_sets_metadata() {
+        // v2.1.163+: stop_hook_summary entries carrying hookSpecificOutput must expose it as
+        // HookMsg.metadata so the frontend can render additionalContext in the hook details panel.
+        let e = Entry {
+            entry_type: "system".to_string(),
+            uuid: "uuid-stop-with-context".to_string(),
+            timestamp: "2026-06-04T10:00:00Z".to_string(),
+            subtype: "stop_hook_summary".to_string(),
+            hook_count: 1,
+            hook_infos: Some(json!([{"command": "~/.claude/hooks/stop.sh", "durationMs": 42}])),
+            hook_specific_output: Some(json!({"additionalContext": "All checks passed."})),
+            ..Default::default()
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::Hook(h)) => {
+                assert_eq!(h.hook_event, "Stop");
+                let meta = h
+                    .metadata
+                    .expect("hookSpecificOutput must be set as metadata");
+                assert_eq!(
+                    meta.get("additionalContext").and_then(|v| v.as_str()),
+                    Some("All checks passed."),
+                    "additionalContext must be accessible from metadata"
+                );
+            }
+            other => panic!(
+                "Expected Hook for stop_hook_summary with hookSpecificOutput, got {:?}",
+                other
+            ),
+        }
+    }
+
+    #[test]
+    fn classify_stop_hook_summary_without_hook_specific_output_has_none_metadata() {
+        // Pre-v2.1.163 stop_hook_summary entries without hookSpecificOutput must still produce
+        // HookMsg with metadata: None — no regression from the old behaviour.
+        let e = Entry {
+            entry_type: "system".to_string(),
+            uuid: "uuid-stop-no-context".to_string(),
+            timestamp: "2026-06-04T10:00:00Z".to_string(),
+            subtype: "stop_hook_summary".to_string(),
+            hook_count: 1,
+            hook_infos: Some(json!([{"command": "~/.claude/hooks/stop.sh", "durationMs": 10}])),
+            hook_specific_output: None,
+            ..Default::default()
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::Hook(h)) => {
+                assert!(
+                    h.metadata.is_none(),
+                    "metadata must be None when hookSpecificOutput is absent"
+                );
+            }
+            other => panic!("Expected Hook for stop_hook_summary, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn classify_system_hook_progress_with_hook_specific_output_sets_metadata() {
+        // v2.1.163+: system/hook_progress entries for Stop/SubagentStop may carry
+        // hookSpecificOutput — it must flow through to HookMsg.metadata.
+        let e = Entry {
+            entry_type: "system".to_string(),
+            uuid: "uuid-sys-hook-context".to_string(),
+            timestamp: "2026-06-04T11:00:00Z".to_string(),
+            subtype: "hook_progress".to_string(),
+            hook_event: "SubagentStop".to_string(),
+            hook_name: "on-subagent-stop".to_string(),
+            hook_specific_output: Some(
+                json!({"additionalContext": "Subagent completed successfully."}),
+            ),
+            ..Default::default()
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::Hook(h)) => {
+                assert_eq!(h.hook_event, "SubagentStop");
+                let meta = h
+                    .metadata
+                    .expect("hookSpecificOutput must be set as metadata");
+                assert_eq!(
+                    meta.get("additionalContext").and_then(|v| v.as_str()),
+                    Some("Subagent completed successfully.")
+                );
+            }
+            other => panic!(
+                "Expected Hook for system/hook_progress with hookSpecificOutput, got {:?}",
+                other
+            ),
+        }
+    }
+
+    #[test]
+    fn classify_progress_hook_entry_with_hook_specific_output_in_data_sets_metadata() {
+        // v2.1.163+: progress-type hook entries may carry hookSpecificOutput nested inside
+        // data rather than at the top level of the entry. It must be extracted and set as
+        // HookMsg.metadata.
+        let e = Entry {
+            entry_type: "progress".to_string(),
+            uuid: "uuid-progress-hook-context".to_string(),
+            timestamp: "2026-06-04T12:00:00Z".to_string(),
+            data: Some(json!({
+                "type": "hook_progress",
+                "hookEvent": "Stop",
+                "hookName": "on-stop",
+                "command": "~/.claude/hooks/stop.sh",
+                "hookSpecificOutput": {
+                    "additionalContext": "Git status is clean."
+                }
+            })),
+            ..Default::default()
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::Hook(h)) => {
+                assert_eq!(h.hook_event, "Stop");
+                assert_eq!(h.hook_name, "on-stop");
+                let meta = h
+                    .metadata
+                    .expect("hookSpecificOutput in data must be set as metadata");
+                assert_eq!(
+                    meta.get("additionalContext").and_then(|v| v.as_str()),
+                    Some("Git status is clean.")
+                );
+            }
+            other => panic!(
+                "Expected Hook for progress/hook_progress with hookSpecificOutput in data, got {:?}",
+                other
+            ),
+        }
+    }
+
+    #[test]
+    fn classify_progress_hook_entry_without_hook_specific_output_has_none_metadata() {
+        // Pre-v2.1.163 progress hook entries without hookSpecificOutput in data must produce
+        // HookMsg with metadata: None — no regression from old behaviour.
+        let e = Entry {
+            entry_type: "progress".to_string(),
+            uuid: "uuid-progress-hook-old".to_string(),
+            timestamp: "2026-05-01T10:00:00Z".to_string(),
+            data: Some(json!({
+                "type": "hook_progress",
+                "hookEvent": "Stop",
+                "hookName": "on-stop",
+                "command": "~/.claude/hooks/stop.sh"
+            })),
+            ..Default::default()
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::Hook(h)) => {
+                assert!(
+                    h.metadata.is_none(),
+                    "metadata must be None when hookSpecificOutput is absent from data"
+                );
+            }
+            other => panic!("Expected Hook for old progress hook entry, got {:?}", other),
+        }
     }
 
     // --- Issue #37: document content block is recognised as user content ---
