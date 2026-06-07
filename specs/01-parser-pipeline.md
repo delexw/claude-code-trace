@@ -129,15 +129,16 @@ flowchart TD
 
 ### Version-Compatibility Normalisations
 
-| Issue                                                                                     | Version      | Fix                                                                                                                                              |
-| ----------------------------------------------------------------------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Tool inputs JSON-encoded as strings                                                       | pre-v2.1.92  | Deserialise inner string → object                                                                                                                |
-| Fork reference in `forkedFrom` field                                                      | pre-v2.1.118 | Map to synthetic `fork-context-ref`                                                                                                              |
-| Hook payload in content text                                                              | all          | Regex extraction of teammate ID, color, protocol                                                                                                 |
-| Large outputs written to disk                                                             | v2.1.89+     | `RE_PERSISTED_OUTPUT_PATH` → file read                                                                                                           |
-| Dynamic Workflow lifecycle types                                                          | v2.1.154+    | Add to `NOISE_ENTRY_TYPES`; capture workflow fields on `Entry`                                                                                   |
-| `cache_creation_input_tokens` always 0 when API uses nested `cache_creation.input_tokens` | v2.1.152+    | `cache_creation_from_value()` reads both flat and nested forms; takes max                                                                        |
-| `MessageDisplay` hook event name                                                          | v2.1.152+    | `hook_event` stored as `String` — no enum; catch-all presence-of-hookEvent checks in classify handle any future event name without a code change |
+| Issue                                                                                     | Version      | Fix                                                                                                                                                              |
+| ----------------------------------------------------------------------------------------- | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Tool inputs JSON-encoded as strings                                                       | pre-v2.1.92  | Deserialise inner string → object                                                                                                                                |
+| Fork reference in `forkedFrom` field                                                      | pre-v2.1.118 | Map to synthetic `fork-context-ref`                                                                                                                              |
+| Hook payload in content text                                                              | all          | Regex extraction of teammate ID, color, protocol                                                                                                                 |
+| Large outputs written to disk                                                             | v2.1.89+     | `RE_PERSISTED_OUTPUT_PATH` → file read                                                                                                                           |
+| Dynamic Workflow lifecycle types                                                          | v2.1.154+    | Add to `NOISE_ENTRY_TYPES`; capture workflow fields on `Entry`                                                                                                   |
+| `cache_creation_input_tokens` always 0 when API uses nested `cache_creation.input_tokens` | v2.1.152+    | `cache_creation_from_value()` reads both flat and nested forms; takes max                                                                                        |
+| `MessageDisplay` hook event name                                                          | v2.1.152+    | `hook_event` stored as `String` — no enum; catch-all presence-of-hookEvent checks in classify handle any future event name without a code change                 |
+| `fallbackModel` retry writes null/empty stub assistant entry before successful response   | v2.1.166+    | `classify()` returns `None` for assistant entries with `null` or empty `content` array; fallback response with real content passes through with its own model ID |
 
 ---
 

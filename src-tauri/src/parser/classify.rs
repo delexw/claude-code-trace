@@ -446,6 +446,17 @@ pub fn classify(e: Entry) -> Option<ClassifiedMsg> {
 
     // AI message (assistant).
     if e.entry_type == "assistant" {
+        // v2.1.166+: when fallbackModel retries a failed turn, Claude Code writes a stub assistant
+        // entry with null or empty content for the failed primary attempt before writing the
+        // successful fallback response. Skip these stubs to avoid emitting empty AI turns.
+        let content_is_empty = match &e.message.content {
+            None => true,
+            Some(Value::Array(arr)) => arr.is_empty(),
+            _ => false,
+        };
+        if content_is_empty {
+            return None;
+        }
         let (thinking, tool_calls, blocks) = extract_assistant_details(&e.message.content);
         let stop_reason = e.message.stop_reason.clone().unwrap_or_default();
         return Some(ClassifiedMsg::AI(AIMsg {
@@ -838,6 +849,57 @@ mod tests {
         let mut e = make_entry("assistant", Some(json!([{"type": "text", "text": "hi"}])));
         e.message.model = "<synthetic>".to_string();
         assert!(classify(e).is_none());
+    }
+
+    // --- Issue #124: v2.1.166+ fallbackModel retry stub entries ---
+
+    #[test]
+    fn classify_returns_none_for_assistant_with_null_content() {
+        // v2.1.166+: when the primary model fails and fallbackModel retries the turn, Claude Code
+        // writes a stub assistant entry with null content for the failed attempt. classify must
+        // return None so no empty AI turn appears in the conversation display.
+        let mut e = make_entry("assistant", None);
+        e.message.model = "claude-opus-4-7".to_string();
+        assert!(
+            classify(e).is_none(),
+            "assistant entry with null content must be dropped (fallback retry stub)"
+        );
+    }
+
+    #[test]
+    fn classify_returns_none_for_assistant_with_empty_content_array() {
+        // v2.1.166+: the failed primary attempt may also carry an empty content array []
+        // instead of null. classify must return None in this case too.
+        let mut e = make_entry("assistant", Some(json!([])));
+        e.message.model = "claude-opus-4-7".to_string();
+        assert!(
+            classify(e).is_none(),
+            "assistant entry with empty content array must be dropped (fallback retry stub)"
+        );
+    }
+
+    #[test]
+    fn classify_returns_ai_for_fallback_model_assistant_with_real_content() {
+        // v2.1.166+: the successful fallback response has a different model ID but real content.
+        // classify must emit an AIMsg with the fallback model's ID so per-turn model display
+        // is accurate — not the session's primary model.
+        let content = json!([{"type": "text", "text": "Here is the answer"}]);
+        let mut e = make_entry("assistant", Some(content));
+        e.message.model = "claude-haiku-4-5".to_string();
+        e.message.stop_reason = Some("end_turn".to_string());
+        match classify(e) {
+            Some(ClassifiedMsg::AI(ai)) => {
+                assert_eq!(
+                    ai.model, "claude-haiku-4-5",
+                    "fallback model must be preserved per-entry, not overridden by primary model"
+                );
+                assert!(ai.text.contains("Here is the answer"));
+            }
+            other => panic!(
+                "Expected AI for fallback response with content, got {:?}",
+                other
+            ),
+        }
     }
 
     #[test]
