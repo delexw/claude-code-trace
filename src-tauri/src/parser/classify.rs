@@ -454,6 +454,17 @@ pub fn classify(e: Entry) -> Option<ClassifiedMsg> {
 
     // AI message (assistant).
     if e.entry_type == "assistant" {
+        // v2.1.166+: when fallbackModel retries a failed turn, Claude Code writes a stub assistant
+        // entry with null or empty content for the failed primary attempt before writing the
+        // successful fallback response. Skip these stubs to avoid emitting empty AI turns.
+        let content_is_empty = match &e.message.content {
+            None => true,
+            Some(Value::Array(arr)) => arr.is_empty(),
+            _ => false,
+        };
+        if content_is_empty {
+            return None;
+        }
         let (thinking, tool_calls, blocks) = extract_assistant_details(&e.message.content);
         let stop_reason = e.message.stop_reason.clone().unwrap_or_default();
         return Some(ClassifiedMsg::AI(AIMsg {
@@ -846,6 +857,57 @@ mod tests {
         let mut e = make_entry("assistant", Some(json!([{"type": "text", "text": "hi"}])));
         e.message.model = "<synthetic>".to_string();
         assert!(classify(e).is_none());
+    }
+
+    // --- Issue #124: v2.1.166+ fallbackModel retry stub entries ---
+
+    #[test]
+    fn classify_returns_none_for_assistant_with_null_content() {
+        // v2.1.166+: when the primary model fails and fallbackModel retries the turn, Claude Code
+        // writes a stub assistant entry with null content for the failed attempt. classify must
+        // return None so no empty AI turn appears in the conversation display.
+        let mut e = make_entry("assistant", None);
+        e.message.model = "claude-opus-4-7".to_string();
+        assert!(
+            classify(e).is_none(),
+            "assistant entry with null content must be dropped (fallback retry stub)"
+        );
+    }
+
+    #[test]
+    fn classify_returns_none_for_assistant_with_empty_content_array() {
+        // v2.1.166+: the failed primary attempt may also carry an empty content array []
+        // instead of null. classify must return None in this case too.
+        let mut e = make_entry("assistant", Some(json!([])));
+        e.message.model = "claude-opus-4-7".to_string();
+        assert!(
+            classify(e).is_none(),
+            "assistant entry with empty content array must be dropped (fallback retry stub)"
+        );
+    }
+
+    #[test]
+    fn classify_returns_ai_for_fallback_model_assistant_with_real_content() {
+        // v2.1.166+: the successful fallback response has a different model ID but real content.
+        // classify must emit an AIMsg with the fallback model's ID so per-turn model display
+        // is accurate — not the session's primary model.
+        let content = json!([{"type": "text", "text": "Here is the answer"}]);
+        let mut e = make_entry("assistant", Some(content));
+        e.message.model = "claude-haiku-4-5".to_string();
+        e.message.stop_reason = Some("end_turn".to_string());
+        match classify(e) {
+            Some(ClassifiedMsg::AI(ai)) => {
+                assert_eq!(
+                    ai.model, "claude-haiku-4-5",
+                    "fallback model must be preserved per-entry, not overridden by primary model"
+                );
+                assert!(ai.text.contains("Here is the answer"));
+            }
+            other => panic!(
+                "Expected AI for fallback response with content, got {:?}",
+                other
+            ),
+        }
     }
 
     #[test]
@@ -2137,6 +2199,129 @@ mod tests {
                 "Expected Compact for isCompactSummary user entry, got {:?}",
                 other
             ),
+        }
+    }
+
+    // --- Issue #124: v2.1.166+ fallbackModel retry stubs (empty-content assistant entries) ---
+
+    #[test]
+    fn classify_drops_assistant_with_null_content() {
+        // v2.1.166+: when the primary model fails before emitting any content, Claude Code
+        // writes an assistant stub with message.content:null before the fallback response.
+        // classify must return None for this stub so no blank AI turn appears in the UI.
+        let e = Entry {
+            entry_type: "assistant".to_string(),
+            uuid: "stub-null-content".to_string(),
+            timestamp: "2026-06-06T10:00:00Z".to_string(),
+            message: super::super::entry::EntryMessage {
+                role: "assistant".to_string(),
+                model: "claude-opus-4-7".to_string(),
+                content: None,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert!(
+            classify(e).is_none(),
+            "assistant entry with null content must be dropped (fallback retry stub)"
+        );
+    }
+
+    #[test]
+    fn classify_drops_assistant_with_empty_array_content() {
+        // v2.1.166+: the stub may also carry an empty array instead of null.
+        // Both forms must be silently dropped.
+        let e = Entry {
+            entry_type: "assistant".to_string(),
+            uuid: "stub-empty-array-content".to_string(),
+            timestamp: "2026-06-06T10:01:00Z".to_string(),
+            message: super::super::entry::EntryMessage {
+                role: "assistant".to_string(),
+                model: "claude-opus-4-7".to_string(),
+                content: Some(json!([])),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert!(
+            classify(e).is_none(),
+            "assistant entry with empty-array content must be dropped (fallback retry stub)"
+        );
+    }
+
+    #[test]
+    fn classify_keeps_fallback_success_entry_with_content() {
+        // v2.1.166+: the successful fallback response has real content and must be kept.
+        // Its model (claude-haiku-4-5) may differ from the primary model and must be
+        // preserved as authoritative for that entry.
+        let content = json!([{"type": "text", "text": "Hello from fallback model"}]);
+        let e = Entry {
+            entry_type: "assistant".to_string(),
+            uuid: "fallback-success-entry".to_string(),
+            timestamp: "2026-06-06T10:01:01Z".to_string(),
+            message: super::super::entry::EntryMessage {
+                role: "assistant".to_string(),
+                model: "claude-haiku-4-5".to_string(),
+                content: Some(content),
+                stop_reason: Some("end_turn".to_string()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::AI(ai)) => {
+                assert_eq!(
+                    ai.model, "claude-haiku-4-5",
+                    "fallback response model must be entry-authoritative"
+                );
+                assert!(
+                    ai.text.contains("Hello from fallback model"),
+                    "fallback response text must be preserved"
+                );
+            }
+            other => panic!("Expected AI for fallback success entry, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn classify_fallback_model_differs_from_primary_model() {
+        // v2.1.166+: adjacent turns may have different model IDs when fallbackModel is used.
+        // Each entry's model is authoritative for that turn — no session-level assumption.
+        let primary_content = json!([{"type": "text", "text": "Response from primary"}]);
+        let primary = Entry {
+            entry_type: "assistant".to_string(),
+            uuid: "primary-turn".to_string(),
+            timestamp: "2026-06-06T10:00:00Z".to_string(),
+            message: super::super::entry::EntryMessage {
+                role: "assistant".to_string(),
+                model: "claude-opus-4-7".to_string(),
+                content: Some(primary_content),
+                stop_reason: Some("end_turn".to_string()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let fallback_content = json!([{"type": "text", "text": "Response from fallback"}]);
+        let fallback = Entry {
+            entry_type: "assistant".to_string(),
+            uuid: "fallback-turn".to_string(),
+            timestamp: "2026-06-06T10:00:05Z".to_string(),
+            message: super::super::entry::EntryMessage {
+                role: "assistant".to_string(),
+                model: "claude-haiku-4-5".to_string(),
+                content: Some(fallback_content),
+                stop_reason: Some("end_turn".to_string()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        match (classify(primary), classify(fallback)) {
+            (Some(ClassifiedMsg::AI(p)), Some(ClassifiedMsg::AI(f))) => {
+                assert_eq!(p.model, "claude-opus-4-7");
+                assert_eq!(f.model, "claude-haiku-4-5");
+            }
+            other => panic!("Expected two AI messages, got {:?}", other),
         }
     }
 
