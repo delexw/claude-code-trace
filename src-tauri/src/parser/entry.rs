@@ -122,6 +122,12 @@ pub struct Entry {
     pub background_tasks: Option<Value>,
     #[serde(default, rename = "session_crons")]
     pub session_crons: Option<Value>,
+    // Present in Stop and SubagentStop hook result entries (v2.1.163+). When a hook returns
+    // hookSpecificOutput.additionalContext, Claude Code persists the payload at the top level
+    // so the feedback text can be injected back into the session without being labeled a hook
+    // error.
+    #[serde(default, rename = "hookSpecificOutput")]
+    pub hook_specific_output: Option<Value>,
     // Present in workflow lifecycle entries (v2.1.154+). Claude Code's dynamic workflow
     // system writes workflow-start, workflow-progress, workflow-complete, workflow-cancelled,
     // and workflow-error entries carrying these fields.
@@ -788,6 +794,85 @@ mod tests {
         assert!(
             entry.session_crons.is_none(),
             "session_crons must be None when absent"
+        );
+    }
+
+    // --- Issue #125: v2.1.163+ hookSpecificOutput.additionalContext ---
+
+    #[test]
+    fn parse_entry_captures_hook_specific_output_v2_1_163() {
+        // v2.1.163+: Stop and SubagentStop hooks can return hookSpecificOutput.additionalContext
+        // to inject feedback back into the session. The field must be captured as a Value so
+        // callers can inspect additionalContext and any future sub-fields.
+        let line = json!({
+            "type": "system",
+            "subtype": "stop_hook_summary",
+            "uuid": "stop-hook-output-uuid",
+            "timestamp": "2026-06-04T10:00:00Z",
+            "hookCount": 1,
+            "hookInfos": [{"command": "~/.claude/hooks/stop.sh", "durationMs": 42}],
+            "hookSpecificOutput": {
+                "additionalContext": "All checks passed. You may continue."
+            }
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes)
+            .expect("must parse stop_hook_summary entry with hookSpecificOutput");
+        assert_eq!(entry.subtype, "stop_hook_summary");
+        let hso = entry
+            .hook_specific_output
+            .expect("hookSpecificOutput must be captured");
+        assert_eq!(
+            hso.get("additionalContext").and_then(|v| v.as_str()),
+            Some("All checks passed. You may continue."),
+            "additionalContext must be accessible from hookSpecificOutput"
+        );
+    }
+
+    #[test]
+    fn parse_entry_hook_specific_output_defaults_to_none_when_absent() {
+        // Entries from before v2.1.163 (or hooks that don't return feedback) have no
+        // hookSpecificOutput field — must default to None.
+        let line = json!({
+            "type": "system",
+            "subtype": "stop_hook_summary",
+            "uuid": "stop-hook-old-uuid",
+            "timestamp": "2026-05-01T10:00:00Z",
+            "hookCount": 1,
+            "hookInfos": [{"command": "~/.claude/hooks/stop.sh", "durationMs": 10}]
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("must parse old stop_hook_summary entry");
+        assert!(
+            entry.hook_specific_output.is_none(),
+            "hookSpecificOutput must be None when absent"
+        );
+    }
+
+    #[test]
+    fn parse_entry_hook_specific_output_on_hook_progress_entry() {
+        // hookSpecificOutput may also appear on system/hook_progress entries for SubagentStop.
+        let line = json!({
+            "type": "system",
+            "subtype": "hook_progress",
+            "uuid": "subagent-stop-output-uuid",
+            "timestamp": "2026-06-04T11:00:00Z",
+            "hookEvent": "SubagentStop",
+            "hookName": "on-subagent-stop",
+            "hookSpecificOutput": {
+                "additionalContext": "Subagent completed successfully."
+            }
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes)
+            .expect("must parse SubagentStop hook_progress with hookSpecificOutput");
+        assert_eq!(entry.hook_event, "SubagentStop");
+        let hso = entry
+            .hook_specific_output
+            .expect("hookSpecificOutput must be captured for SubagentStop hook_progress");
+        assert_eq!(
+            hso.get("additionalContext").and_then(|v| v.as_str()),
+            Some("Subagent completed successfully.")
         );
     }
 

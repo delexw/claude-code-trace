@@ -67,25 +67,26 @@ Each JSONL line is decoded into an `Entry` struct that mirrors the raw Claude Co
 
 ### Key Fields
 
-| Field              | Description                                                              |
-| ------------------ | ------------------------------------------------------------------------ |
-| `uuid`             | Unique message identifier                                                |
-| `entry_type`       | Discriminant: `user`, `assistant`, `system`, `hook_event`, etc.          |
-| `role`             | Same as `entry_type` for most messages                                   |
-| `content`          | Message body (string or content-block array)                             |
-| `model`            | Model string (assistant messages only)                                   |
-| `subtype`          | Hook subtype: `PreToolUse`, `PostToolUse`, `Stop`, …                     |
-| `hookEvent`        | Hook event name                                                          |
-| `isCompactSummary` | Compaction boundary marker                                               |
-| `away_summary`     | Session-recap text                                                       |
-| `forkedFrom`       | Pre-v2.1.118 fork reference                                              |
-| `tool_use_result`  | JSON object for tool results                                             |
-| `background_tasks` | v2.1.145+: running background task descriptors (Stop/SubagentStop hooks) |
-| `session_crons`    | v2.1.145+: registered session cron jobs (Stop/SubagentStop hooks)        |
-| `workflowId`       | v2.1.154+: workflow identifier on lifecycle entries                      |
-| `workflowName`     | v2.1.154+: workflow name on lifecycle entries                            |
-| `workflowRunUrl`   | v2.1.154+: workflow run URL on lifecycle entries                         |
-| `workflowStatus`   | v2.1.154+: workflow run status on lifecycle entries                      |
+| Field                | Description                                                                                                        |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `uuid`               | Unique message identifier                                                                                          |
+| `entry_type`         | Discriminant: `user`, `assistant`, `system`, `hook_event`, etc.                                                    |
+| `role`               | Same as `entry_type` for most messages                                                                             |
+| `content`            | Message body (string or content-block array)                                                                       |
+| `model`              | Model string (assistant messages only)                                                                             |
+| `subtype`            | Hook subtype: `PreToolUse`, `PostToolUse`, `Stop`, …                                                               |
+| `hookEvent`          | Hook event name                                                                                                    |
+| `isCompactSummary`   | Compaction boundary marker                                                                                         |
+| `away_summary`       | Session-recap text                                                                                                 |
+| `forkedFrom`         | Pre-v2.1.118 fork reference                                                                                        |
+| `tool_use_result`    | JSON object for tool results                                                                                       |
+| `background_tasks`   | v2.1.145+: running background task descriptors (Stop/SubagentStop hooks)                                           |
+| `session_crons`      | v2.1.145+: registered session cron jobs (Stop/SubagentStop hooks)                                                  |
+| `hookSpecificOutput` | v2.1.163+: hook result payload; `additionalContext` sub-field carries feedback text injected back into the session |
+| `workflowId`         | v2.1.154+: workflow identifier on lifecycle entries                                                                |
+| `workflowName`       | v2.1.154+: workflow name on lifecycle entries                                                                      |
+| `workflowRunUrl`     | v2.1.154+: workflow run URL on lifecycle entries                                                                   |
+| `workflowStatus`     | v2.1.154+: workflow run status on lifecycle entries                                                                |
 
 ```mermaid
 classDiagram
