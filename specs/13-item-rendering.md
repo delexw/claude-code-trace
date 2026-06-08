@@ -28,16 +28,15 @@ flowchart LR
     DI --> ICON["getItemIcon()"]
     DI --> NAME["getItemName()"]
     DI --> SUMMARY["getItemSummary()"]
-    DI --> BODY{"isExpanded\nor Output (web)?"}
+    DI --> BODY{"isExpanded\nor Output?"}
     BODY -->|"yes"| DIB["DetailItemBody\n(type-specific)"]
     BODY -->|"no"| HIDE["header only"]
 ```
 
-> **Web `Output` is always inline.** On the web frontend the assistant's prose (`Output`
-> items) renders its body unconditionally, not just when expanded, so a turn reads as
-> commentary interleaved with tool calls in chronological order. Its collapsed-row summary is
-> therefore empty (the full text shows in the body, not a truncated preview). The TUI keeps the
-> expand-gated behaviour. See [Expanded Body Per Type](#expanded-body-per-type).
+> **`Output` is always inline.** Both renderers show the assistant's prose (`Output` items)
+> unconditionally, not just when expanded, so a turn reads as commentary interleaved with tool
+> calls in chronological order. The collapsed-row summary is therefore empty (the full text
+> shows in the body, not a truncated preview). See [Expanded Body Per Type](#expanded-body-per-type).
 
 ---
 
@@ -46,14 +45,14 @@ flowchart LR
 The three "introspection" functions are mirrored between web (`DetailItem.tsx`) and TUI
 (`tui-py/items.py`). Same logic, different glyph/icon vocabulary.
 
-| `item_type`       | Name source                        | Summary source                                                           | Web icon (`react-icons`)                        | TUI icon (Unicode) |
-| ----------------- | ---------------------------------- | ------------------------------------------------------------------------ | ----------------------------------------------- | ------------------ |
-| `Thinking`        | literal `"Thinking"`               | `text.slice(0,80)` (or "Content not recorded")                           | `VscLightbulbEmpty`                             | `◆` (U+25C6)       |
-| `Output`          | literal `"Output"`                 | `""` (web — prose shown inline in body) / `jsonShapeSummary(text)` (TUI) | `VscComment`                                    | `▪` (U+25AA)       |
-| `ToolCall`        | `tool_name` or `"Tool"`            | `tool_summary`                                                           | `toolCategoryIcons[tool_category]` or `Warning` | `⚙` (U+2699)       |
-| `Subagent`        | `subagent_type` or `"Subagent"`    | `subagent_desc`                                                          | `ClaudeIcon`                                    | `✦` (U+2726)       |
-| `TeammateMessage` | `team_member_name` or `"Teammate"` | `text.slice(0,100)` (web) / `text` (TUI)                                 | `ClaudeIcon`                                    | `◈` (U+25C8)       |
-| `HookEvent`       | `hook_event` or `"Hook"`           | `hook_name` + `: ` + truncated `hook_command`                            | `VscExtensions` (hook icon)                     | `⚡` (U+26A1)      |
+| `item_type`       | Name source                        | Summary source                                 | Web icon (`react-icons`)                        | TUI icon (Unicode) |
+| ----------------- | ---------------------------------- | ---------------------------------------------- | ----------------------------------------------- | ------------------ |
+| `Thinking`        | literal `"Thinking"`               | `text.slice(0,80)` (or "Content not recorded") | `VscLightbulbEmpty`                             | `◆` (U+25C6)       |
+| `Output`          | literal `"Output"`                 | `""` (prose shown inline in body)              | `VscComment`                                    | `▪` (U+25AA)       |
+| `ToolCall`        | `tool_name` or `"Tool"`            | `tool_summary`                                 | `toolCategoryIcons[tool_category]` or `Warning` | `⚙` (U+2699)       |
+| `Subagent`        | `subagent_type` or `"Subagent"`    | `subagent_desc`                                | `ClaudeIcon`                                    | `✦` (U+2726)       |
+| `TeammateMessage` | `team_member_name` or `"Teammate"` | `text.slice(0,100)` (web) / `text` (TUI)       | `ClaudeIcon`                                    | `◈` (U+25C8)       |
+| `HookEvent`       | `hook_event` or `"Hook"`           | `hook_name` + `: ` + truncated `hook_command`  | `VscExtensions` (hook icon)                     | `⚡` (U+26A1)      |
 
 ### Web Tool Category Icons (`Icons.tsx`)
 
@@ -99,13 +98,14 @@ on `item_type` but use different layout primitives.
 | `HookEvent`       | Three sections: `Hook` (`{hook_event}: {hook_name}`), `Command` (`<pre>` if present), `Metadata` (`<pre>` if present)                                                                                                                                             |
 | `default`         | Single text block                                                                                                                                                                                                                                                 |
 
-On the web frontend the `Output` body renders inline regardless of expansion state (the
-assistant's prose is always shown in chronological position); all other types render their body
-only when `isExpanded`. Because that prose is now shown by the `Output` items themselves,
-`MessageDetail` suppresses the flattened `msg.content` blob it would otherwise render above the
-items whenever the turn contains at least one `Output` item — the blob concatenated every text
-block out of order and duplicated what the items already show. Turns with no `Output` items
-(e.g. tool-only or plain user/system messages) still render `msg.content`.
+Both renderers show the `Output` body inline regardless of expansion state (the assistant's
+prose is always shown in chronological position); all other types render their body only when
+`isExpanded`. Because that prose is shown by the `Output` items themselves, the message view
+(`MessageDetail` on web, `DetailView` in the TUI) suppresses the flattened `msg.content` blob it
+would otherwise render above the items whenever the turn contains at least one `Output` item —
+the blob concatenated every text block out of order and duplicated what the items already show.
+Turns with no `Output` items (e.g. tool-only or plain user/system messages) still render
+`msg.content`.
 
 ### TUI (`DetailItemBody`)
 

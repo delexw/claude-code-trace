@@ -33,6 +33,28 @@ ICON_TOOL = "⚙"
 # ---------------------------------------------------------------------------
 
 
+def _has_inline_prose(msg: DisplayMessage) -> bool:
+    """True when the turn has Output items that render the assistant prose inline.
+
+    Output items render their prose in chronological position alongside the tool
+    calls, so the flattened ``msg.content`` blob (and its title preview) would just
+    duplicate the same text out of order.
+    """
+    return any(it.item_type == "Output" for it in msg.items)
+
+
+def _item_collapsed(item: DisplayItem, idx: int, expanded_items: set[int]) -> bool:
+    """Whether an item's Collapsible starts collapsed.
+
+    Output is the assistant's prose: it renders inline always so a turn reads as
+    commentary interleaved with tool calls in chronological order. Every other type
+    stays collapsed until the user expands it.
+    """
+    if item.item_type == "Output":
+        return False
+    return idx not in expanded_items
+
+
 def _stats_text_parts(msg: DisplayMessage) -> list[tuple[str, str]]:
     import format_utils as fu
 
@@ -71,7 +93,7 @@ def _render_msg_title(msg: DisplayMessage, depth: int, ongoing: bool, anim_frame
     if ongoing:
         parts.append(f"  [{theme.ONGOING}]{theme.SPIN[anim_frame]}[/]")
 
-    if msg.content:
+    if msg.content and not _has_inline_prose(msg):
         first_line = next((ln.strip() for ln in msg.content.split("\n") if ln.strip()), "")
         if first_line:
             preview = first_line[:80] + ("…" if len(first_line) > 80 else "")
@@ -345,7 +367,7 @@ class DetailView(Widget):
         for idx in range(len(self._items)):
             with contextlib.suppress(Exception):
                 coll = self.query_one(f"#item-{idx}", Collapsible)
-                coll.collapsed = idx not in self._expanded_items
+                coll.collapsed = _item_collapsed(self._items[idx], idx, self._expanded_items)
 
     async def _rebuild(self) -> None:
         try:
@@ -357,10 +379,16 @@ class DetailView(Widget):
                 )
                 content = self._message.content or ""
                 await msg_coll.remove_children()
-                await msg_coll.mount(
-                    Markdown(content) if content else Static(f"[{theme.TEXT_DIM}]No content[/]")
-                )
-                msg_coll.collapsed = False
+                if _has_inline_prose(self._message):
+                    # Output items render the prose inline below; don't duplicate it here.
+                    await msg_coll.mount(Static(f"[{theme.TEXT_DIM}]Prose shown inline below[/]"))
+                    msg_coll.collapsed = True
+                elif content:
+                    await msg_coll.mount(Markdown(content))
+                    msg_coll.collapsed = False
+                else:
+                    await msg_coll.mount(Static(f"[{theme.TEXT_DIM}]No content[/]"))
+                    msg_coll.collapsed = False
             else:
                 msg_coll.title = f"[{theme.TEXT_DIM}]No message selected[/]"
                 msg_coll.collapsed = True
@@ -385,7 +413,7 @@ class DetailView(Widget):
             for idx, item in enumerate(self._items):
                 title = _render_item_title(item, self._max_name_len)
                 body_md = _render_item_body(item)
-                collapsed = idx not in self._expanded_items
+                collapsed = _item_collapsed(item, idx, self._expanded_items)
                 await lv.append(
                     ListItem(
                         Collapsible(
