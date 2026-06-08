@@ -105,6 +105,10 @@ describe("getItemSummary", () => {
     expect(getItemSummary(makeItem({ item_type: "Output", text: "" }))).toBe("");
   });
 
+  it("returns empty string for Output with text (prose renders inline in the body)", () => {
+    expect(getItemSummary(makeItem({ item_type: "Output", text: "a".repeat(100) }))).toBe("");
+  });
+
   it("returns hook_name and command for HookEvent", () => {
     const result = getItemSummary(
       makeItem({ item_type: "HookEvent", hook_name: "format", hook_command: "prettier ." }),
@@ -248,6 +252,28 @@ describe("DetailItem", () => {
     );
     expect(screen.getByText("plain output text")).toBeInTheDocument();
     expect(container.querySelector(".detail-item__json")).not.toBeInTheDocument();
+  });
+
+  it("renders Output prose inline even when collapsed", () => {
+    const { container } = render(
+      <DetailItem
+        item={makeItem({
+          id: "out-1",
+          item_type: "Output",
+          tool_name: "",
+          tool_summary: "",
+          text: "I'll investigate the tmp agents",
+        })}
+        index={0}
+        isSelected={false}
+        isExpanded={false}
+        onToggle={vi.fn()}
+        onToggleExpand={vi.fn()}
+        onSelect={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("I'll investigate the tmp agents")).toBeInTheDocument();
+    expect(container.querySelector(".detail-item__text--markdown")).toBeInTheDocument();
   });
 
   it("shows thinking body with italic text when expanded", () => {

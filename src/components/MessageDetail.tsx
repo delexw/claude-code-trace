@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useLayoutEffect, useEffect } from "react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
@@ -63,26 +63,27 @@ interface MessageDetailProps {
   viewActionsRef: ViewActionsRef;
 }
 
+// Defined at module scope (not inside MarkdownRenderer's render) so the component
+// reference is stable across renders — see react(no-unstable-nested-components).
+const MARKDOWN_COMPONENTS: Components = {
+  code({ className, children }) {
+    const match = /language-(\w+)/.exec(className ?? "");
+    const lang = match ? match[1] : "";
+    const code = String(children).replace(/\n$/, "");
+    if (lang) {
+      return (
+        <SyntaxHighlighter language={lang} style={oneDark} PreTag="div">
+          {code}
+        </SyntaxHighlighter>
+      );
+    }
+    return <code className={className}>{children}</code>;
+  },
+};
+
 function MarkdownRenderer({ content }: { content: string }) {
   return (
-    <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
-      components={{
-        code({ className, children }) {
-          const match = /language-(\w+)/.exec(className ?? "");
-          const lang = match ? match[1] : "";
-          const code = String(children).replace(/\n$/, "");
-          if (lang) {
-            return (
-              <SyntaxHighlighter language={lang} style={oneDark} PreTag="div">
-                {code}
-              </SyntaxHighlighter>
-            );
-          }
-          return <code className={className}>{children}</code>;
-        },
-      }}
-    >
+    <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
       {fenceInlineJson(content)}
     </ReactMarkdown>
   );
@@ -174,6 +175,10 @@ export function MessageDetail({
   const modelColor = msg.model ? getModelColor(msg.model) : undefined;
   const time = formatExactTime(msg.timestamp);
   const hasItems = msg.items.length > 0;
+  // Output items render the assistant's prose inline, in chronological order with
+  // the tool calls. When present, the flattened msg.content blob at the top would
+  // duplicate that same text out of order, so we suppress it.
+  const hasInlineProse = msg.items.some((i) => i.item_type === "Output");
   const hasPanels = panelStack.length > 0;
   const hasToolCalls = msg.items.some(
     (i) => i.item_type === "ToolCall" || i.item_type === "Subagent",
@@ -382,7 +387,7 @@ export function MessageDetail({
 
         <div className="message-detail__body" ref={bodyRef}>
           <div className="message-detail__content">
-            {msg.content && (
+            {msg.content && !hasInlineProse && (
               <div className="message-detail__text">
                 <MarkdownRenderer content={msg.content} />
               </div>
@@ -671,6 +676,9 @@ function AgentDetailColumn({
   const modelColor = msg.model ? getModelColor(msg.model) : undefined;
   const time = formatExactTime(msg.timestamp);
   const hasItems = msg.items.length > 0;
+  // See main column: suppress the flattened content blob when Output items already
+  // render the prose inline and in chronological order.
+  const hasInlineProse = msg.items.some((i) => i.item_type === "Output");
 
   // Check if a deeper panel is open for a given agent_id
   const activeAgentId = depth + 1 < panelStack.length ? panelStack[depth + 1].item.agent_id : null;
@@ -751,7 +759,7 @@ function AgentDetailColumn({
         </div>
         <div className="message-detail__body" ref={detailBodyRef}>
           <div className="message-detail__content">
-            {msg.content && (
+            {msg.content && !hasInlineProse && (
               <div className="message-detail__text">
                 <MarkdownRenderer content={msg.content} />
               </div>
