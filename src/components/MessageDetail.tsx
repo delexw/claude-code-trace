@@ -174,6 +174,10 @@ export function MessageDetail({
   const modelColor = msg.model ? getModelColor(msg.model) : undefined;
   const time = formatExactTime(msg.timestamp);
   const hasItems = msg.items.length > 0;
+  // Output items render the assistant's prose inline, in chronological order with
+  // the tool calls. When present, the flattened msg.content blob at the top would
+  // duplicate that same text out of order, so we suppress it.
+  const hasInlineProse = msg.items.some((i) => i.item_type === "Output");
   const hasPanels = panelStack.length > 0;
   const hasToolCalls = msg.items.some(
     (i) => i.item_type === "ToolCall" || i.item_type === "Subagent",
@@ -382,7 +386,7 @@ export function MessageDetail({
 
         <div className="message-detail__body" ref={bodyRef}>
           <div className="message-detail__content">
-            {msg.content && (
+            {msg.content && !hasInlineProse && (
               <div className="message-detail__text">
                 <MarkdownRenderer content={msg.content} />
               </div>
@@ -671,6 +675,9 @@ function AgentDetailColumn({
   const modelColor = msg.model ? getModelColor(msg.model) : undefined;
   const time = formatExactTime(msg.timestamp);
   const hasItems = msg.items.length > 0;
+  // See main column: suppress the flattened content blob when Output items already
+  // render the prose inline and in chronological order.
+  const hasInlineProse = msg.items.some((i) => i.item_type === "Output");
 
   // Check if a deeper panel is open for a given agent_id
   const activeAgentId = depth + 1 < panelStack.length ? panelStack[depth + 1].item.agent_id : null;
@@ -751,7 +758,7 @@ function AgentDetailColumn({
         </div>
         <div className="message-detail__body" ref={detailBodyRef}>
           <div className="message-detail__content">
-            {msg.content && (
+            {msg.content && !hasInlineProse && (
               <div className="message-detail__text">
                 <MarkdownRenderer content={msg.content} />
               </div>

@@ -127,4 +127,46 @@ describe("MessageDetail", () => {
 
     expect(screen.getByText("Bash")).toBeInTheDocument();
   });
+
+  it("suppresses the flattened content blob when Output items render the prose inline", () => {
+    const message = makeMessage({
+      content: "I'll investigate the tmp agents",
+      items: [
+        makeItem({
+          id: "out-1",
+          item_type: "Output",
+          tool_name: "",
+          tool_summary: "",
+          text: "I'll investigate the tmp agents",
+        }),
+        makeItem({ id: "tool-1", item_type: "ToolCall", tool_name: "Read", tool_summary: "x.ts" }),
+      ],
+    });
+
+    const { container } = render(
+      <MessageDetail message={message} onBack={vi.fn()} viewActionsRef={makeViewActionsRef()} />,
+    );
+
+    // The duplicated top-of-turn prose wall is gone...
+    expect(container.querySelector(".message-detail__text")).toBeNull();
+    // ...but the prose still shows, inline and in order as an Output item.
+    expect(container.querySelector(".detail-item__text--markdown")).not.toBeNull();
+    expect(screen.getByText("I'll investigate the tmp agents")).toBeInTheDocument();
+  });
+
+  it("keeps the content blob when the turn has no Output items", () => {
+    const message = makeMessage({
+      content: "plain answer",
+      items: [
+        makeItem({ id: "tool-1", item_type: "ToolCall", tool_name: "Read", tool_summary: "x.ts" }),
+      ],
+    });
+
+    const { container } = render(
+      <MessageDetail message={message} onBack={vi.fn()} viewActionsRef={makeViewActionsRef()} />,
+    );
+
+    expect(container.querySelector(".message-detail__text")).not.toBeNull();
+    expect(screen.getByText("plain answer")).toBeInTheDocument();
+  });
 });

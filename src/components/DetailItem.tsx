@@ -158,7 +158,9 @@ export function DetailItem({
         </div>
       )}
       {subagentStats && <StatsBar stats={subagentStats} />}
-      {isExpanded && <DetailItemBody item={item} />}
+      {/* Output is the assistant's prose: render it inline always so the timeline
+          reads as commentary interleaved with tool calls in chronological order. */}
+      {(isExpanded || item.item_type === "Output") && <DetailItemBody item={item} />}
       {popout && (
         <PopoutModal
           onClose={() => setPopout(false)}
@@ -356,7 +358,9 @@ export function getItemSummary(item: DisplayItem): string {
         ? item.text.slice(0, 80) + (item.text.length > 80 ? "\u2026" : "")
         : "Content not recorded";
     case "Output":
-      return item.text ? item.text.slice(0, 80) + (item.text.length > 80 ? "\u2026" : "") : "";
+      // Full prose renders inline in the row body, so the collapsed-row preview
+      // would just duplicate the start of it.
+      return "";
     case "HookEvent":
       return item.hook_name
         ? `${item.hook_name}${item.hook_command ? ": " + truncate(item.hook_command, 60) : ""}`
