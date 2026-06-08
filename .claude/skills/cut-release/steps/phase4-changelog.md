@@ -25,7 +25,26 @@ For each chosen commit in `$SUBSET`:
    - deletions of public surface → Removed
 2. Read the diff if the subject is terse — the bullet should explain user-visible impact,
    not summarize the commit message verbatim.
-3. End the bullet with a commit link: ``([`<sha7>`](https://github.com/delexw/claude-code-trace/commit/<sha>))``
+3. Resolve the author handle for attribution (see `changelog-template.md` → Attribution).
+   When the commit subject carries a squashed PR number `(#NN)`:
+
+   ```bash
+   gh pr view <NN> --repo "$(git remote get-url origin)" --json author --jq '.author.login'
+   ```
+
+   Otherwise fall back to the commit's GitHub author:
+
+   ```bash
+   gh api "repos/{owner}/{repo}/commits/<sha>" --jq '.author.login'
+   ```
+
+   If the login is **not** `delexw` (the maintainer), the bullet must credit them; if it
+   **is** `delexw`, add no handle.
+
+4. End the bullet with a commit link, plus the handle when the author isn't the
+   maintainer:
+   - external author: ``([`<sha7>`](https://github.com/delexw/claude-code-trace/commit/<sha>), @contributor)``
+   - maintainer (`delexw`): ``([`<sha7>`](https://github.com/delexw/claude-code-trace/commit/<sha>))``
 
 Always skip `chore:` / `docs:` / `test:` / `ci:` — they clutter user-facing CHANGELOGs.
 The skill is non-interactive.

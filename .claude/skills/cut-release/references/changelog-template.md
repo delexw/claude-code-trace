@@ -25,13 +25,14 @@ maintainer — explain visible impact, not implementation.
 
 ### Added
 
-- **Headline name** ([`<sha7>`](https://github.com/delexw/claude-code-trace/commit/<sha>)).
+- **Headline name** ([`<sha7>`](https://github.com/delexw/claude-code-trace/commit/<sha>), @contributor).
   Two or three sentences. Why it exists, what the user sees, any caveat. End with a
-  pointer to verification or docs if useful.
+  pointer to verification or docs if useful. (Drop `@contributor` when the author is the
+  maintainer — see Attribution.)
 
 ### Fixed
 
-- **Headline name** ([`<sha7>`](https://github.com/delexw/claude-code-trace/commit/<sha>)).
+- **Headline name** ([`<sha7>`](https://github.com/delexw/claude-code-trace/commit/<sha>), @contributor).
   What was broken, when it surfaced, how it surfaces now. Avoid jargon-only entries like
   "fix race condition" — say which user-visible behavior was wrong and is now right.
 
@@ -73,6 +74,23 @@ Each bullet **must** link to its commit so readers can dig in:
 
 The reference-link at the bottom (`[X.Y.Z]: https://...releases/tag/...`) is what GitHub
 uses to make the version header a clickable link in rendered markdown. Keep it.
+
+## Attribution
+
+Credit external contributors. When a bullet's commit/PR was authored by **anyone other
+than the maintainer (`delexw`)**, append the author's GitHub handle to the commit link so
+the contribution is acknowledged:
+
+```
+([`ebb2ca5`](https://github.com/delexw/claude-code-trace/commit/ebb2ca5), @contributor)
+```
+
+- Omit the handle entirely for the maintainer's own commits (`delexw`) — don't write
+  `@delexw`. The default authorship is the maintainer, so an unattributed bullet means
+  "by the maintainer".
+- One handle per bullet (the PR author). If a bullet summarizes several commits by the
+  same external author, attribute once.
+- Phase 4 explains how to resolve the handle from each commit/PR.
 
 ## Style
 
