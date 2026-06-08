@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useLayoutEffect, useEffect } from "react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
@@ -63,26 +63,27 @@ interface MessageDetailProps {
   viewActionsRef: ViewActionsRef;
 }
 
+// Defined at module scope (not inside MarkdownRenderer's render) so the component
+// reference is stable across renders — see react(no-unstable-nested-components).
+const MARKDOWN_COMPONENTS: Components = {
+  code({ className, children }) {
+    const match = /language-(\w+)/.exec(className ?? "");
+    const lang = match ? match[1] : "";
+    const code = String(children).replace(/\n$/, "");
+    if (lang) {
+      return (
+        <SyntaxHighlighter language={lang} style={oneDark} PreTag="div">
+          {code}
+        </SyntaxHighlighter>
+      );
+    }
+    return <code className={className}>{children}</code>;
+  },
+};
+
 function MarkdownRenderer({ content }: { content: string }) {
   return (
-    <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
-      components={{
-        code({ className, children }) {
-          const match = /language-(\w+)/.exec(className ?? "");
-          const lang = match ? match[1] : "";
-          const code = String(children).replace(/\n$/, "");
-          if (lang) {
-            return (
-              <SyntaxHighlighter language={lang} style={oneDark} PreTag="div">
-                {code}
-              </SyntaxHighlighter>
-            );
-          }
-          return <code className={className}>{children}</code>;
-        },
-      }}
-    >
+    <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
       {fenceInlineJson(content)}
     </ReactMarkdown>
   );
