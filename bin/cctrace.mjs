@@ -5,6 +5,7 @@ import { createConnection } from "node:net";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { platform } from "node:os";
+import { ensureTuiVenv } from "./python-venv.mjs";
 
 const binDir = dirname(fileURLToPath(import.meta.url));
 const root = resolve(binDir, "..");
@@ -154,17 +155,14 @@ switch (mode) {
       });
     }
 
-    // Install Python dependencies, wait for backend, then start TUI
-    execSync("pip install -r requirements.txt --quiet", {
-      stdio: "inherit",
-      cwd: resolve(root, "tui-py"),
-    });
+    // Set up an isolated venv + install deps, wait for backend, then start TUI.
+    const venvPython = ensureTuiVenv(root);
     execSync("node wait-for-backend.mjs", {
       stdio: "inherit",
       cwd: resolve(root, "bin"),
     });
 
-    const tui = spawn("python3", ["main.py"], {
+    const tui = spawn(venvPython, ["main.py"], {
       stdio: "inherit",
       cwd: resolve(root, "tui-py"),
     });

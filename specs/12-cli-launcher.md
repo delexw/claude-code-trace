@@ -1,6 +1,6 @@
 # Spec: CLI Launcher and Service Installer
 
-**Locations**: `bin/cctrace.mjs`, `bin/install-service.mjs`, `bin/wait-for-backend.mjs`
+**Locations**: `bin/cctrace.mjs`, `bin/python-venv.mjs`, `bin/install-service.mjs`, `bin/wait-for-backend.mjs`
 
 The CLI entrypoint `cctrace` selects which mode to run and orchestrates the necessary processes.
 It also supports installing the server as a persistent OS service.
@@ -53,7 +53,7 @@ sequenceDiagram
 sequenceDiagram
     participant CLI as cctrace --tui
     participant BE as Rust Backend (11423)
-    participant DEPS as pip install
+    participant VENV as ensureTuiVenv()
     participant WAIT as wait-for-backend.mjs
     participant TUI as TUI process
 
@@ -62,20 +62,40 @@ sequenceDiagram
         CLI ->> BE: spawn headless backend\n(tauri dev --headless)
     end
 
-    CLI ->> DEPS: pip install -r tui-py/requirements.txt --quiet
-    DEPS -->> CLI: textual + httpx + ... installed
+    CLI ->> VENV: ensure tui-py/.venv exists + deps installed
+    alt .venv missing
+        VENV ->> VENV: discover python3 interpreters on PATH
+        VENV ->> VENV: create venv with first one that yields working pip
+    end
+    VENV ->> VENV: <venv>/bin/python -m pip install -r requirements.txt
+    VENV -->> CLI: path to <venv>/bin/python
 
     CLI ->> WAIT: node bin/wait-for-backend.mjs
     WAIT ->> BE: poll GET /api/settings\n(every 200 ms, up to 30 s)
     BE -->> WAIT: 200 OK
     WAIT -->> CLI: backend ready
 
-    CLI ->> TUI: python3 tui-py/main.py\n(stdio: inherit)
+    CLI ->> TUI: <venv>/bin/python tui-py/main.py\n(stdio: inherit)
 
     Note over CLI,TUI: graceful shutdown
     TUI ->> CLI: exit signal
     CLI ->> BE: kill backend (if spawned)
 ```
+
+### Why a dedicated venv
+
+The TUI's Python deps install into a dedicated `tui-py/.venv` (created on first
+launch, reused after) rather than via a bare `pip` + `python3`. A bare `pip` and
+a bare `python3` can resolve to **different** interpreters on a developer's
+machine — an asdf shim, an unrelated active virtualenv (which may even lack
+pip), system python, etc. — so deps could install where the app can't import
+them. The venv guarantees install and launch use the same isolated interpreter.
+
+Candidate interpreters are **discovered dynamically** by scanning PATH (plus
+well-known install dirs) for `python3` / `python3.<minor>` — no hardcoded version
+list — and each is validated by actually creating the venv and confirming pip is
+present (some interpreters can `import ensurepip` yet still fail to seed pip).
+The first candidate that yields a working venv is used.
 
 ---
 
