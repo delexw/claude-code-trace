@@ -1,6 +1,6 @@
 {
   "productName": "Claude Code Trace",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "identifier": "com.claudecodetrace.app",
   "build": {
     "devUrl": "http://localhost:1420",

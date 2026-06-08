@@ -3,6 +3,78 @@
 All notable changes to claude-code-trace are documented here. Versions follow
 [semantic versioning](https://semver.org/).
 
+## [0.7.0] — 2026-06-08
+
+This release is mostly about keeping the JSONL parser in lockstep with a fast run of
+Claude Code releases (v2.1.145 through v2.1.166) so newer transcripts stop silently
+losing content or rendering blank turns. Alongside the compat work, the macOS desktop
+install now produces a real `.app` bundle instead of a window that launches blank, and
+turn detail reads in chronological order instead of a flattened wall of text.
+
+### Added
+
+- **`background_tasks` and `session_crons` hook fields**
+  ([`da22c00`](https://github.com/delexw/claude-code-trace/commit/da22c00)). Stop and
+  SubagentStop hook payloads in Claude Code v2.1.145+ carry two new arrays — running
+  background-task descriptors and session-scoped cron jobs. Both are now captured on the
+  `Entry` struct instead of being dropped, so they survive into the transcript view.
+
+### Fixed
+
+- **macOS install launches a blank white window**
+  ([`2752850`](https://github.com/delexw/claude-code-trace/commit/2752850)). `cargo install`
+  produced a bare Mach-O binary with no `.app` wrapper or `Info.plist`, so the webview came
+  up blank. The macOS installer now builds a proper `.app` bundle via `tauri build`,
+  installs it to `/Applications`, and removes any stale cargo binary left on `PATH`.
+  Linux and other platforms keep the existing cargo-install path.
+
+- **Turn detail rendered out of order**
+  ([`2752850`](https://github.com/delexw/claude-code-trace/commit/2752850)). The detail view
+  flattened every assistant text block into one blob at the top, then repeated the same text
+  as collapsed Output items below — so commentary and the final result read as a jumbled
+  wall. Output prose now renders inline and always-visible, interleaved with tool calls in
+  chronological order, with the duplicated top blob suppressed. Web and the Python TUI now
+  match.
+
+- **Blank AI turns from fallback-model retries**
+  ([`dbb7f5b`](https://github.com/delexw/claude-code-trace/commit/dbb7f5b)). Claude Code
+  v2.1.166's `fallbackModel` writes a partial assistant entry with null/empty content before
+  the successful fallback response. These stubs surfaced as empty AI turns and confused
+  chunk aggregation. The parser now drops assistant entries with null or empty content, while
+  the real fallback response (and its actual model ID, e.g. `claude-haiku-4-5`) passes through
+  unaffected.
+
+- **Hook `additionalContext` was silently dropped**
+  ([`e03684b`](https://github.com/delexw/claude-code-trace/commit/e03684b)). Stop /
+  SubagentStop hook entries in v2.1.163 carry `hookSpecificOutput.additionalContext` at the
+  top level, which serde discarded. It is now captured as hook metadata and shown in the
+  transcript's hook panel.
+
+- **Cache-write token counts showed 0 on v2.1.152+**
+  ([`e7e3a88`](https://github.com/delexw/claude-code-trace/commit/e7e3a88)). The parser only
+  read the flat `cache_creation_input_tokens` field; v2.1.152+ reports cache-write tokens
+  nested under `cache_creation.input_tokens`. Both formats are now read (taking the larger of
+  the two), so cache-write counts are correct for recent sessions and still backward-compatible.
+
+- **v2.1.154 dynamic-workflow entries broke parsing**
+  ([`2e37441`](https://github.com/delexw/claude-code-trace/commit/2e37441)). Dynamic workflows
+  introduced new entry types (`workflow-start`/`-progress`/`-complete`/`-cancelled`/`-error`)
+  and `workflow*` state fields. The five lifecycle types are now discarded as noise and the
+  state fields captured, instead of hitting the role-based fallback or tripping
+  `deny_unknown_fields`.
+
+- **`.meta.json` parsing fragile to schema changes**
+  ([`3fc65ba`](https://github.com/delexw/claude-code-trace/commit/3fc65ba)). Sidecar metadata
+  is now parsed through a typed `SidecarMeta` struct where every field is optional or
+  `serde(default)`, so sessions written before (or after) a field was added keep parsing
+  instead of failing.
+
+- **Tool results not pretty-printed**
+  ([`b7ea662`](https://github.com/delexw/claude-code-trace/commit/b7ea662)). JSON tool results
+  now render as formatted code blocks — using the backend-parsed `tool_result_json` when
+  available, otherwise attempting a JSON parse and falling back to plain text — matching how
+  tool inputs already display, in both web/desktop and the Python TUI.
+
 ## [0.6.0] — 2026-05-21
 
 A release that rewrites the terminal UI from scratch in Python/Textual, fixes the JSONL
@@ -103,4 +175,5 @@ cut after the WebKit and SSE-flooding root causes were untangled.
   most recent `projectDirs` in a ref so the SSE handler can re-issue `discover_sessions`
   without the caller threading state through.
 
+[0.7.0]: https://github.com/delexw/claude-code-trace/releases/tag/v0.7.0
 [0.6.0]: https://github.com/delexw/claude-code-trace/releases/tag/v0.6.0
