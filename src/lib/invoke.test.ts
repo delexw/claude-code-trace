@@ -4,22 +4,22 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 
 const API_BASE = "http://127.0.0.1:11423";
 
+function mockFetch(body: unknown, ok = true) {
+  const fn = vi.fn().mockResolvedValue({
+    ok,
+    status: ok ? 200 : 400,
+    statusText: ok ? "OK" : "Bad Request",
+    text: () => Promise.resolve(JSON.stringify(body)),
+    json: () => Promise.resolve(body),
+  });
+  vi.stubGlobal("fetch", fn);
+  return fn;
+}
+
 describe("invoke (web/HTTP mode)", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
   });
-
-  function mockFetch(body: unknown, ok = true) {
-    const fn = vi.fn().mockResolvedValue({
-      ok,
-      status: ok ? 200 : 400,
-      statusText: ok ? "OK" : "Bad Request",
-      text: () => Promise.resolve(JSON.stringify(body)),
-      json: () => Promise.resolve(body),
-    });
-    vi.stubGlobal("fetch", fn);
-    return fn;
-  }
 
   it("get_settings calls GET /api/settings", async () => {
     const data = { projects_dir: "/custom", default_dir: "/home/.claude/projects" };

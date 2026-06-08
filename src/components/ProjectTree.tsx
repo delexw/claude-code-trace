@@ -6,6 +6,9 @@ import { OngoingDots } from "./OngoingDots";
 import { buildFlatItems } from "../../shared/projectTree";
 import type { FlatItem } from "../../shared/projectTree";
 
+/** Stable no-op default so the prop doesn't create a new reference each render. */
+const noop = () => {};
+
 interface ProjectTreeProps {
   sessions: SessionInfo[];
   selectedProject: string | null;
@@ -90,7 +93,7 @@ export function ProjectTree({
   isFocused = false,
   collapsedKeys,
   onSelectProject,
-  onToggleCollapse = () => {},
+  onToggleCollapse = noop,
   onRefresh,
   onFocus,
   refreshing,

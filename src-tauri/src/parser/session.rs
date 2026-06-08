@@ -1302,6 +1302,15 @@ fn scan_ongoing_user(
     }
 }
 
+const TOOL_USE_REJECTED_MSG: &str = "User rejected tool use";
+
+fn is_tool_use_rejection(raw: &Value) -> bool {
+    raw.get("toolUseResult")
+        .and_then(|v| v.as_str())
+        .map(|s| s == TOOL_USE_REJECTED_MSG)
+        .unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2081,7 +2090,7 @@ mod tests {
         // Only an assistant entry with tool_use — no user message follows.
         let asst = "{\"type\":\"assistant\",\"uuid\":\"a1\",\"parentUuid\":null,\"timestamp\":\"2026-04-28T10:00:00Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"toolu_defer\",\"name\":\"Bash\",\"input\":{\"command\":\"sleep 10\"}}],\"model\":\"claude-sonnet-4-6\",\"stop_reason\":\"tool_use\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0}}}\n";
 
-        std::fs::write(&path, format!("{asst}")).unwrap();
+        std::fs::write(&path, asst).unwrap();
 
         let meta = scan_session_metadata(path.to_str().unwrap());
         assert!(
@@ -2385,13 +2394,4 @@ mod tests {
             "duplicate summary must be deduplicated to one CompactMsg"
         );
     }
-}
-
-const TOOL_USE_REJECTED_MSG: &str = "User rejected tool use";
-
-fn is_tool_use_rejection(raw: &Value) -> bool {
-    raw.get("toolUseResult")
-        .and_then(|v| v.as_str())
-        .map(|s| s == TOOL_USE_REJECTED_MSG)
-        .unwrap_or(false)
 }

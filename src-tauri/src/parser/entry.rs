@@ -990,7 +990,7 @@ mod tests {
             Some(serde_json::Value::Array(arr)) => {
                 assert!(arr.is_empty(), "content must be an empty array");
             }
-            other => panic!("expected Some(Array([])), got {:?}", other),
+            other => panic!("expected Some(Array([])), got {other:?}"),
         }
     }
 

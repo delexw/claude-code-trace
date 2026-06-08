@@ -179,7 +179,7 @@ mod tests {
         for i in 0..8 {
             items.push(DisplayItem {
                 item_type: DisplayItemType::ToolCall,
-                tool_name: format!("Tool{}", i),
+                tool_name: format!("Tool{i}"),
                 ..Default::default()
             });
         }

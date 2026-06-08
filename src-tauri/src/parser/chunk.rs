@@ -494,7 +494,7 @@ pub fn is_team_task(item: &DisplayItem) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parser::classify::{AIMsg, ClassifiedMsg, ContentBlock, SystemMsg, Usage, UserMsg};
+    use crate::parser::classify::{AIMsg, ClassifiedMsg, ContentBlock, Usage, UserMsg};
     use chrono::Utc;
 
     fn make_ai_msg(blocks: Vec<ContentBlock>, is_meta: bool) -> AIMsg {

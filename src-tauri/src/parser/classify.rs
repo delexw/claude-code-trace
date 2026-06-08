@@ -834,8 +834,7 @@ mod tests {
             let e = make_entry(noise_type, Some(json!("content")));
             assert!(
                 classify(e).is_none(),
-                "Expected None for entry_type={}",
-                noise_type
+                "Expected None for entry_type={noise_type}"
             );
         }
     }
@@ -848,7 +847,7 @@ mod tests {
             Some(ClassifiedMsg::Compact(c)) => {
                 assert_eq!(c.text, "Session summary text");
             }
-            other => panic!("Expected Compact, got {:?}", other),
+            other => panic!("Expected Compact, got {other:?}"),
         }
     }
 
@@ -903,10 +902,7 @@ mod tests {
                 );
                 assert!(ai.text.contains("Here is the answer"));
             }
-            other => panic!(
-                "Expected AI for fallback response with content, got {:?}",
-                other
-            ),
+            other => panic!("Expected AI for fallback response with content, got {other:?}"),
         }
     }
 
@@ -917,7 +913,7 @@ mod tests {
             Some(ClassifiedMsg::User(u)) => {
                 assert!(u.text.contains("Hello Claude"));
             }
-            other => panic!("Expected User, got {:?}", other),
+            other => panic!("Expected User, got {other:?}"),
         }
     }
 
@@ -939,17 +935,18 @@ mod tests {
                 assert_eq!(ai.model, "claude-sonnet-4-20250514");
                 assert_eq!(ai.stop_reason, "tool_use");
             }
-            other => panic!("Expected AI, got {:?}", other),
+            other => panic!("Expected AI, got {other:?}"),
         }
     }
 
     #[test]
     fn classify_returns_system_msg_for_stdout_tag() {
-        let content = format!("<local-command-stdout>file1.txt\nfile2.txt</local-command-stdout>");
+        let content =
+            "<local-command-stdout>file1.txt\nfile2.txt</local-command-stdout>".to_string();
         let e = make_entry("user", Some(json!(content)));
         match classify(e) {
             Some(ClassifiedMsg::System(_)) => {}
-            other => panic!("Expected System, got {:?}", other),
+            other => panic!("Expected System, got {other:?}"),
         }
     }
 
@@ -961,7 +958,7 @@ mod tests {
             Some(ClassifiedMsg::System(s)) => {
                 assert!(!s.output.is_empty());
             }
-            other => panic!("Expected System, got {:?}", other),
+            other => panic!("Expected System, got {other:?}"),
         }
     }
 
@@ -973,7 +970,7 @@ mod tests {
             Some(ClassifiedMsg::System(s)) => {
                 assert!(!s.is_error);
             }
-            other => panic!("Expected System, got {:?}", other),
+            other => panic!("Expected System, got {other:?}"),
         }
     }
 
@@ -987,7 +984,7 @@ mod tests {
                 assert_eq!(t.color, "#ff0000");
                 assert!(t.text.contains("Hello from worker"));
             }
-            other => panic!("Expected Teammate, got {:?}", other),
+            other => panic!("Expected Teammate, got {other:?}"),
         }
     }
 
@@ -1020,7 +1017,7 @@ mod tests {
             Some(ClassifiedMsg::System(s)) => {
                 assert!(!s.is_error, "killed (user-stopped) should not be an error");
             }
-            other => panic!("Expected System, got {:?}", other),
+            other => panic!("Expected System, got {other:?}"),
         }
     }
 
@@ -1032,7 +1029,7 @@ mod tests {
             Some(ClassifiedMsg::System(s)) => {
                 assert!(s.is_error, "failed status should be an error");
             }
-            other => panic!("Expected System with is_error, got {:?}", other),
+            other => panic!("Expected System with is_error, got {other:?}"),
         }
     }
 
@@ -1058,7 +1055,7 @@ mod tests {
                 assert_eq!(h.hook_event, "PostToolUse");
                 assert_eq!(h.hook_name, "my-hook");
             }
-            other => panic!("Expected Hook, got {:?}", other),
+            other => panic!("Expected Hook, got {other:?}"),
         }
     }
 
@@ -1083,10 +1080,7 @@ mod tests {
             Some(ClassifiedMsg::Hook(h)) => {
                 assert_eq!(h.hook_event, "TaskCreated");
             }
-            other => panic!(
-                "Expected Hook for hookEvent-bearing progress entry, got {:?}",
-                other
-            ),
+            other => panic!("Expected Hook for hookEvent-bearing progress entry, got {other:?}"),
         }
     }
 
@@ -1124,10 +1118,7 @@ mod tests {
                 assert_eq!(h.hook_event, "PreToolUse");
                 assert_eq!(h.hook_name, "pre-commit");
             }
-            other => panic!(
-                "Expected Hook for system/hook_progress entry, got {:?}",
-                other
-            ),
+            other => panic!("Expected Hook for system/hook_progress entry, got {other:?}"),
         }
     }
 
@@ -1146,10 +1137,7 @@ mod tests {
             Some(ClassifiedMsg::Hook(h)) => {
                 assert_eq!(h.hook_event, "PostToolUse");
             }
-            other => panic!(
-                "Expected Hook for system entry with hookEvent, got {:?}",
-                other
-            ),
+            other => panic!("Expected Hook for system entry with hookEvent, got {other:?}"),
         }
     }
 
@@ -1189,7 +1177,7 @@ mod tests {
                 assert_eq!(h.hook_event, "Stop");
                 assert_eq!(h.hook_name, "~/.claude/stop-hook-git-check.sh");
             }
-            other => panic!("Expected Hook for stop_hook_summary entry, got {:?}", other),
+            other => panic!("Expected Hook for stop_hook_summary entry, got {other:?}"),
         }
     }
 
@@ -1237,10 +1225,7 @@ mod tests {
                     "command should contain hook output"
                 );
             }
-            other => panic!(
-                "Expected Hook for stop hook feedback entry, got {:?}",
-                other
-            ),
+            other => panic!("Expected Hook for stop hook feedback entry, got {other:?}"),
         }
     }
 
@@ -1265,10 +1250,7 @@ mod tests {
                 assert_eq!(h.hook_event, "PreToolUse");
                 assert_eq!(h.hook_name, "my-pre-hook");
             }
-            other => panic!(
-                "Expected Hook for attachment/hook_success entry, got {:?}",
-                other
-            ),
+            other => panic!("Expected Hook for attachment/hook_success entry, got {other:?}"),
         }
     }
 
@@ -1293,10 +1275,7 @@ mod tests {
                 assert_eq!(h.hook_name, "post-lint");
                 assert!(h.command.contains("Lint failed"));
             }
-            other => panic!(
-                "Expected Hook for attachment/hook_blocking_error, got {:?}",
-                other
-            ),
+            other => panic!("Expected Hook for attachment/hook_blocking_error, got {other:?}"),
         }
     }
 
@@ -1341,7 +1320,7 @@ mod tests {
                 assert_eq!(h.hook_name, "my-large-hook");
                 assert_eq!(h.command, "large output preview");
             }
-            other => panic!("Expected Hook with preview, got {:?}", other),
+            other => panic!("Expected Hook with preview, got {other:?}"),
         }
     }
 
@@ -1367,7 +1346,7 @@ mod tests {
             Some(ClassifiedMsg::Hook(h)) => {
                 assert_eq!(h.command, "full large hook output");
             }
-            other => panic!("Expected Hook, got {:?}", other),
+            other => panic!("Expected Hook, got {other:?}"),
         }
         std::fs::remove_file(&path).ok();
     }
@@ -1394,7 +1373,7 @@ mod tests {
                 assert_eq!(h.hook_event, "PostToolUse");
                 assert_eq!(h.command, "lint error preview");
             }
-            other => panic!("Expected Hook, got {:?}", other),
+            other => panic!("Expected Hook, got {other:?}"),
         }
     }
 
@@ -1418,7 +1397,7 @@ mod tests {
                 assert_eq!(h.hook_event, "PreToolUse");
                 assert_eq!(h.command, "stderr preview text");
             }
-            other => panic!("Expected Hook, got {:?}", other),
+            other => panic!("Expected Hook, got {other:?}"),
         }
     }
 
@@ -1427,7 +1406,7 @@ mod tests {
     #[test]
     fn classify_drops_rate_limit_event_silently() {
         // rate_limit_event has a uuid but no message role — must be dropped, not shown as AI.
-        let mut e = Entry {
+        let e = Entry {
             entry_type: "rate_limit_event".to_string(),
             uuid: "uuid-rate".to_string(),
             timestamp: "2025-01-15T10:30:00Z".to_string(),
@@ -1458,7 +1437,7 @@ mod tests {
     #[test]
     fn classify_keeps_unknown_entry_with_message_role_as_meta() {
         // An unknown entry type that carries actual message content should still be shown.
-        let mut e = Entry {
+        let e = Entry {
             entry_type: "channel_message".to_string(),
             uuid: "uuid-chan".to_string(),
             timestamp: "2025-01-15T10:30:00Z".to_string(),
@@ -1473,10 +1452,7 @@ mod tests {
             Some(ClassifiedMsg::AI(ai)) => {
                 assert!(ai.is_meta, "Unknown entry with role should be meta AI");
             }
-            other => panic!(
-                "Expected meta AI for unknown entry with role, got {:?}",
-                other
-            ),
+            other => panic!("Expected meta AI for unknown entry with role, got {other:?}"),
         }
     }
 
@@ -1568,7 +1544,7 @@ mod tests {
                     "env should be a native array, not a string"
                 );
             }
-            other => panic!("Expected AI, got {:?}", other),
+            other => panic!("Expected AI, got {other:?}"),
         }
     }
 
@@ -1590,7 +1566,7 @@ mod tests {
                 assert_eq!(c.text, "Working on a bug fix in entry.rs.");
                 assert!(c.is_recap, "away_summary must produce is_recap=true");
             }
-            other => panic!("Expected Compact for away_summary, got {:?}", other),
+            other => panic!("Expected Compact for away_summary, got {other:?}"),
         }
     }
 
@@ -1610,7 +1586,7 @@ mod tests {
                 assert_eq!(c.text, "");
                 assert!(c.is_recap, "away_summary must produce is_recap=true");
             }
-            other => panic!("Expected Compact for empty away_summary, got {:?}", other),
+            other => panic!("Expected Compact for empty away_summary, got {other:?}"),
         }
     }
 
@@ -1632,7 +1608,7 @@ mod tests {
                 assert_eq!(h.hook_event, "PermissionDenied");
                 assert_eq!(h.hook_name, "~/.claude/hooks/deny.sh");
             }
-            other => panic!("Expected Hook, got {:?}", other),
+            other => panic!("Expected Hook, got {other:?}"),
         }
     }
 
@@ -1655,10 +1631,7 @@ mod tests {
                 assert_eq!(h.hook_event, "PreCompact");
                 assert_eq!(h.hook_name, "PreCompact:my-hook");
             }
-            other => panic!(
-                "Expected Hook for PreCompact progress entry, got {:?}",
-                other
-            ),
+            other => panic!("Expected Hook for PreCompact progress entry, got {other:?}"),
         }
     }
 
@@ -1690,7 +1663,7 @@ mod tests {
                     Some("uncommitted changes detected")
                 );
             }
-            other => panic!("Expected Hook for PreCompact attachment, got {:?}", other),
+            other => panic!("Expected Hook for PreCompact attachment, got {other:?}"),
         }
     }
 
@@ -1733,10 +1706,7 @@ mod tests {
                 assert_eq!(h.hook_event, "PreCompact");
                 assert_eq!(h.hook_name, "my-compact-hook");
             }
-            other => panic!(
-                "Expected Hook for PreCompact progress entry, got {:?}",
-                other
-            ),
+            other => panic!("Expected Hook for PreCompact progress entry, got {other:?}"),
         }
     }
 
@@ -1772,10 +1742,9 @@ mod tests {
                     Some("Not ready to compact")
                 );
             }
-            other => panic!(
-                "Expected Hook for PreCompact attachment with decision:block, got {:?}",
-                other
-            ),
+            other => {
+                panic!("Expected Hook for PreCompact attachment with decision:block, got {other:?}")
+            }
         }
     }
 
@@ -1802,10 +1771,7 @@ mod tests {
                 assert_eq!(h.hook_event, "MessageDisplay");
                 assert_eq!(h.hook_name, "my-display-hook");
             }
-            other => panic!(
-                "Expected Hook for MessageDisplay progress entry, got {:?}",
-                other
-            ),
+            other => panic!("Expected Hook for MessageDisplay progress entry, got {other:?}"),
         }
     }
 
@@ -1827,10 +1793,9 @@ mod tests {
                 assert_eq!(h.hook_event, "MessageDisplay");
                 assert_eq!(h.hook_name, "display-transform");
             }
-            other => panic!(
-                "Expected Hook for system/hook_progress MessageDisplay entry, got {:?}",
-                other
-            ),
+            other => {
+                panic!("Expected Hook for system/hook_progress MessageDisplay entry, got {other:?}")
+            }
         }
     }
 
@@ -1862,10 +1827,7 @@ mod tests {
                     Some("MessageDisplay")
                 );
             }
-            other => panic!(
-                "Expected Hook for MessageDisplay attachment entry, got {:?}",
-                other
-            ),
+            other => panic!("Expected Hook for MessageDisplay attachment entry, got {other:?}"),
         }
     }
 
@@ -1967,7 +1929,7 @@ mod tests {
                     Some("my-workflow")
                 );
             }
-            other => panic!("Expected AI with Workflow tool_use, got {:?}", other),
+            other => panic!("Expected AI with Workflow tool_use, got {other:?}"),
         }
     }
 
@@ -2018,10 +1980,9 @@ mod tests {
                     "additionalContext must be accessible from metadata"
                 );
             }
-            other => panic!(
-                "Expected Hook for stop_hook_summary with hookSpecificOutput, got {:?}",
-                other
-            ),
+            other => {
+                panic!("Expected Hook for stop_hook_summary with hookSpecificOutput, got {other:?}")
+            }
         }
     }
 
@@ -2046,7 +2007,7 @@ mod tests {
                     "metadata must be None when hookSpecificOutput is absent"
                 );
             }
-            other => panic!("Expected Hook for stop_hook_summary, got {:?}", other),
+            other => panic!("Expected Hook for stop_hook_summary, got {other:?}"),
         }
     }
 
@@ -2078,8 +2039,7 @@ mod tests {
                 );
             }
             other => panic!(
-                "Expected Hook for system/hook_progress with hookSpecificOutput, got {:?}",
-                other
+                "Expected Hook for system/hook_progress with hookSpecificOutput, got {other:?}"
             ),
         }
     }
@@ -2117,8 +2077,7 @@ mod tests {
                 );
             }
             other => panic!(
-                "Expected Hook for progress/hook_progress with hookSpecificOutput in data, got {:?}",
-                other
+                "Expected Hook for progress/hook_progress with hookSpecificOutput in data, got {other:?}"
             ),
         }
     }
@@ -2146,7 +2105,7 @@ mod tests {
                     "metadata must be None when hookSpecificOutput is absent from data"
                 );
             }
-            other => panic!("Expected Hook for old progress hook entry, got {:?}", other),
+            other => panic!("Expected Hook for old progress hook entry, got {other:?}"),
         }
     }
 
@@ -2162,7 +2121,7 @@ mod tests {
         // classify should produce a UserMsg (not None) because document counts as user content.
         match classify(e) {
             Some(ClassifiedMsg::User(_)) => {}
-            other => panic!("Expected UserMsg for document block, got {:?}", other),
+            other => panic!("Expected UserMsg for document block, got {other:?}"),
         }
     }
 
@@ -2195,10 +2154,7 @@ mod tests {
                 );
                 assert!(!c.is_recap, "isCompactSummary must produce is_recap=false");
             }
-            other => panic!(
-                "Expected Compact for isCompactSummary user entry, got {:?}",
-                other
-            ),
+            other => panic!("Expected Compact for isCompactSummary user entry, got {other:?}"),
         }
     }
 
@@ -2279,7 +2235,7 @@ mod tests {
                     "fallback response text must be preserved"
                 );
             }
-            other => panic!("Expected AI for fallback success entry, got {:?}", other),
+            other => panic!("Expected AI for fallback success entry, got {other:?}"),
         }
     }
 
@@ -2321,7 +2277,7 @@ mod tests {
                 assert_eq!(p.model, "claude-opus-4-7");
                 assert_eq!(f.model, "claude-haiku-4-5");
             }
-            other => panic!("Expected two AI messages, got {:?}", other),
+            other => panic!("Expected two AI messages, got {other:?}"),
         }
     }
 
@@ -2333,7 +2289,7 @@ mod tests {
             Some(ClassifiedMsg::User(u)) => {
                 assert!(u.text.contains("Hello Claude"));
             }
-            other => panic!("Expected User, got {:?}", other),
+            other => panic!("Expected User, got {other:?}"),
         }
     }
 }
