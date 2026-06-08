@@ -88,8 +88,6 @@ cctrace --web        # web mode (opens browser)
 cctrace --tui        # terminal UI
 ```
 
-> On **macOS**, `install.sh` builds a proper `.app` bundle with `tauri build` and installs it to `/Applications/Claude Code Trace.app`. A bare `cargo install` binary on macOS has no `.app` wrapper or `Info.plist`, so its webview launches as a blank white window — building the bundle avoids that. On **Linux**, the binary is installed to `~/.cargo/bin` via `cargo install`. The `cctrace` CLI launcher is linked globally on all platforms.
-
 ### Run from source without installing
 
 ```bash
