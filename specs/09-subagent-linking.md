@@ -85,6 +85,18 @@ Recursion depth is bounded by the actual agent nesting depth in the file system.
 (e.g., agent spawns agent spawns agent) is handled by recursive calls, but stack overflows are
 mitigated by iterative traversal for deeply nested structures.
 
+### Team Session Discovery
+
+`discover_team_sessions()` scans the project directory for session files that match
+`(teamName, agentName)` pairs extracted from parent chunks. Each candidate file is
+identified by `read_team_session_meta()`, which scans lines until finding one with
+**both** `teamName` and `agentName` populated.
+
+Before Claude Code v2.1.174, Workflow tool `agent()` subagents omitted attribution
+headers from their JSONL entries. A session file where no line carries attribution
+returns `("", "")` and is gracefully skipped. A file where attribution appears only
+on later entries (mixed pre/post-fix session) is still correctly identified.
+
 ---
 
 ## Four-Phase Linking Algorithm
