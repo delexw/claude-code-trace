@@ -52,6 +52,15 @@ describe("shortModel", () => {
   it("handles claude- prefix only", () => {
     expect(shortModel("claude-")).toBe("");
   });
+
+  it("strips bracket context suffix before normalizing", () => {
+    expect(shortModel("claude-fable-5-20261001[1m]")).toBe("fable5");
+    expect(shortModel("claude-fable-5-20261001[1M]")).toBe("fable5");
+  });
+
+  it("handles new single-number family version with date", () => {
+    expect(shortModel("claude-fable-5-20261001")).toBe("fable5");
+  });
 });
 
 // ---------------------------------------------------------------------------

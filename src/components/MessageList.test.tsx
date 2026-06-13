@@ -98,7 +98,7 @@ describe("MessageList", () => {
       makeMessage({ role: "claude", content: "Response", model: "claude-sonnet-4-20250514" }),
     ];
     render(<MessageList {...defaultProps({ messages })} />);
-    const modelEl = screen.getByText("sonnet4.20250514");
+    const modelEl = screen.getByText("sonnet4");
     expect(modelEl).toBeInTheDocument();
     expect(modelEl).toHaveStyle({ color: "#5fafff" }); // modelSonnet color
   });
