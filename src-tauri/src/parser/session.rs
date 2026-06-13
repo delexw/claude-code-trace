@@ -576,20 +576,19 @@ pub(crate) fn scan_session_metadata(path: &str) -> SessionMetadata {
             }
         }
 
-        // --- Session-level metadata (cwd, branch: first seen; mode: last seen) ---
+        // --- Session-level metadata (cwd, branch, mode: last seen) ---
         // Extract before UUID check so queue-operation entries contribute metadata.
-        if meta.cwd.is_empty() {
-            if let Some(cwd) = raw.get("cwd").and_then(|v| v.as_str()) {
-                if !cwd.is_empty() {
-                    meta.cwd = cwd.to_string();
-                }
+        // v2.1.157+: EnterWorktree can switch worktrees mid-session, so cwd/gitBranch can
+        // change multiple times within a single JSONL file. Always update to the latest
+        // non-empty value so the session metadata reflects the final working context.
+        if let Some(cwd) = raw.get("cwd").and_then(|v| v.as_str()) {
+            if !cwd.is_empty() {
+                meta.cwd = cwd.to_string();
             }
         }
-        if meta.git_branch.is_empty() {
-            if let Some(branch) = raw.get("gitBranch").and_then(|v| v.as_str()) {
-                if !branch.is_empty() {
-                    meta.git_branch = branch.to_string();
-                }
+        if let Some(branch) = raw.get("gitBranch").and_then(|v| v.as_str()) {
+            if !branch.is_empty() {
+                meta.git_branch = branch.to_string();
             }
         }
         if let Some(mode) = raw.get("permissionMode").and_then(|v| v.as_str()) {
@@ -2393,5 +2392,96 @@ mod tests {
             compact_count, 1,
             "duplicate summary must be deduplicated to one CompactMsg"
         );
+    }
+
+    // --- Issue #128: v2.1.157+ EnterWorktree mid-session cwd/gitBranch tracking ---
+
+    #[test]
+    fn scan_session_metadata_cwd_tracks_last_seen_after_enter_worktree() {
+        // v2.1.157+: EnterWorktree can switch worktrees mid-session, causing cwd and
+        // gitBranch to change across entries in the same JSONL file.  The session-level
+        // metadata must reflect the LAST seen values, not the first.
+        let tmp = env::temp_dir().join("tail-test-issue128-enter-worktree-cwd");
+        std::fs::create_dir_all(&tmp).unwrap();
+        let path = tmp.join("session.jsonl");
+
+        // First entry: session starts in the main repo worktree.
+        let entry1 = "{\"type\":\"user\",\"uuid\":\"u1\",\"parentUuid\":null,\"isSidechain\":false,\"timestamp\":\"2026-05-29T10:00:00Z\",\"cwd\":\"/repo/main\",\"gitBranch\":\"main\",\"message\":{\"role\":\"user\",\"content\":\"Fix the bug\"}}\n";
+        // Second entry: after EnterWorktree switched to a feature branch worktree.
+        let entry2 = "{\"type\":\"assistant\",\"uuid\":\"a1\",\"parentUuid\":\"u1\",\"isSidechain\":false,\"timestamp\":\"2026-05-29T10:00:01Z\",\"cwd\":\"/repo/worktrees/fix-issue-128\",\"gitBranch\":\"fix-issue-128\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Switched to worktree.\"}],\"model\":\"claude-opus-4-7\",\"stop_reason\":\"end_turn\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0}}}\n";
+
+        std::fs::write(&path, format!("{entry1}{entry2}")).unwrap();
+
+        let meta = scan_session_metadata(path.to_str().unwrap());
+        assert_eq!(
+            meta.cwd, "/repo/worktrees/fix-issue-128",
+            "cwd must reflect the last-seen value after worktree switch; got {:?}",
+            meta.cwd
+        );
+        assert_eq!(
+            meta.git_branch, "fix-issue-128",
+            "git_branch must reflect the last-seen value after worktree switch; got {:?}",
+            meta.git_branch
+        );
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn scan_session_metadata_cwd_tracks_multiple_worktree_switches() {
+        // A session that switches worktrees more than once: metadata must always show
+        // the value from the final entry.
+        let tmp = env::temp_dir().join("tail-test-issue128-multi-worktree");
+        std::fs::create_dir_all(&tmp).unwrap();
+        let path = tmp.join("session.jsonl");
+
+        let entry1 = "{\"type\":\"user\",\"uuid\":\"u1\",\"parentUuid\":null,\"timestamp\":\"2026-05-29T10:00:00Z\",\"cwd\":\"/repo/main\",\"gitBranch\":\"main\",\"message\":{\"role\":\"user\",\"content\":\"Start\"}}\n";
+        let entry2 = "{\"type\":\"assistant\",\"uuid\":\"a1\",\"parentUuid\":\"u1\",\"timestamp\":\"2026-05-29T10:00:01Z\",\"cwd\":\"/repo/worktrees/wt-alpha\",\"gitBranch\":\"wt-alpha\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"In alpha.\"}],\"model\":\"claude-opus-4-7\",\"stop_reason\":\"end_turn\",\"usage\":{\"input_tokens\":5,\"output_tokens\":2,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0}}}\n";
+        let entry3 = "{\"type\":\"user\",\"uuid\":\"u2\",\"parentUuid\":\"a1\",\"timestamp\":\"2026-05-29T10:00:02Z\",\"cwd\":\"/repo/worktrees/wt-beta\",\"gitBranch\":\"wt-beta\",\"message\":{\"role\":\"user\",\"content\":\"Now in beta\"}}\n";
+
+        std::fs::write(&path, format!("{entry1}{entry2}{entry3}")).unwrap();
+
+        let meta = scan_session_metadata(path.to_str().unwrap());
+        assert_eq!(
+            meta.cwd, "/repo/worktrees/wt-beta",
+            "cwd must be from the final entry after multiple switches; got {:?}",
+            meta.cwd
+        );
+        assert_eq!(
+            meta.git_branch, "wt-beta",
+            "git_branch must be from the final entry after multiple switches; got {:?}",
+            meta.git_branch
+        );
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn scan_session_metadata_cwd_not_overwritten_by_empty_value() {
+        // If a later entry has an empty/absent cwd, the previously-seen non-empty value
+        // must be preserved (empty does not override a valid path).
+        let tmp = env::temp_dir().join("tail-test-issue128-cwd-empty-guard");
+        std::fs::create_dir_all(&tmp).unwrap();
+        let path = tmp.join("session.jsonl");
+
+        let entry1 = "{\"type\":\"user\",\"uuid\":\"u1\",\"parentUuid\":null,\"timestamp\":\"2026-05-29T10:00:00Z\",\"cwd\":\"/repo/worktrees/fix-128\",\"gitBranch\":\"fix-128\",\"message\":{\"role\":\"user\",\"content\":\"Hello\"}}\n";
+        // Second entry omits cwd/gitBranch — must not reset the metadata to empty.
+        let entry2 = "{\"type\":\"assistant\",\"uuid\":\"a1\",\"parentUuid\":\"u1\",\"timestamp\":\"2026-05-29T10:00:01Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Hi.\"}],\"model\":\"claude-opus-4-7\",\"stop_reason\":\"end_turn\",\"usage\":{\"input_tokens\":5,\"output_tokens\":2,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0}}}\n";
+
+        std::fs::write(&path, format!("{entry1}{entry2}")).unwrap();
+
+        let meta = scan_session_metadata(path.to_str().unwrap());
+        assert_eq!(
+            meta.cwd, "/repo/worktrees/fix-128",
+            "cwd must not be cleared by a later entry that omits it; got {:?}",
+            meta.cwd
+        );
+        assert_eq!(
+            meta.git_branch, "fix-128",
+            "git_branch must not be cleared by a later entry that omits it; got {:?}",
+            meta.git_branch
+        );
+
+        std::fs::remove_dir_all(&tmp).ok();
     }
 }
