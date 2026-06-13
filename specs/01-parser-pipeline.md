@@ -87,6 +87,8 @@ Each JSONL line is decoded into an `Entry` struct that mirrors the raw Claude Co
 | `workflowName`       | v2.1.154+: workflow name on lifecycle entries                                                                      |
 | `workflowRunUrl`     | v2.1.154+: workflow run URL on lifecycle entries                                                                   |
 | `workflowStatus`     | v2.1.154+: workflow run status on lifecycle entries                                                                |
+| `agentDepth`         | v2.1.172+: 1-indexed nesting depth for sidechain entries from deeply nested sub-agents (up to 5 levels)            |
+| `parentAgentName`    | v2.1.172+: name of the spawning agent for deeply nested sidechain attribution                                      |
 
 ```mermaid
 classDiagram
