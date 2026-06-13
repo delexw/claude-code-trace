@@ -42,6 +42,7 @@ pub fn tool_summary(name: &str, input: &Option<Value>) -> String {
         "Skill" => summary_skill(fields),
         "Monitor" => summary_monitor(fields),
         "EnterPlanMode" | "ExitPlanMode" | "EnterWorktree" | "ExitWorktree" => name.to_string(),
+        "Cd" => summary_cd(fields),
         _ if name.starts_with("mcp__") => summary_mcp(name, fields),
         _ => summary_default(name, fields),
     }
@@ -436,6 +437,14 @@ fn summary_skill(f: &serde_json::Map<String, Value>) -> String {
         return "Skill".to_string();
     }
     skill.to_string()
+}
+
+fn summary_cd(f: &serde_json::Map<String, Value>) -> String {
+    let path = get_str(f, "path");
+    if path.is_empty() {
+        return "Cd".to_string();
+    }
+    short_path(path, 2)
 }
 
 fn summary_default(name: &str, f: &serde_json::Map<String, Value>) -> String {
@@ -947,5 +956,29 @@ mod tests {
         let result = truncate_word("abcdefghijklmnopqrstuvwxyz", 10);
         assert!(result.ends_with('\u{2026}'));
         assert_eq!(result.chars().count(), 10);
+    }
+
+    // --- Cd tool summary tests (#136) ---
+
+    #[test]
+    fn summary_cd_with_path() {
+        let input = json!({"path": "/home/user/project-b"});
+        let result = tool_summary("Cd", &Some(input));
+        assert!(
+            result.contains("project-b"),
+            "Cd summary must include the target directory; got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn summary_cd_no_path_falls_back_to_cd() {
+        let input = json!({});
+        assert_eq!(tool_summary("Cd", &Some(input)), "Cd");
+    }
+
+    #[test]
+    fn summary_cd_nil_input_falls_back_to_cd() {
+        assert_eq!(tool_summary("Cd", &None), "Cd");
     }
 }

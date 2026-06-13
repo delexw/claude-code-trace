@@ -39,7 +39,9 @@ pub fn categorize_tool_name(name: &str) -> ToolCategory {
         | "AskUserQuestion"
         | "ListMcpResourcesTool"
         | "ReadMcpResourceTool" => ToolCategory::Tool,
-        "EnterPlanMode" | "ExitPlanMode" | "EnterWorktree" | "ExitWorktree" => ToolCategory::Tool,
+        "EnterPlanMode" | "ExitPlanMode" | "EnterWorktree" | "ExitWorktree" | "Cd" => {
+            ToolCategory::Tool
+        }
         "WebFetch" | "WebSearch" => ToolCategory::Web,
         "CronCreate" | "CronDelete" | "CronList" => ToolCategory::Cron,
 
@@ -123,6 +125,7 @@ mod tests {
         assert_eq!(categorize_tool_name("ExitPlanMode"), ToolCategory::Tool);
         assert_eq!(categorize_tool_name("EnterWorktree"), ToolCategory::Tool);
         assert_eq!(categorize_tool_name("ExitWorktree"), ToolCategory::Tool);
+        assert_eq!(categorize_tool_name("Cd"), ToolCategory::Tool);
     }
 
     #[test]

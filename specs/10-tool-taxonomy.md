@@ -24,7 +24,7 @@ flowchart TD
     R1 -->|"Grep"| GREP["Grep"]
     R1 -->|"Glob"| GLOB["Glob"]
     R1 -->|"Task / Agent / Task* / Team* / SendMessage"| TASK["Task"]
-    R1 -->|"Skill / ToolSearch / LSP\n/ TodoWrite / Monitor / AskUserQuestion\n/ EnterPlanMode / ExitPlanMode\n/ EnterWorktree / ExitWorktree\n/ ListMcpResourcesTool / ReadMcpResourceTool"| TOOL_CAT["Tool"]
+    R1 -->|"Skill / ToolSearch / LSP\n/ TodoWrite / Monitor / AskUserQuestion\n/ EnterPlanMode / ExitPlanMode\n/ EnterWorktree / ExitWorktree / Cd\n/ ListMcpResourcesTool / ReadMcpResourceTool"| TOOL_CAT["Tool"]
     R1 -->|"WebFetch / WebSearch"| WEB["Web"]
     R1 -->|"CronCreate / CronList / CronDelete"| CRON["Cron"]
     R1 -->|"name starts with 'mcp__'"| MCP["Mcp"]
@@ -33,20 +33,20 @@ flowchart TD
 
 ### Category Mapping Table
 
-| Category | Matched tool names                                                                                                                                                                       |
-| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Read`   | `Read`                                                                                                                                                                                   |
-| `Edit`   | `Edit`                                                                                                                                                                                   |
-| `Write`  | `Write`, `NotebookEdit`                                                                                                                                                                  |
-| `Bash`   | `Bash`, `PowerShell`                                                                                                                                                                     |
-| `Grep`   | `Grep`                                                                                                                                                                                   |
-| `Glob`   | `Glob`                                                                                                                                                                                   |
-| `Task`   | `Task`, `Agent`, `TaskCreate`, `TaskUpdate`, `TaskList`, `TaskGet`, `TaskStop`, `TaskOutput`, `TeamCreate`, `TeamDelete`, `SendMessage`                                                  |
-| `Tool`   | `Skill`, `ToolSearch`, `LSP`, `TodoWrite`, `Monitor`, `AskUserQuestion`, `ListMcpResourcesTool`, `ReadMcpResourceTool`, `EnterPlanMode`, `ExitPlanMode`, `EnterWorktree`, `ExitWorktree` |
-| `Web`    | `WebFetch`, `WebSearch`                                                                                                                                                                  |
-| `Cron`   | `CronCreate`, `CronDelete`, `CronList`                                                                                                                                                   |
-| `Mcp`    | any name starting with `mcp__`                                                                                                                                                           |
-| `Other`  | anything not listed above (e.g. `LS`, `Find`, third-party tools)                                                                                                                         |
+| Category | Matched tool names                                                                                                                                                                             |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Read`   | `Read`                                                                                                                                                                                         |
+| `Edit`   | `Edit`                                                                                                                                                                                         |
+| `Write`  | `Write`, `NotebookEdit`                                                                                                                                                                        |
+| `Bash`   | `Bash`, `PowerShell`                                                                                                                                                                           |
+| `Grep`   | `Grep`                                                                                                                                                                                         |
+| `Glob`   | `Glob`                                                                                                                                                                                         |
+| `Task`   | `Task`, `Agent`, `TaskCreate`, `TaskUpdate`, `TaskList`, `TaskGet`, `TaskStop`, `TaskOutput`, `TeamCreate`, `TeamDelete`, `SendMessage`                                                        |
+| `Tool`   | `Skill`, `ToolSearch`, `LSP`, `TodoWrite`, `Monitor`, `AskUserQuestion`, `ListMcpResourcesTool`, `ReadMcpResourceTool`, `EnterPlanMode`, `ExitPlanMode`, `EnterWorktree`, `ExitWorktree`, `Cd` |
+| `Web`    | `WebFetch`, `WebSearch`                                                                                                                                                                        |
+| `Cron`   | `CronCreate`, `CronDelete`, `CronList`                                                                                                                                                         |
+| `Mcp`    | any name starting with `mcp__`                                                                                                                                                                 |
+| `Other`  | anything not listed above (e.g. `LS`, `Find`, third-party tools)                                                                                                                               |
 
 > Note: `SendMessage` (cross-agent messaging) is `Task`, not `Tool`.
 > Note: `NotebookEdit` is `Write`, not `Edit`.
