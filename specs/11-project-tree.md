@@ -86,6 +86,15 @@ flowchart LR
     CHILD --> LABEL["label: 'feature-branch'"]
 ```
 
+### Orphan worktrees (no anchor session)
+
+The base project may have **no session of its own** — e.g. a headless/deterministic
+orchestrator that only ever runs agent phases inside per-item worktrees and never opens a
+session at the repo root. In that case `buildTree` **synthesizes** the base project node
+(keyed by the prefix before the worktree marker) so the worktree still nests under its repo
+with a `CLAUDE-WORKTREES` group, instead of orphaning as a flat root. A synthesized node is
+created only when no real prefix-ancestor session exists, so anchored runs are unaffected.
+
 ---
 
 ## Ongoing Status Propagation

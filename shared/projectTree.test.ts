@@ -164,6 +164,64 @@ describe("buildTree", () => {
   });
 });
 
+describe("buildTree — orphan worktree synthesis", () => {
+  it("synthesizes a repo-root parent for worktree nodes with no anchor session", () => {
+    // Headless/deterministic orchestrators only ever run agent phases inside per-item
+    // worktrees, so no session exists at the repo root to anchor them.
+    const nodes = [
+      {
+        name: "grpc-js-1.14.4",
+        key: "-t-ws-webapp--claude-worktrees-dep-grpc",
+        sessionCount: 1,
+        hasOngoing: false,
+      },
+      {
+        name: "vitest",
+        key: "-t-ws-webapp--claude-worktrees-dep-vitest",
+        sessionCount: 1,
+        hasOngoing: false,
+      },
+    ];
+    const roots = buildTree(nodes);
+    expect(roots).toHaveLength(1);
+    expect(roots[0].node.key).toBe("-t-ws-webapp");
+    expect(roots[0].node.name).toBe("webapp");
+    expect(roots[0].children).toHaveLength(2);
+  });
+
+  it("flattens the synthesized repo node into a CLAUDE-WORKTREES group", () => {
+    const nodes = [
+      {
+        name: "grpc-js-1.14.4",
+        key: "-t-ws-webapp--claude-worktrees-dep-grpc",
+        sessionCount: 1,
+        hasOngoing: false,
+      },
+    ];
+    const flat = flattenTree(buildTree(nodes));
+    expect(flat.map((i) => i.name)).toContain("webapp");
+    const group = flat.find((i) => i.isGroup && i.name === "claude-worktrees");
+    expect(group).toBeDefined();
+    // The orphan must no longer be its own depth-0 root.
+    expect(flat.filter((i) => i.depth === 0)).toHaveLength(1);
+  });
+
+  it("does not synthesize when a real root-anchor session exists", () => {
+    const nodes = [
+      { name: "ctf", key: "-ws-ctf", sessionCount: 1, hasOngoing: false },
+      {
+        name: "wt",
+        key: "-ws-ctf-repo--claude-worktrees-fix-1",
+        sessionCount: 1,
+        hasOngoing: false,
+      },
+    ];
+    const roots = buildTree(nodes);
+    expect(roots).toHaveLength(1);
+    expect(roots[0].node.key).toBe("-ws-ctf");
+  });
+});
+
 describe("detectWorktreeKind", () => {
   it("detects worktrees (old single-dash style)", () => {
     expect(detectWorktreeKind("-Users-me-backend", "-Users-me-backend-worktrees-EC-123")).toBe(
