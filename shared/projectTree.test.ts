@@ -171,23 +171,21 @@ describe("buildTree — orphan worktree synthesis", () => {
     const nodes = [
       {
         name: "grpc-js-1.14.4",
-        key: "-t-ws-elements-storefront--claude-worktrees-dep-grpc",
+        key: "-t-ws-webapp--claude-worktrees-dep-grpc",
         sessionCount: 1,
         hasOngoing: false,
       },
       {
         name: "vitest",
-        key: "-t-ws-elements-storefront--claude-worktrees-dep-vitest",
+        key: "-t-ws-webapp--claude-worktrees-dep-vitest",
         sessionCount: 1,
         hasOngoing: false,
       },
     ];
     const roots = buildTree(nodes);
     expect(roots).toHaveLength(1);
-    expect(roots[0].node.key).toBe("-t-ws-elements-storefront");
-    // projectDisplayName collapses every "-" to a path separator (lossy — same as how the
-    // tool labels every other node), so "elements-storefront" surfaces as "storefront".
-    expect(roots[0].node.name).toBe("storefront");
+    expect(roots[0].node.key).toBe("-t-ws-webapp");
+    expect(roots[0].node.name).toBe("webapp");
     expect(roots[0].children).toHaveLength(2);
   });
 
@@ -195,13 +193,13 @@ describe("buildTree — orphan worktree synthesis", () => {
     const nodes = [
       {
         name: "grpc-js-1.14.4",
-        key: "-t-ws-elements-storefront--claude-worktrees-dep-grpc",
+        key: "-t-ws-webapp--claude-worktrees-dep-grpc",
         sessionCount: 1,
         hasOngoing: false,
       },
     ];
     const flat = flattenTree(buildTree(nodes));
-    expect(flat.map((i) => i.name)).toContain("storefront");
+    expect(flat.map((i) => i.name)).toContain("webapp");
     const group = flat.find((i) => i.isGroup && i.name === "claude-worktrees");
     expect(group).toBeDefined();
     // The orphan must no longer be its own depth-0 root.
