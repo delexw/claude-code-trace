@@ -46,8 +46,43 @@ export function treeNodeCmp(a: TreeNode, b: TreeNode): number {
   return a.node.name.localeCompare(b.node.name);
 }
 
+/** The repo-portion of a worktree key: everything before the first worktree marker, or null. */
+function worktreeRootKey(key: string): string | null {
+  for (const marker of ["--claude-worktrees-", "--worktrees-"]) {
+    const i = key.indexOf(marker);
+    if (i > 0) return key.slice(0, i);
+  }
+  return null;
+}
+
+/** True when some other key is a prefix-ancestor of `key` (i.e. a real session can anchor it). */
+function hasRealAncestor(key: string, keys: ReadonlySet<string>): boolean {
+  for (const k of keys) if (k !== key && key.startsWith(k + "-")) return true;
+  return false;
+}
+
 export function buildTree(nodes: ProjectNode[]): TreeNode[] {
-  const sorted = [...nodes].toSorted((a, b) => a.key.length - b.key.length);
+  // A worktree session whose orchestrator never opens a session at the repo root (headless
+  // / deterministic runs that only ever execute agent phases inside per-item worktrees) has
+  // no ancestor node to nest under, so it would orphan as a flat root. Synthesize the
+  // repo-root node from the worktree key so it anchors and groups like an anchored run; the
+  // synthesized node flows through the normal parenting/intermediate/flatten logic below.
+  const keys = new Set(nodes.map((n) => n.key));
+  const synthesized = new Map<string, ProjectNode>();
+  for (const node of nodes) {
+    const rootKey = worktreeRootKey(node.key);
+    if (rootKey && !keys.has(rootKey) && !hasRealAncestor(node.key, keys)) {
+      synthesized.set(rootKey, {
+        name: projectDisplayName(rootKey),
+        key: rootKey,
+        sessionCount: 0,
+        hasOngoing: false,
+      });
+    }
+  }
+  const input = synthesized.size ? [...nodes, ...synthesized.values()] : nodes;
+
+  const sorted = [...input].toSorted((a, b) => a.key.length - b.key.length);
   const roots: TreeNode[] = [];
   const all: TreeNode[] = [];
 
