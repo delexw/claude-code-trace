@@ -139,6 +139,16 @@ pub struct Entry {
     pub workflow_run_url: String,
     #[serde(default, rename = "workflowStatus")]
     pub workflow_status: String,
+    // Present in sidechain entries when Claude Code writes deeply nested sub-agent attribution
+    // fields (v2.1.172+). With 5-level sub-agent nesting, entries carry `agentDepth` (1-indexed
+    // depth in the agent tree) and `parentAgentName` (the spawning agent's name). Both are
+    // optional — older sessions and non-sidechain entries omit them entirely.
+    // Declared here so that when Claude Code adds them, the fields are captured rather than
+    // silently dropped by the parser.
+    #[serde(default, rename = "agentDepth")]
+    pub agent_depth: Option<u32>,
+    #[serde(default, rename = "parentAgentName")]
+    pub parent_agent_name: String,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -1259,5 +1269,119 @@ mod tests {
         let entry = parse_entry(&bytes).expect("must parse despite unknown fields");
         assert_eq!(entry.entry_type, "system");
         assert_eq!(entry.uuid, "future-uuid");
+    }
+
+    // --- Issue #135: v2.1.172+ 5-level sub-agent nesting — agentDepth / parentAgentName ---
+
+    #[test]
+    fn parse_entry_captures_agent_depth_field_v2_1_172() {
+        // v2.1.172+: sidechain entries may carry agentDepth (1-indexed nesting level)
+        // so callers can distinguish depth-1 sub-agents from depth-2 through depth-5.
+        for depth in 1u32..=5 {
+            let line = json!({
+                "type": "assistant",
+                "uuid": format!("depth-{depth}-uuid"),
+                "parentUuid": format!("parent-of-depth-{depth}"),
+                "isSidechain": true,
+                "timestamp": "2026-06-10T10:00:00Z",
+                "agentDepth": depth,
+                "agentName": format!("agent-depth-{depth}"),
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "working"}],
+                    "model": "claude-sonnet-4-6",
+                    "stop_reason": "end_turn",
+                    "usage": {"input_tokens": 10, "output_tokens": 5}
+                }
+            });
+            let bytes = serde_json::to_vec(&line).unwrap();
+            let entry = parse_entry(&bytes)
+                .unwrap_or_else(|| panic!("must parse depth-{depth} sidechain entry"));
+            assert_eq!(
+                entry.agent_depth,
+                Some(depth),
+                "agentDepth must be captured for depth {depth}"
+            );
+            assert!(entry.is_sidechain, "entry must carry isSidechain:true");
+        }
+    }
+
+    #[test]
+    fn parse_entry_captures_parent_agent_name_field_v2_1_172() {
+        // v2.1.172+: sidechain entries may carry parentAgentName identifying which
+        // agent spawned this one — enables proper attribution in the UI.
+        let line = json!({
+            "type": "user",
+            "uuid": "nested-agent-uuid",
+            "parentUuid": "root-agent-entry-uuid",
+            "isSidechain": true,
+            "timestamp": "2026-06-10T11:00:00Z",
+            "agentDepth": 2,
+            "parentAgentName": "orchestrator",
+            "agentName": "sub-worker",
+            "message": {"role": "user", "content": "do some work"}
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("must parse entry with parentAgentName");
+        assert_eq!(
+            entry.parent_agent_name, "orchestrator",
+            "parentAgentName must be captured"
+        );
+        assert_eq!(entry.agent_name, "sub-worker");
+        assert_eq!(entry.agent_depth, Some(2));
+    }
+
+    #[test]
+    fn parse_entry_agent_depth_defaults_to_none_when_absent() {
+        // Entries from before v2.1.172 (or non-sidechain entries) have no agentDepth —
+        // must default to None.
+        let line = json!({
+            "type": "user",
+            "uuid": "no-depth-uuid",
+            "timestamp": "2026-06-10T10:00:00Z",
+            "message": {"role": "user", "content": "Hello"}
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("must parse entry without agentDepth");
+        assert!(
+            entry.agent_depth.is_none(),
+            "agentDepth must be None when absent"
+        );
+        assert!(
+            entry.parent_agent_name.is_empty(),
+            "parentAgentName must be empty when absent"
+        );
+    }
+
+    #[test]
+    fn parse_entry_sidechain_with_all_depth_fields_succeeds() {
+        // Full payload as Claude Code v2.1.172+ might write for a depth-3 sidechain entry.
+        // Verifies the complete set of attribution fields round-trips correctly.
+        let line = json!({
+            "type": "assistant",
+            "uuid": "depth3-assistant-uuid",
+            "parentUuid": "depth3-parent-uuid",
+            "isSidechain": true,
+            "timestamp": "2026-06-10T12:00:00Z",
+            "agentDepth": 3,
+            "agentName": "deep-worker",
+            "parentAgentName": "mid-level-agent",
+            "teamName": "",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "deep work done"}],
+                "model": "claude-haiku-4-5",
+                "stop_reason": "end_turn",
+                "usage": {"input_tokens": 50, "output_tokens": 20}
+            }
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("must parse full depth-3 sidechain entry");
+        assert_eq!(entry.entry_type, "assistant");
+        assert!(entry.is_sidechain);
+        assert_eq!(entry.agent_depth, Some(3));
+        assert_eq!(entry.agent_name, "deep-worker");
+        assert_eq!(entry.parent_agent_name, "mid-level-agent");
+        assert_eq!(entry.message.model, "claude-haiku-4-5");
     }
 }

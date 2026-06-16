@@ -1585,6 +1585,78 @@ mod tests {
         // S is sidechain; it won't be in the live_set, but classify() handles it separately
     }
 
+    // --- Issue #135: v2.1.172+ 5-level sub-agent nesting — deeply nested sidechain chains ---
+
+    #[test]
+    fn live_chain_five_level_deep_sidechains_do_not_corrupt_live_set() {
+        // Claude Code v2.1.172+ allows sub-agents to spawn sub-agents up to 5 levels deep.
+        // All sidechain entries at every depth appear in the main session JSONL with
+        // isSidechain:true. Verify that the live chain resolver still correctly identifies
+        // the main-session leaf even when 5 levels of sidechain entries follow it.
+        //
+        // Main chain:  A → B (B is the live leaf)
+        // Depth-1:     A → S1 (is_sidechain)
+        // Depth-2:     S1 → S2 (is_sidechain)
+        // Depth-3:     S2 → S3 (is_sidechain)
+        // Depth-4:     S3 → S4 (is_sidechain)
+        // Depth-5:     S4 → S5 (is_sidechain)
+        let entries = vec![
+            make_entry("A", "", "", false),
+            make_entry("B", "A", "", false), // main-session live leaf
+            make_entry("S1", "A", "", true), // depth-1 sidechain
+            make_entry("S2", "S1", "", true), // depth-2 sidechain
+            make_entry("S3", "S2", "", true), // depth-3 sidechain
+            make_entry("S4", "S3", "", true), // depth-4 sidechain
+            make_entry("S5", "S4", "", true), // depth-5 sidechain
+        ];
+        let set = resolve_live_chain_uuids(&entries);
+        assert!(
+            set.contains("A"),
+            "root main-session entry must be in live set"
+        );
+        assert!(
+            set.contains("B"),
+            "main-session live leaf must survive 5-level sidechain chains"
+        );
+        // Sidechain entries must not appear in the live set — they are handled by the
+        // per-agent JSONL files, not by the main session parser.
+        for id in ["S1", "S2", "S3", "S4", "S5"] {
+            assert!(
+                !set.contains(id),
+                "depth sidechain {id} must not be in main-session live set"
+            );
+        }
+    }
+
+    #[test]
+    fn live_chain_with_leafuuid_hint_handles_five_level_sidechains() {
+        // When leafUuid is present (the normal case for v2.1.172+ sessions), the live tip
+        // is resolved via the explicit hint, not the fallback scan. Five levels of sidechain
+        // entries must not interfere with this hint-based resolution.
+        let mut leaf_entry = make_entry("B", "A", "", false);
+        leaf_entry.leaf_uuid = "B".to_string(); // Claude Code writes leafUuid on every turn
+        let entries = vec![
+            make_entry("A", "", "", false),
+            leaf_entry,
+            make_entry("S1", "A", "", true),
+            make_entry("S2", "S1", "", true),
+            make_entry("S3", "S2", "", true),
+            make_entry("S4", "S3", "", true),
+            make_entry("S5", "S4", "", true),
+        ];
+        let set = resolve_live_chain_uuids(&entries);
+        assert!(set.contains("A"), "root must be in live set");
+        assert!(
+            set.contains("B"),
+            "leafUuid-pointed entry must be the live tip"
+        );
+        assert_eq!(
+            set.len(),
+            2,
+            "only A and B belong to the main-session chain"
+        );
+    }
+
     #[test]
     fn live_chain_cycle_guard_prevents_infinite_loop() {
         // Malformed entries: A.parent = B, B.parent = A (cycle)
