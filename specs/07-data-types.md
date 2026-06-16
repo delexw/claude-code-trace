@@ -210,11 +210,11 @@ type TaskStatus = "pending" | "in_progress" | "completed" | "cancelled";
 
 ## `SessionInfo` Field Notes
 
-| Field           | Notes                                                                                                                                                                              |
-| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `first_message` | First user turn content (truncated at ~200 chars)                                                                                                                                  |
-| `mod_time`      | ISO-8601 timestamp of last file modification                                                                                                                                       |
-| `session_id`    | UUID of the root session entry                                                                                                                                                     |
+| Field           | Notes                                                                                                                                                                                  |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `first_message` | First user turn content (truncated at ~200 chars)                                                                                                                                      |
+| `mod_time`      | ISO-8601 timestamp of last file modification                                                                                                                                           |
+| `session_id`    | UUID of the root session entry                                                                                                                                                         |
 | `git_branch`    | Git branch from the last JSONL entry (per-entry; tracks `/cd` and v2.1.157+ EnterWorktree switches). Pre-v2.1.176 sessions may show a stale branch after `/cd` — cwd is authoritative. |
 
 ---
