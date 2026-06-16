@@ -1015,6 +1015,14 @@ pub fn discover_team_sessions(
     Ok(procs)
 }
 
+/// Read teamName and agentName from a session JSONL file.
+///
+/// Scans all lines rather than stopping at the first parseable one. Before
+/// Claude Code v2.1.174 the Workflow tool's agent() subagents did not write
+/// attribution headers (agentName/teamName), so the first several entries in
+/// such a file carry empty strings for both fields. Scanning forward lets us
+/// find a later entry that does carry attribution, making historical Workflow
+/// sessions discoverable alongside sessions written after the fix.
 fn read_team_session_meta(path: &str) -> (String, String) {
     let f = match fs::File::open(path) {
         Ok(f) => f,
@@ -1040,7 +1048,12 @@ fn read_team_session_meta(path: &str) -> (String, String) {
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
-        return (team_name, agent_name);
+        // Only accept lines where both fields are populated. Pre-v2.1.174
+        // Workflow agent() entries have both absent — keep scanning for a
+        // line that was written after the attribution fix landed.
+        if !team_name.is_empty() && !agent_name.is_empty() {
+            return (team_name, agent_name);
+        }
     }
     (String::new(), String::new())
 }
@@ -1596,5 +1609,115 @@ mod tests {
         .unwrap();
         let result = read_agent_type(path.to_str().unwrap());
         assert_eq!(result, "general-purpose");
+    }
+
+    // --- Issue #138: pre-v2.1.174 Workflow agent() missing agentName attribution ---
+
+    #[test]
+    fn read_team_session_meta_finds_attribution_on_later_line() {
+        // Pre-v2.1.174 Workflow agent() sessions may have the first several entries
+        // written without agentName/teamName. read_team_session_meta must scan forward
+        // to find the first line that carries both populated fields.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("workflow-agent.jsonl");
+        std::fs::write(
+            &path,
+            concat!(
+                // First entry: no attribution (pre-v2.1.174 style)
+                r#"{"type":"user","uuid":"u1","timestamp":"2026-06-12T10:00:00Z","message":{"role":"user","content":"Run the workflow task"}}"#,
+                "\n",
+                // Second entry: also no attribution
+                r#"{"type":"assistant","uuid":"u2","timestamp":"2026-06-12T10:00:01Z","message":{"role":"assistant","content":[{"type":"text","text":"Starting..."}],"stop_reason":"end_turn","usage":{"input_tokens":50,"output_tokens":10}}}"#,
+                "\n",
+                // Third entry: has attribution (written after fix or partial session)
+                r#"{"type":"user","uuid":"u3","teamName":"workflow-team","agentName":"worker-a","timestamp":"2026-06-12T10:00:02Z","message":{"role":"user","content":"Continue"}}"#,
+                "\n",
+            ),
+        )
+        .unwrap();
+
+        let (team_name, agent_name) = read_team_session_meta(path.to_str().unwrap());
+        assert_eq!(
+            team_name, "workflow-team",
+            "team_name must be found from a later line"
+        );
+        assert_eq!(
+            agent_name, "worker-a",
+            "agent_name must be found from a later line"
+        );
+    }
+
+    #[test]
+    fn read_team_session_meta_returns_empty_when_no_line_has_attribution() {
+        // Pure pre-v2.1.174 session: no line carries agentName or teamName.
+        // Must return ("", "") gracefully — the session is still skipped by
+        // discover_team_sessions, but without panic or error.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("pre-fix-workflow.jsonl");
+        std::fs::write(
+            &path,
+            concat!(
+                r#"{"type":"user","uuid":"u1","timestamp":"2026-06-12T10:00:00Z","message":{"role":"user","content":"task"}}"#,
+                "\n",
+                r#"{"type":"assistant","uuid":"u2","timestamp":"2026-06-12T10:00:01Z","message":{"role":"assistant","content":[{"type":"text","text":"done"}],"stop_reason":"end_turn","usage":{"input_tokens":30,"output_tokens":5}}}"#,
+                "\n",
+            ),
+        )
+        .unwrap();
+
+        let (team_name, agent_name) = read_team_session_meta(path.to_str().unwrap());
+        assert_eq!(
+            team_name, "",
+            "team_name must be empty when no line has attribution"
+        );
+        assert_eq!(
+            agent_name, "",
+            "agent_name must be empty when no line has attribution"
+        );
+    }
+
+    #[test]
+    fn read_team_session_meta_returns_attribution_from_first_line_when_present() {
+        // Post-v2.1.174 sessions have attribution on every line. Must still work
+        // correctly and return from the first attributed line.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("post-fix-workflow.jsonl");
+        std::fs::write(
+            &path,
+            concat!(
+                r#"{"type":"user","uuid":"u1","teamName":"alpha","agentName":"builder","timestamp":"2026-06-12T10:00:00Z","message":{"role":"user","content":"task"}}"#,
+                "\n",
+                r#"{"type":"assistant","uuid":"u2","teamName":"alpha","agentName":"builder","timestamp":"2026-06-12T10:00:01Z","message":{"role":"assistant","content":[],"stop_reason":"end_turn","usage":{"input_tokens":10,"output_tokens":3}}}"#,
+                "\n",
+            ),
+        )
+        .unwrap();
+
+        let (team_name, agent_name) = read_team_session_meta(path.to_str().unwrap());
+        assert_eq!(team_name, "alpha");
+        assert_eq!(agent_name, "builder");
+    }
+
+    #[test]
+    fn read_team_session_meta_skips_partial_attribution_lines() {
+        // If a line has teamName but not agentName (or vice versa), keep scanning.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("partial-attribution.jsonl");
+        std::fs::write(
+            &path,
+            concat!(
+                // Only teamName, no agentName
+                r#"{"type":"user","uuid":"u1","teamName":"my-team","timestamp":"2026-06-12T10:00:00Z","message":{"role":"user","content":"start"}}"#,
+                "\n",
+                // Both present
+                r#"{"type":"assistant","uuid":"u2","teamName":"my-team","agentName":"worker-1","timestamp":"2026-06-12T10:00:01Z","message":{"role":"assistant","content":[],"stop_reason":"end_turn","usage":{"input_tokens":5,"output_tokens":2}}}"#,
+                "\n",
+            ),
+        )
+        .unwrap();
+
+        let (team_name, agent_name) = read_team_session_meta(path.to_str().unwrap());
+        assert_eq!(team_name, "my-team");
+        assert_eq!(agent_name, "worker-1");
     }
 }
