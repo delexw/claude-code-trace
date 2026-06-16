@@ -156,7 +156,7 @@ describe("SessionPicker", () => {
         onSearchChange={vi.fn()}
       />,
     );
-    expect(screen.getByText("sonnet4.20250514")).toBeInTheDocument();
+    expect(screen.getByText("sonnet4")).toBeInTheDocument();
     // Tokens appear in both header and session row
     expect(screen.getAllByText(/5\.0k/).length).toBeGreaterThanOrEqual(1);
     // Cost appears in both header and session row

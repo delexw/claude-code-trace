@@ -7,20 +7,23 @@ export { formatTokens, transformInlineJson } from "../../shared/format";
 
 /**
  * Turns "claude-opus-4-6" into "opus4.6".
+ * Strips bracket context suffixes (e.g. "[1m]", "[1M]") and 8-digit date
+ * components so "claude-fable-5-20261001[1m]" becomes "fable5".
  */
 export function shortModel(m: string): string {
+  // Strip bracket suffix (e.g., "[1m]", "[1M]") before normalizing.
+  const bracketIdx = m.indexOf("[");
+  if (bracketIdx !== -1) m = m.slice(0, bracketIdx);
+
   m = m.replace(/^claude-/, "");
   const dashIdx = m.indexOf("-");
   if (dashIdx === -1) return m;
 
   const family = m.slice(0, dashIdx);
   const rest = m.slice(dashIdx + 1);
-  // Keep major-minor only, drop patch/build metadata
-  const vParts = rest.split("-");
-  let version = vParts[0];
-  if (vParts.length >= 2) {
-    version = vParts[0] + "." + vParts[1];
-  }
+  // Keep major-minor only; skip pure 8-digit date components (YYYYMMDD).
+  const vParts = rest.split("-").filter((p) => !(p.length === 8 && /^\d+$/.test(p)));
+  const version = vParts.slice(0, 2).join(".");
   return family + version;
 }
 

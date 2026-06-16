@@ -120,19 +120,36 @@ fn format_time(ts: &chrono::DateTime<chrono::Utc>) -> String {
     local.format("%Y-%m-%d %H:%M:%S").to_string()
 }
 
-/// Shorten model name: "claude-opus-4-6" -> "opus4.6"
+/// Shorten model name: "claude-opus-4-6" -> "opus4.6".
+/// Strips bracket context suffixes (e.g. "[1m]", "[1M]") and 8-digit date
+/// components so "claude-fable-5-20261001[1m]" becomes "fable5".
 fn short_model(m: &str) -> String {
+    // Strip bracket suffix (e.g., "[1m]", "[1M]") before normalizing.
+    let m = if let Some(bracket_pos) = m.find('[') {
+        &m[..bracket_pos]
+    } else {
+        m
+    };
     let m = m.strip_prefix("claude-").unwrap_or(m);
     let parts: Vec<&str> = m.splitn(2, '-').collect();
     if parts.len() == 2 {
         let family = parts[0];
-        let v_parts: Vec<&str> = parts[1].splitn(3, '-').collect();
-        let version = if v_parts.len() >= 2 {
-            format!("{}-{}", v_parts[0], v_parts[1])
+        // Skip pure 8-digit date components (YYYYMMDD); keep major-minor only.
+        let v_parts: Vec<&str> = parts[1]
+            .split('-')
+            .filter(|p| !(p.len() == 8 && p.chars().all(|c| c.is_ascii_digit())))
+            .collect();
+        let version = v_parts
+            .iter()
+            .take(2)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(".");
+        if version.is_empty() {
+            family.to_string()
         } else {
-            v_parts[0].to_string()
-        };
-        format!("{}{}", family, version.replace('-', "."))
+            format!("{family}{version}")
+        }
     } else {
         m.to_string()
     }
@@ -501,6 +518,21 @@ mod tests {
     #[test]
     fn short_model_empty() {
         assert_eq!(short_model(""), "");
+    }
+
+    #[test]
+    fn short_model_fable5_with_date() {
+        assert_eq!(short_model("claude-fable-5-20261001"), "fable5");
+    }
+
+    #[test]
+    fn short_model_fable5_with_bracket_suffix_lowercase() {
+        assert_eq!(short_model("claude-fable-5-20261001[1m]"), "fable5");
+    }
+
+    #[test]
+    fn short_model_fable5_with_bracket_suffix_uppercase() {
+        assert_eq!(short_model("claude-fable-5-20261001[1M]"), "fable5");
     }
 
     // ---- tool_category_str tests ----
