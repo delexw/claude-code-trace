@@ -3,6 +3,57 @@
 All notable changes to claude-code-trace are documented here. Versions follow
 [semantic versioning](https://semver.org/).
 
+## [0.8.0] — 2026-06-16
+
+This release keeps the JSONL parser in step with another run of Claude Code releases
+(v2.1.157 through v2.1.174): deeper sub-agent nesting, sessions that change directory or
+switch worktrees partway through, Workflow sub-agents that didn't always announce
+themselves, and newer model IDs like Claude Fable 5. The project tree also stops
+stranding worktree-only sessions at the top level.
+
+### Added
+
+- **Five-level sub-agent nesting**
+  ([`beb3a61`](https://github.com/delexw/claude-code-trace/commit/beb3a61)). Claude Code
+  v2.1.172 lets sub-agents spawn sub-agents up to five levels deep. The `Entry` struct now
+  captures the optional `agentDepth` and `parentAgentName` fields those sidechain entries
+  carry, so depth and attribution survive into the transcript instead of being dropped, and
+  the main-session chain is still isolated correctly at every level.
+
+### Fixed
+
+- **Session picker froze on the starting directory after a worktree switch**
+  ([`6aa548d`](https://github.com/delexw/claude-code-trace/commit/6aa548d)). Session
+  metadata took the working directory and git branch from the first entry only, so after an
+  `EnterWorktree` switch mid-session (v2.1.157+) the picker kept showing where the session
+  started rather than where it ended up. Both fields now follow the last-seen value.
+
+- **Mid-session `/cd` changes and the `Cd` tool weren't reflected**
+  ([`3295fc6`](https://github.com/delexw/claude-code-trace/commit/3295fc6)). Directory
+  changes from `/cd` (v2.1.169+) now update the InfoBar and session picker, and `Cd` tool
+  calls render with a tool-category icon and a short directory marker in the transcript
+  timeline instead of going uncategorised.
+
+- **Workflow sub-agent sessions were silently skipped**
+  ([`e2faaff`](https://github.com/delexw/claude-code-trace/commit/e2faaff)). Before
+  v2.1.174, `agent()` sub-agents from the Workflow tool didn't write attribution headers on
+  their first line, so team-session discovery returned empty and dropped them. Discovery now
+  scans every line for attribution, making those historical sub-agent sessions visible when
+  any entry carries it.
+
+- **Model IDs with bracket suffixes or dates rendered awkwardly**
+  ([`ae7c0ec`](https://github.com/delexw/claude-code-trace/commit/ae7c0ec)). Model labels
+  now strip bracket context suffixes (e.g. `[1m]`/`[1M]` from pre-v2.1.173 sessions) and
+  drop `YYYYMMDD` date components before shortening, so `claude-fable-5-20261001[1m]` shows
+  as `fable5` while existing names like `haiku4.5` are unchanged.
+
+- **Worktree-only sessions stranded at the top of the project tree**
+  ([`d3aba67`](https://github.com/delexw/claude-code-trace/commit/d3aba67)). Sessions that
+  only ever ran inside per-item worktrees (never at the repo root) rendered as flat
+  top-level nodes. The tree now synthesizes a repo-root node for them so they nest under
+  their repository in a `CLAUDE-WORKTREES` group; runs that already have a real anchor are
+  unchanged.
+
 ## [0.7.0] — 2026-06-08
 
 This release is mostly about keeping the JSONL parser in lockstep with a fast run of
@@ -175,5 +226,6 @@ cut after the WebKit and SSE-flooding root causes were untangled.
   most recent `projectDirs` in a ref so the SSE handler can re-issue `discover_sessions`
   without the caller threading state through.
 
+[0.8.0]: https://github.com/delexw/claude-code-trace/releases/tag/v0.8.0
 [0.7.0]: https://github.com/delexw/claude-code-trace/releases/tag/v0.7.0
 [0.6.0]: https://github.com/delexw/claude-code-trace/releases/tag/v0.6.0
