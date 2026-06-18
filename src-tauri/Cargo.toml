@@ -26,7 +26,7 @@ dirs = "6"
 tauri-plugin-opener = "2.5.4"
 tauri-plugin-single-instance = "2"
 axum = { version = "0.8", features = ["json"] }
-tower-http = { version = "0.6", features = ["cors", "fs"] }
+tower-http = { version = "0.7", features = ["cors", "fs"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
 
 [lints.clippy]
