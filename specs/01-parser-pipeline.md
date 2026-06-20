@@ -143,6 +143,8 @@ flowchart TD
 | `MessageDisplay` hook event name                                                                             | v2.1.152+    | `hook_event` stored as `String` — no enum; catch-all presence-of-hookEvent checks in classify handle any future event name without a code change                                                                     |
 | `fallbackModel` retry writes null/empty stub assistant entry before successful response                      | v2.1.166+    | `classify()` returns `None` for assistant entries with `null` or empty `content` array; fallback response with real content passes through with its own model ID                                                     |
 | Mid-stream connection drop flushes partial assistant entry with `usage:null` or null individual token fields | v2.1.179+    | `EntryMessage.usage` and all four numeric fields of `EntryUsage` use `null_as_default`; null values deserialise to 0 instead of failing. `stop_reason` was already `Option<String>` and handles null/unknown values. |
+| Thinking-only assistant entries (`content` = one `thinking` block, no `text`/`tool_use`)                     | v2.1.183+    | Non-empty content array passes the empty-content guard; classified as `AIMsg` with `thinking_count=1` and empty `text`. Rendered with thinking block, no empty-bubble discard.                                       |
+| Synthetic re-prompt `isMeta: true` user entries after thinking-only turns                                    | v2.1.183+    | `classify()` returns `None` for `user` entries with `is_meta: true` that don't match a known pattern (Stop hook feedback). Prevents spurious meta-AI bubbles.                                                        |
 
 ---
 
