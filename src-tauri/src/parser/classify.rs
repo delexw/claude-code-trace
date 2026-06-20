@@ -2292,4 +2292,58 @@ mod tests {
             other => panic!("Expected User, got {other:?}"),
         }
     }
+
+    // --- Issue #156: v2.1.179+ mid-stream connection drop — partial assistant entries ---
+
+    #[test]
+    fn classify_partial_assistant_with_null_usage_produces_ai_msg() {
+        // v2.1.179+: a partial assistant entry (connection drop mid-stream) has null usage.
+        // classify must produce an AIMsg with zero token counts rather than dropping the entry.
+        let content = json!([{"type": "text", "text": "Partial response before drop"}]);
+        let mut e = make_entry("assistant", Some(content));
+        e.message.model = "claude-sonnet-4-6".to_string();
+        e.message.stop_reason = None; // null stop_reason from connection drop
+        e.message.usage = Default::default(); // null usage deserialized as all-zero defaults
+        match classify(e) {
+            Some(ClassifiedMsg::AI(ai)) => {
+                assert!(
+                    ai.text.contains("Partial response before drop"),
+                    "truncated text must be preserved"
+                );
+                assert_eq!(
+                    ai.usage.input_tokens, 0,
+                    "null usage must produce zero input_tokens"
+                );
+                assert_eq!(
+                    ai.usage.output_tokens, 0,
+                    "null usage must produce zero output_tokens"
+                );
+                assert_eq!(
+                    ai.stop_reason, "",
+                    "null stop_reason must become empty string"
+                );
+            }
+            other => panic!("Expected AI for partial assistant entry, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_partial_assistant_with_unknown_stop_reason_produces_ai_msg() {
+        // v2.1.179+: a connection drop may produce an unusual stop_reason not in the known set.
+        // classify must emit an AIMsg with the raw stop_reason preserved so the UI can render
+        // a "response interrupted" indicator.
+        let content = json!([{"type": "text", "text": "Work in progress"}]);
+        let mut e = make_entry("assistant", Some(content));
+        e.message.model = "claude-sonnet-4-6".to_string();
+        e.message.stop_reason = Some("connection_drop".to_string());
+        match classify(e) {
+            Some(ClassifiedMsg::AI(ai)) => {
+                assert_eq!(
+                    ai.stop_reason, "connection_drop",
+                    "unknown stop_reason must be preserved verbatim in AIMsg"
+                );
+            }
+            other => panic!("Expected AI for entry with unknown stop_reason, got {other:?}"),
+        }
+    }
 }
