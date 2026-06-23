@@ -353,6 +353,10 @@ pub fn classify(e: Entry) -> Option<ClassifiedMsg> {
                 metadata: None,
             }));
         }
+        // v2.1.183+: synthetic re-prompt user entries are internal Claude Code markers
+        // inserted when a thinking-only assistant turn triggers a re-prompt. They are not
+        // human-typed messages; drop them to avoid spurious meta-AI bubbles in the UI.
+        return None;
     }
 
     // Teammate messages.
@@ -936,6 +940,74 @@ mod tests {
                 assert_eq!(ai.stop_reason, "tool_use");
             }
             other => panic!("Expected AI, got {other:?}"),
+        }
+    }
+
+    // --- Issue #157: v2.1.183+ thinking-only assistant entries and synthetic re-prompt user entries ---
+
+    #[test]
+    fn classify_returns_ai_for_thinking_only_assistant_entry() {
+        // v2.1.183+: assistant turns that re-prompt because the model returned only a thinking
+        // block must not be silently discarded. The content array is non-empty (has one thinking
+        // block) so the empty-content guard must not fire. The entry must classify as an AIMsg
+        // with thinking_count=1 and empty text.
+        let content = json!([{"type": "thinking", "thinking": "I need to reconsider this."}]);
+        let mut e = make_entry("assistant", Some(content));
+        e.message.model = "claude-opus-4-7".to_string();
+        e.message.stop_reason = Some("end_turn".to_string());
+        match classify(e) {
+            Some(ClassifiedMsg::AI(ai)) => {
+                assert_eq!(ai.thinking_count, 1, "thinking block must be counted");
+                assert_eq!(ai.tool_calls.len(), 0);
+                assert_eq!(ai.stop_reason, "end_turn");
+            }
+            other => panic!("Expected AI for thinking-only assistant entry, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_drops_is_meta_user_re_prompt_entry() {
+        // v2.1.183+: after a thinking-only assistant turn, Claude Code inserts an internal
+        // isMeta user message to re-prompt the model. These entries are not typed by humans
+        // and must be silently dropped rather than surfaced as spurious AI meta turns.
+        let mut e = make_entry(
+            "user",
+            Some(json!([{"type": "text", "text": "Please continue."}])),
+        );
+        e.is_meta = true;
+        assert!(
+            classify(e).is_none(),
+            "isMeta user re-prompt entry must be dropped"
+        );
+    }
+
+    #[test]
+    fn classify_drops_is_meta_user_entry_with_empty_content() {
+        // isMeta user entries with no content (another possible re-prompt shape) must also drop.
+        let mut e = make_entry("user", Some(json!([])));
+        e.is_meta = true;
+        assert!(
+            classify(e).is_none(),
+            "isMeta user entry with empty content must be dropped"
+        );
+    }
+
+    #[test]
+    fn classify_still_rescues_stop_hook_feedback_is_meta_user() {
+        // The isMeta drop must not fire for Stop hook feedback entries — they must still
+        // be classified as HookMsg so hook errors appear in the transcript.
+        let mut e = make_entry(
+            "user",
+            Some(json!(
+                "Stop hook feedback:\n[~/.claude/hook.sh]: non-zero exit"
+            )),
+        );
+        e.is_meta = true;
+        match classify(e) {
+            Some(ClassifiedMsg::Hook(h)) => {
+                assert_eq!(h.hook_event, "Stop");
+            }
+            other => panic!("Expected Hook for Stop hook feedback isMeta entry, got {other:?}"),
         }
     }
 
