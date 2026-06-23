@@ -1,5 +1,5 @@
 textual>=8.2.7
 httpx>=0.28.1
 ruff>=0.15.16
-pytest>=9.0.3
+pytest>=9.1.0
 pytest-asyncio>=1.4.0
