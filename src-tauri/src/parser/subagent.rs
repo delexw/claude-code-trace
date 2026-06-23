@@ -986,7 +986,9 @@ pub fn discover_team_sessions(
         }
 
         let (team_name, agent_name) = read_team_session_meta(&file_path);
-        if team_name.is_empty() || agent_name.is_empty() {
+        // agentName is the authoritative signal. teamName is optional: absent in
+        // v2.1.178+ implicit-team sessions.
+        if agent_name.is_empty() {
             continue;
         }
         if !wanted.contains_key(&(team_name.clone(), agent_name.clone())) {
@@ -1023,6 +1025,11 @@ pub fn discover_team_sessions(
 /// such a file carry empty strings for both fields. Scanning forward lets us
 /// find a later entry that does carry attribution, making historical Workflow
 /// sessions discoverable alongside sessions written after the fix.
+///
+/// Claude Code v2.1.178 introduced implicit teams: `TeamCreate`/`TeamDelete` are
+/// gone and `teamName` may be absent on entries even in multi-agent sessions.
+/// The authoritative signal is `agentName` being non-empty — `teamName` is
+/// opportunistically recorded when present but not required.
 fn read_team_session_meta(path: &str) -> (String, String) {
     let f = match fs::File::open(path) {
         Ok(f) => f,
@@ -1048,17 +1055,22 @@ fn read_team_session_meta(path: &str) -> (String, String) {
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
-        // Only accept lines where both fields are populated. Pre-v2.1.174
-        // Workflow agent() entries have both absent — keep scanning for a
-        // line that was written after the attribution fix landed.
-        if !team_name.is_empty() && !agent_name.is_empty() {
+        // Accept any line where agentName is non-empty. teamName is optional:
+        // pre-v2.1.178 sessions carry both; v2.1.178+ implicit-team sessions
+        // carry only agentName. Pre-v2.1.174 Workflow agent() entries have both
+        // absent — keep scanning for a line that carries attribution.
+        if !agent_name.is_empty() {
             return (team_name, agent_name);
         }
     }
     (String::new(), String::new())
 }
 
-/// Extract (team_name, agent_name) pairs from Task items in parent chunks.
+/// Extract (team_name, agent_name) pairs from named-agent items in parent chunks.
+///
+/// `team_name` may be empty for v2.1.178+ implicit-team sessions where `TeamCreate`
+/// is absent and the `team_name` tool-input field is omitted. `agent_name` (the
+/// `name` key) is the authoritative signal.
 fn extract_team_specs(chunks: &[Chunk]) -> Vec<(String, String)> {
     let mut specs = Vec::new();
     for c in chunks {
@@ -1072,7 +1084,8 @@ fn extract_team_specs(chunks: &[Chunk]) -> Vec<(String, String)> {
             if let Some(Value::Object(map)) = &item.tool_input {
                 let tn = map.get("team_name").and_then(|v| v.as_str()).unwrap_or("");
                 let an = map.get("name").and_then(|v| v.as_str()).unwrap_or("");
-                if !tn.is_empty() && !an.is_empty() {
+                // agent_name is required; team_name is optional (absent in implicit teams).
+                if !an.is_empty() {
                     specs.push((tn.to_string(), an.to_string()));
                 }
             }
@@ -1719,5 +1732,135 @@ mod tests {
         let (team_name, agent_name) = read_team_session_meta(path.to_str().unwrap());
         assert_eq!(team_name, "my-team");
         assert_eq!(agent_name, "worker-1");
+    }
+
+    // --- Issue #155: v2.1.178 implicit teams — teamName may be absent ---
+
+    #[test]
+    fn read_team_session_meta_accepts_agent_name_without_team_name() {
+        // v2.1.178+ implicit teams: agentName is present but teamName is absent.
+        // read_team_session_meta must return ("", agent_name) so the session is
+        // discoverable even without an explicit team name.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("implicit-team-agent.jsonl");
+        std::fs::write(
+            &path,
+            concat!(
+                r#"{"type":"user","uuid":"u1","agentName":"worker-a","timestamp":"2026-06-15T10:00:00Z","message":{"role":"user","content":"run task"}}"#,
+                "\n",
+                r#"{"type":"assistant","uuid":"u2","agentName":"worker-a","timestamp":"2026-06-15T10:00:01Z","message":{"role":"assistant","content":[{"type":"text","text":"done"}],"stop_reason":"end_turn","usage":{"input_tokens":10,"output_tokens":3}}}"#,
+                "\n",
+            ),
+        )
+        .unwrap();
+
+        let (team_name, agent_name) = read_team_session_meta(path.to_str().unwrap());
+        assert_eq!(
+            team_name, "",
+            "teamName must be empty for implicit-team sessions"
+        );
+        assert_eq!(
+            agent_name, "worker-a",
+            "agentName must be returned even when teamName is absent"
+        );
+    }
+
+    #[test]
+    fn read_team_session_meta_accepts_null_team_name() {
+        // teamName: null (explicitly null in JSONL) should be treated as empty string.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("null-team-name-agent.jsonl");
+        std::fs::write(
+            &path,
+            concat!(
+                r#"{"type":"user","uuid":"u1","agentName":"worker-b","teamName":null,"timestamp":"2026-06-15T10:00:00Z","message":{"role":"user","content":"task"}}"#,
+                "\n",
+            ),
+        )
+        .unwrap();
+
+        let (team_name, agent_name) = read_team_session_meta(path.to_str().unwrap());
+        assert_eq!(
+            team_name, "",
+            "null teamName must deserialize as empty string"
+        );
+        assert_eq!(agent_name, "worker-b");
+    }
+
+    #[test]
+    fn discover_team_sessions_finds_implicit_team_session() {
+        // Simulate a v2.1.178+ session: parent calls Agent with name but no team_name;
+        // the teammate's JSONL has agentName but no teamName.
+        let dir = tempfile::tempdir().unwrap();
+        let session_id = "implicit-team-session";
+        let main_path = dir.path().join(format!("{session_id}.jsonl"));
+
+        // Main session: user + assistant with an Agent spawn (name only, no team_name).
+        std::fs::write(
+            &main_path,
+            concat!(
+                r#"{"type":"user","message":{"role":"user","content":"do work"},"uuid":"u1","timestamp":"2026-06-15T10:00:00Z"}"#,
+                "\n",
+                r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_a1","name":"Agent","input":{"name":"worker-a","prompt":"run the task"}}],"stop_reason":"tool_use","usage":{"input_tokens":50,"output_tokens":10}},"requestId":"req1","uuid":"u2","timestamp":"2026-06-15T10:00:01Z"}"#,
+                "\n",
+            ),
+        )
+        .unwrap();
+
+        // Teammate session: agentName present, teamName absent.
+        let teammate_path = dir.path().join("teammate-implicit.jsonl");
+        std::fs::write(
+            &teammate_path,
+            concat!(
+                r#"{"type":"user","agentName":"worker-a","uuid":"t1","timestamp":"2026-06-15T10:00:02Z","message":{"role":"user","content":"run the task"}}"#,
+                "\n",
+                r#"{"type":"assistant","agentName":"worker-a","uuid":"t2","timestamp":"2026-06-15T10:00:03Z","message":{"role":"assistant","content":[{"type":"text","text":"task done"}],"stop_reason":"end_turn","usage":{"input_tokens":30,"output_tokens":5}}}"#,
+                "\n",
+            ),
+        )
+        .unwrap();
+
+        let (classified, _, _) =
+            crate::parser::session::read_session_incremental(main_path.to_str().unwrap(), 0)
+                .unwrap();
+        let chunks = crate::parser::chunk::build_chunks(&classified);
+
+        let team_procs =
+            discover_team_sessions(main_path.to_str().unwrap(), &chunks).unwrap_or_default();
+
+        assert_eq!(
+            team_procs.len(),
+            1,
+            "implicit-team session (agentName only, no teamName) must be discovered"
+        );
+        assert!(
+            team_procs[0].id.contains("worker-a"),
+            "discovered proc id must include the agent name"
+        );
+    }
+
+    #[test]
+    fn extract_team_specs_includes_implicit_team_agents() {
+        use crate::parser::chunk::{build_chunks, Chunk, ChunkType, DisplayItem, DisplayItemType};
+
+        let item = DisplayItem {
+            item_type: DisplayItemType::Subagent,
+            tool_name: "Agent".to_string(),
+            tool_input: Some(serde_json::json!({
+                "name": "worker-implicit",
+                "prompt": "do the task"
+            })),
+            ..Default::default()
+        };
+        let chunk = Chunk {
+            chunk_type: ChunkType::AI,
+            items: vec![item],
+            ..Default::default()
+        };
+
+        let specs = extract_team_specs(&[chunk]);
+        assert_eq!(specs.len(), 1, "implicit team agent must produce a spec");
+        assert_eq!(specs[0].0, "", "team_name must be empty for implicit agent");
+        assert_eq!(specs[0].1, "worker-implicit");
     }
 }

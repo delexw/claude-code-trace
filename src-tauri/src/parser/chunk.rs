@@ -483,10 +483,14 @@ fn extract_subagent_info(input: &Option<Value>) -> (String, String, String) {
     (subagent_type, description, member_name)
 }
 
-/// Check whether a DisplayItem is a team task (has team_name and name in input).
+/// Check whether a DisplayItem is a named-agent task (`name` present in tool input).
+///
+/// Handles both pre-v2.1.178 explicit team spawns (which also carry `team_name`) and
+/// v2.1.178+ implicit team spawns where `TeamCreate`/`TeamDelete` are absent and
+/// `team_name` may be missing from the tool input entirely.
 pub fn is_team_task(item: &DisplayItem) -> bool {
     match &item.tool_input {
-        Some(Value::Object(map)) => map.contains_key("team_name") && map.contains_key("name"),
+        Some(Value::Object(map)) => map.contains_key("name"),
         _ => false,
     }
 }
@@ -721,5 +725,56 @@ mod tests {
             !chunks[0].items[0].is_orphan,
             "tool_use at end of session must not be is_orphan"
         );
+    }
+
+    // --- Issue #155: v2.1.178 implicit teams — is_team_task must not require team_name ---
+
+    fn make_subagent_item(tool_input: Option<serde_json::Value>) -> DisplayItem {
+        DisplayItem {
+            item_type: DisplayItemType::Subagent,
+            tool_name: "Agent".to_string(),
+            tool_input,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn is_team_task_true_with_name_and_team_name() {
+        // Pre-v2.1.178: explicit team spawn has both team_name and name.
+        let item = make_subagent_item(Some(serde_json::json!({
+            "name": "worker-a",
+            "team_name": "my-team",
+            "prompt": "do something"
+        })));
+        assert!(is_team_task(&item));
+    }
+
+    #[test]
+    fn is_team_task_true_with_name_only_implicit_team() {
+        // v2.1.178+: implicit team spawn has name but no team_name.
+        let item = make_subagent_item(Some(serde_json::json!({
+            "name": "worker-a",
+            "prompt": "do something"
+        })));
+        assert!(
+            is_team_task(&item),
+            "implicit team spawn (name only, no team_name) must be recognised as a team task"
+        );
+    }
+
+    #[test]
+    fn is_team_task_false_for_anonymous_agent() {
+        // Anonymous Agent call (no name) is not a team task.
+        let item = make_subagent_item(Some(serde_json::json!({
+            "prompt": "do something",
+            "subagent_type": "general-purpose"
+        })));
+        assert!(!is_team_task(&item));
+    }
+
+    #[test]
+    fn is_team_task_false_for_no_input() {
+        let item = make_subagent_item(None);
+        assert!(!is_team_task(&item));
     }
 }

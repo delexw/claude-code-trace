@@ -90,12 +90,22 @@ mitigated by iterative traversal for deeply nested structures.
 `discover_team_sessions()` scans the project directory for session files that match
 `(teamName, agentName)` pairs extracted from parent chunks. Each candidate file is
 identified by `read_team_session_meta()`, which scans lines until finding one with
-**both** `teamName` and `agentName` populated.
+a non-empty `agentName`. `teamName` is optional: pre-v2.1.178 sessions carry both,
+while v2.1.178+ implicit-team sessions carry only `agentName`.
+
+`is_team_task()` identifies named-agent tool calls by checking for the `name` key in
+tool input (not `team_name`), so both explicit team spawns (pre-v2.1.178) and implicit
+team spawns (v2.1.178+) are correctly classified.
 
 Before Claude Code v2.1.174, Workflow tool `agent()` subagents omitted attribution
-headers from their JSONL entries. A session file where no line carries attribution
+headers from their JSONL entries. A session file where no line carries any attribution
 returns `("", "")` and is gracefully skipped. A file where attribution appears only
 on later entries (mixed pre/post-fix session) is still correctly identified.
+
+Claude Code v2.1.178 removed `TeamCreate`/`TeamDelete` and made `teamName` optional
+in multi-agent sessions. Sessions recorded after this version may have teammates with
+`agentName` set but `teamName` absent — this is the authoritative signal and such
+sessions are fully discoverable.
 
 ---
 
