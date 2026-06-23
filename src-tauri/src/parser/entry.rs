@@ -161,7 +161,9 @@ pub struct EntryMessage {
     pub model: String,
     #[serde(default)]
     pub stop_reason: Option<String>,
-    #[serde(default)]
+    // v2.1.179+: mid-stream connection drops flush a partial assistant entry where usage may be
+    // null. null_as_default converts null → EntryUsage::default() so the entry is preserved.
+    #[serde(default, deserialize_with = "null_as_default")]
     pub usage: EntryUsage,
 }
 
@@ -176,14 +178,16 @@ pub struct CacheCreationUsage {
 
 #[derive(Debug, Deserialize, Default)]
 pub struct EntryUsage {
-    #[serde(default)]
+    // v2.1.179+: partial flush entries may include null for individual token counts.
+    // null_as_default maps null → 0 so arithmetic on partial usage is safe.
+    #[serde(default, deserialize_with = "null_as_default")]
     pub input_tokens: i64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub output_tokens: i64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub cache_read_input_tokens: i64,
     /// Flat format (pre-v2.1.152). May be 0 when the API uses the nested format.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub cache_creation_input_tokens: i64,
     /// Nested format (v2.1.152+). Takes precedence when non-zero.
     #[serde(default)]
@@ -1351,6 +1355,143 @@ mod tests {
             entry.parent_agent_name.is_empty(),
             "parentAgentName must be empty when absent"
         );
+    }
+
+    // --- Issue #156: v2.1.179+ mid-stream connection drop — partial assistant entries ---
+
+    #[test]
+    fn parse_entry_assistant_with_null_usage_succeeds() {
+        // v2.1.179+: partial flush entries may have usage:null when the token count was not yet
+        // computed at the time of the connection drop. The entry must be preserved (not dropped).
+        let line = json!({
+            "type": "assistant",
+            "uuid": "partial-null-usage-uuid",
+            "timestamp": "2026-06-16T10:00:00Z",
+            "message": {
+                "role": "assistant",
+                "model": "claude-sonnet-4-6",
+                "content": [{"type": "text", "text": "Partial respon"}],
+                "stop_reason": null,
+                "usage": null
+            }
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry =
+            parse_entry(&bytes).expect("must parse partial assistant entry with null usage");
+        assert_eq!(entry.entry_type, "assistant");
+        assert_eq!(entry.message.usage.input_tokens, 0);
+        assert_eq!(entry.message.usage.output_tokens, 0);
+        assert_eq!(entry.message.usage.cache_read_input_tokens, 0);
+        assert_eq!(entry.message.usage.cache_creation_input_tokens, 0);
+        assert!(
+            entry.message.stop_reason.is_none(),
+            "null stop_reason must be None"
+        );
+    }
+
+    #[test]
+    fn parse_entry_assistant_with_null_individual_usage_fields_succeeds() {
+        // v2.1.179+: partial flush may emit usage with some fields explicitly null (e.g. only
+        // output_tokens was counted before the drop). Each null field must default to 0.
+        let line = json!({
+            "type": "assistant",
+            "uuid": "partial-null-fields-uuid",
+            "timestamp": "2026-06-16T10:01:00Z",
+            "message": {
+                "role": "assistant",
+                "model": "claude-sonnet-4-6",
+                "content": [{"type": "text", "text": "Truncated mid"}],
+                "stop_reason": null,
+                "usage": {
+                    "input_tokens": null,
+                    "output_tokens": null,
+                    "cache_read_input_tokens": null,
+                    "cache_creation_input_tokens": null
+                }
+            }
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry =
+            parse_entry(&bytes).expect("must parse partial entry with null token count fields");
+        assert_eq!(entry.message.usage.input_tokens, 0);
+        assert_eq!(entry.message.usage.output_tokens, 0);
+        assert_eq!(entry.message.usage.cache_read_input_tokens, 0);
+        assert_eq!(entry.message.usage.cache_creation_input_tokens, 0);
+    }
+
+    #[test]
+    fn parse_entry_assistant_with_partial_usage_succeeds() {
+        // v2.1.179+: only some usage sub-fields may be present (e.g. input_tokens computed
+        // but output_tokens not yet). Absent fields must default to 0.
+        let line = json!({
+            "type": "assistant",
+            "uuid": "partial-usage-fields-uuid",
+            "timestamp": "2026-06-16T10:02:00Z",
+            "message": {
+                "role": "assistant",
+                "model": "claude-sonnet-4-6",
+                "content": [{"type": "text", "text": "Partial answer"}],
+                "stop_reason": null,
+                "usage": {"input_tokens": 42}
+            }
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry =
+            parse_entry(&bytes).expect("must parse partial entry with only some usage fields");
+        assert_eq!(entry.message.usage.input_tokens, 42);
+        assert_eq!(
+            entry.message.usage.output_tokens, 0,
+            "absent output_tokens must default to 0"
+        );
+        assert_eq!(entry.message.usage.cache_read_input_tokens, 0);
+    }
+
+    #[test]
+    fn parse_entry_assistant_with_unknown_stop_reason_captured() {
+        // v2.1.179+: a connection drop may produce a stop_reason not in the known set
+        // (end_turn, tool_use, max_tokens). The value must be preserved as Some("...") rather
+        // than failing deserialization.
+        let line = json!({
+            "type": "assistant",
+            "uuid": "unknown-stop-reason-uuid",
+            "timestamp": "2026-06-16T10:03:00Z",
+            "message": {
+                "role": "assistant",
+                "model": "claude-sonnet-4-6",
+                "content": [{"type": "text", "text": "Interrupted response"}],
+                "stop_reason": "connection_drop",
+                "usage": {"input_tokens": 10, "output_tokens": 5}
+            }
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("must parse entry with unknown stop_reason");
+        assert_eq!(
+            entry.message.stop_reason.as_deref(),
+            Some("connection_drop"),
+            "unknown stop_reason must be preserved verbatim"
+        );
+    }
+
+    #[test]
+    fn parse_entry_assistant_with_absent_usage_still_succeeds() {
+        // Regression: entries with entirely absent usage (pre-v2.1.179 normal case) must
+        // still be parsed successfully, defaulting all token counts to 0.
+        let line = json!({
+            "type": "assistant",
+            "uuid": "absent-usage-uuid",
+            "timestamp": "2026-06-16T10:04:00Z",
+            "message": {
+                "role": "assistant",
+                "model": "claude-sonnet-4-6",
+                "content": [{"type": "text", "text": "Normal response"}],
+                "stop_reason": "end_turn"
+            }
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("must parse entry with absent usage");
+        assert_eq!(entry.message.usage.input_tokens, 0);
+        assert_eq!(entry.message.usage.output_tokens, 0);
+        assert_eq!(entry.message.stop_reason.as_deref(), Some("end_turn"));
     }
 
     #[test]
