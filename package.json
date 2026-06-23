@@ -46,10 +46,10 @@
     "@types/react-syntax-highlighter": "^15.5.0",
     "@vitejs/plugin-react": "^6.0.2",
     "jsdom": "^29.1.1",
-    "oxfmt": "^0.54.0",
-    "oxlint": "^1.69.0",
+    "oxfmt": "^0.55.0",
+    "oxlint": "^1.70.0",
     "typescript": "^6.0.3",
     "vite": "^8.0.16",
-    "vitest": "^4.1.8"
+    "vitest": "^4.1.9"
   }
 }
