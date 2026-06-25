@@ -174,12 +174,34 @@ def test_format_edit_diff_produces_diff_block():
     )
     result = _format_edit_diff(inp)
     assert result is not None
-    assert result.startswith("```diff\n")
+    assert "```diff\n" in result
     assert result.endswith("\n```")
-    assert "- const x = 1;" in result
-    assert "+ const x = 2;" in result
-    assert "+ const y = 3;" in result
-    assert "/src/main.ts" in result
+    # File path is a Markdown header above the fence.
+    assert "`/src/main.ts`" in result
+    # Word-level change is marked with guillemets within the changed line.
+    assert "-const x = «1»;" in result
+    assert "+const x = «2»;" in result
+    # The unpaired inserted line has no word markers.
+    assert "+const y = 3;" in result
+
+
+def test_format_edit_diff_keeps_context_lines():
+    import json
+
+    inp = json.dumps(
+        {
+            "file_path": "a.ts",
+            "old_string": "keep\nfoo bar\ntail",
+            "new_string": "keep\nfoo baz\ntail",
+        }
+    )
+    result = _format_edit_diff(inp)
+    assert result is not None
+    # Unchanged lines are context (space-prefixed), not removed+added.
+    assert " keep" in result
+    assert " tail" in result
+    assert "-foo «bar»" in result
+    assert "+foo «baz»" in result
 
 
 def test_format_edit_diff_shows_replace_all():

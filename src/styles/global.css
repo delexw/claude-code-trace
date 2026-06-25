@@ -1715,6 +1715,10 @@ body {
   word-break: break-all;
 }
 
+.detail-item__diff-line--context {
+  color: var(--text-dim);
+}
+
 .detail-item__diff-line--removed {
   background: rgba(248, 81, 73, 0.15);
   color: #f85149;
@@ -1723,6 +1727,19 @@ body {
 .detail-item__diff-line--added {
   background: rgba(63, 185, 80, 0.15);
   color: #3fb950;
+}
+
+/* Intra-line word-level change: a stronger tint over the exact changed span. */
+.detail-item__diff-word {
+  border-radius: 2px;
+}
+
+.detail-item__diff-line--removed .detail-item__diff-word {
+  background: rgba(248, 81, 73, 0.4);
+}
+
+.detail-item__diff-line--added .detail-item__diff-word {
+  background: rgba(63, 185, 80, 0.4);
 }
 
 .detail-item__diff-marker {

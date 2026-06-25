@@ -1,7 +1,15 @@
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import type { DisplayItem } from "../types";
-import { formatDuration, formatJson, firstLine, truncate, parseEditInput } from "../lib/format";
+import {
+  formatDuration,
+  formatJson,
+  firstLine,
+  truncate,
+  parseEditInput,
+  computeEditDiff,
+} from "../lib/format";
+import type { DiffLineKind } from "../lib/format";
 import { getTeamColor } from "../lib/theme";
 import { StatsBar, useSubagentStats } from "./StatsBar";
 import { PopoutModal } from "./PopoutModal";
@@ -185,31 +193,46 @@ export function DetailItem({
   );
 }
 
+const DIFF_MARKER: Record<DiffLineKind, string> = { context: " ", removed: "-", added: "+" };
+const DIFF_LINE_CLASS: Record<DiffLineKind, string> = {
+  context: "detail-item__diff-line detail-item__diff-line--context",
+  removed: "detail-item__diff-line detail-item__diff-line--removed",
+  added: "detail-item__diff-line detail-item__diff-line--added",
+};
+
 function EditDiffLines({ oldLines, newLines }: { oldLines: string[]; newLines: string[] }) {
-  const items: { key: string; className: string; marker: string; text: string }[] = [];
-  for (let i = 0; i < oldLines.length; i++) {
-    items.push({
-      key: `r${i}:${oldLines[i].slice(0, 32)}`,
-      className: "detail-item__diff-line detail-item__diff-line--removed",
-      marker: "-",
-      text: oldLines[i],
+  // Precompute stable keys outside JSX so the index never appears in a `key`
+  // prop (lines and segments can repeat, so keys mix index + offset + content).
+  const rows = computeEditDiff(oldLines, newLines).map((line, i) => {
+    const lineKey = `${line.kind}${i}`;
+    let offset = 0;
+    const segs = line.segments.map((seg) => {
+      const segKey = `${lineKey}#${offset}`;
+      offset += seg.text.length;
+      return { key: segKey, changed: seg.changed, text: seg.text };
     });
-  }
-  for (let i = 0; i < newLines.length; i++) {
-    items.push({
-      key: `a${i}:${newLines[i].slice(0, 32)}`,
-      className: "detail-item__diff-line detail-item__diff-line--added",
-      marker: "+",
-      text: newLines[i],
-    });
-  }
+    return {
+      key: lineKey,
+      className: DIFF_LINE_CLASS[line.kind],
+      marker: DIFF_MARKER[line.kind],
+      segs,
+    };
+  });
   return (
     <pre>
       <code>
-        {items.map((it) => (
-          <div key={it.key} className={it.className}>
-            <span className="detail-item__diff-marker">{it.marker}</span>
-            {it.text}
+        {rows.map((row) => (
+          <div key={row.key} className={row.className}>
+            <span className="detail-item__diff-marker">{row.marker}</span>
+            {row.segs.map((seg) =>
+              seg.changed ? (
+                <span key={seg.key} className="detail-item__diff-word">
+                  {seg.text}
+                </span>
+              ) : (
+                <span key={seg.key}>{seg.text}</span>
+              ),
+            )}
           </div>
         ))}
       </code>

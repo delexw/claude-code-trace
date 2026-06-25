@@ -174,6 +174,54 @@ describe("Edit tool diff view", () => {
     expect(container.querySelector(".detail-item__diff-badge")?.textContent).toBe("replace all");
   });
 
+  it("preserves unchanged lines as context (not removed+added)", () => {
+    const editInput = JSON.stringify({
+      file_path: "/a.ts",
+      old_string: "keep\nfoo bar\ntail",
+      new_string: "keep\nfoo baz\ntail",
+    });
+    const { container } = render(
+      <DetailItem
+        item={makeItem({ tool_name: "Edit", tool_input: editInput })}
+        index={0}
+        isSelected={false}
+        isExpanded={true}
+        onToggle={vi.fn()}
+        onToggleExpand={vi.fn()}
+        onSelect={vi.fn()}
+      />,
+    );
+    // Two unchanged lines stay as context; only the middle line changes.
+    expect(container.querySelectorAll(".detail-item__diff-line--context")).toHaveLength(2);
+    expect(container.querySelectorAll(".detail-item__diff-line--removed")).toHaveLength(1);
+    expect(container.querySelectorAll(".detail-item__diff-line--added")).toHaveLength(1);
+  });
+
+  it("word-highlights the changed token within a changed line", () => {
+    const editInput = JSON.stringify({
+      file_path: "/a.ts",
+      old_string: "foo bar",
+      new_string: "foo baz",
+    });
+    const { container } = render(
+      <DetailItem
+        item={makeItem({ tool_name: "Edit", tool_input: editInput })}
+        index={0}
+        isSelected={false}
+        isExpanded={true}
+        onToggle={vi.fn()}
+        onToggleExpand={vi.fn()}
+        onSelect={vi.fn()}
+      />,
+    );
+    const words = container.querySelectorAll(".detail-item__diff-word");
+    const texts = Array.from(words).map((w) => w.textContent);
+    expect(texts).toContain("bar");
+    expect(texts).toContain("baz");
+    // "foo " is shared and must not be highlighted.
+    expect(texts).not.toContain("foo ");
+  });
+
   it("falls back to JSON view for non-Edit tool calls", () => {
     const { container } = render(
       <DetailItem

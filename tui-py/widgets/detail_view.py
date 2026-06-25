@@ -16,6 +16,7 @@ from textual.widgets import Collapsible, ListItem, Markdown, Static
 
 import theme
 from data_types import DisplayItem, DisplayMessage
+from diff_utils import compute_edit_diff
 from format_utils import format_duration, format_tokens, role_icon
 from items import get_item_icon, get_item_name, get_item_summary
 from theme import get_item_color, get_role_border_color, get_team_color
@@ -156,7 +157,12 @@ def _md_code(s: str, lang: str = "") -> str:
 
 
 def _format_edit_diff(tool_input: str) -> str | None:
-    """Try to format an Edit tool input as a diff block. Returns None if not applicable."""
+    """Format an Edit tool input as a unified-diff Markdown block, or None.
+
+    Unchanged lines are kept as context; within paired changed lines the exact
+    changed words are wrapped in «guillemets». The fence can't carry sub-line
+    colour (Markdown), so the markers convey the word-level change instead.
+    """
     import json as _json
 
     try:
@@ -171,17 +177,21 @@ def _format_edit_diff(tool_input: str) -> str | None:
     if not isinstance(old_string, str) or not isinstance(new_string, str):
         return None
 
-    lines: list[str] = []
+    marker = {"context": " ", "removed": "-", "added": "+"}
+    diff_lines = compute_edit_diff(old_string.split("\n"), new_string.split("\n"))
+    body = []
+    for dl in diff_lines:
+        text = "".join(f"«{seg.text}»" if seg.changed else seg.text for seg in dl.segments)
+        body.append(f"{marker[dl.kind]}{text}")
+    fence = "```diff\n" + "\n".join(body) + "\n```"
+
+    header = ""
     if file_path:
-        header = file_path
+        header = f"`{file_path}`"
         if parsed.get("replace_all"):
-            header += "  (replace all)"
-        lines.append(header)
-    for ln in old_string.split("\n"):
-        lines.append(f"- {ln}")
-    for ln in new_string.split("\n"):
-        lines.append(f"+ {ln}")
-    return "```diff\n" + "\n".join(lines) + "\n```"
+            header += " (replace all)"
+        header += "\n\n"
+    return header + fence
 
 
 def _render_item_body(item: DisplayItem) -> str:
