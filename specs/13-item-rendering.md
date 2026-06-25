@@ -88,15 +88,15 @@ on `item_type` but use different layout primitives.
 
 ### Web (`DetailItemBody`)
 
-| `item_type`       | Body layout (CSS classes)                                                                                                                                                                                                                                         |
-| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Thinking`        | `.detail-item__text--thinking` — single text block, falls back to "Thinking content is not recorded in session logs." when `text` is empty                                                                                                                        |
-| `Output`          | `.detail-item__text--markdown` — `<ReactMarkdown>{text}</ReactMarkdown>`                                                                                                                                                                                          |
+| `item_type`       | Body layout (CSS classes)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Thinking`        | `.detail-item__text--thinking` — single text block, falls back to "Thinking content is not recorded in session logs." when `text` is empty                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `Output`          | `.detail-item__text--markdown` — `<ReactMarkdown>{text}</ReactMarkdown>`                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `ToolCall`        | Two sections: `Input` and `Output`. **Edit tool** input renders as a diff view (`.detail-item__diff`) with file path header, red `−` removed lines, and green `+` added lines via `parseEditInput()` + `EditDiffLines`; shows a "replace all" badge when `replace_all` is true. **Other tools** render input as `<pre><code>{formatJson(tool_input)}</code></pre>`. Output: `tool_result_json` as `<pre><code>` if set, else `formatJson(tool_result)` as `<pre><code>` if valid JSON, else plain text; `.detail-item__text--error` if `tool_error` |
-| `Subagent`        | Up to 4 labelled sections: `Agent ID` (mono), `Description`, `Prompt`, `Content` (`text`)                                                                                                                                                                         |
-| `TeammateMessage` | Single text block (`text`)                                                                                                                                                                                                                                        |
-| `HookEvent`       | Three sections: `Hook` (`{hook_event}: {hook_name}`), `Command` (`<pre>` if present), `Metadata` (`<pre>` if present)                                                                                                                                             |
-| `default`         | Single text block                                                                                                                                                                                                                                                 |
+| `Subagent`        | Up to 4 labelled sections: `Agent ID` (mono), `Description`, `Prompt`, `Content` (`text`)                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `TeammateMessage` | Single text block (`text`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `HookEvent`       | Three sections: `Hook` (`{hook_event}: {hook_name}`), `Command` (`<pre>` if present), `Metadata` (`<pre>` if present)                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `default`         | Single text block                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 
 Both renderers show the `Output` body inline regardless of expansion state (the assistant's
 prose is always shown in chronological position); all other types render their body only when
@@ -109,7 +109,7 @@ Turns with no `Output` items (e.g. tool-only or plain user/system messages) stil
 
 ### TUI (`DetailItemBody`)
 
-```mermaid
+````mermaid
 flowchart TD
     BODY["DetailItemBody(item, cols, scrollOffset)"]
     BODY --> T{"item_type?"}
@@ -120,7 +120,7 @@ flowchart TD
     T -->|"Subagent"| SA["concat:\n'id: ...'\n'description: ...'\n'prompt: ...'\n+ hrule\n'Result: ...'\n→ ScrollBlock"]
     T -->|"TeammateMessage"| TM["ScrollBlock(text)"]
     T -->|"HookEvent"| HK["Three labelled rows:\nhook: {event}: {name}\ncmd: {command}\nmetadata: {metadata}"]
-```
+````
 
 #### `ScrollBlock` (TUI only)
 
