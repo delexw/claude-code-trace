@@ -16,6 +16,8 @@ pub struct SettingsResponse {
     pub effective_dir: String,
     /// Whether the effective directory actually exists on disk.
     pub effective_dir_exists: bool,
+    /// WSL distributions whose projects are also discovered.
+    pub wsl_distros: Vec<String>,
 }
 
 pub fn platform_default_dir() -> String {
@@ -38,6 +40,7 @@ pub fn build_response_pub(settings: &crate::settings::Settings) -> SettingsRespo
         default_dir: platform_default_dir(),
         effective_dir: effective.to_string_lossy().to_string(),
         effective_dir_exists,
+        wsl_distros: settings.wsl_distros.clone(),
     }
 }
 

@@ -87,28 +87,19 @@ pub async fn watch_session(
     Ok(())
 }
 
-/// Return all project directories under the Claude projects base directory.
-/// Each subdirectory corresponds to an encoded project path.
+/// Return all project directories to scan for sessions: every subdirectory of
+/// the Claude projects base directory plus the projects of each configured WSL
+/// distro. Each entry corresponds to an encoded project path.
 #[tauri::command]
 pub async fn get_project_dirs(state: State<'_, Arc<AppState>>) -> Result<Vec<String>, String> {
-    let configured = state
-        .settings
-        .lock()
-        .map_err(|e| e.to_string())?
-        .projects_dir
-        .clone();
-    let projects_dir = crate::parser::session::claude_projects_dir(configured.as_deref())?;
-    if !projects_dir.exists() {
-        return Ok(Vec::new());
-    }
-    let mut dirs = Vec::new();
-    let entries = std::fs::read_dir(&projects_dir).map_err(|e| e.to_string())?;
-    for entry in entries.flatten() {
-        if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-            dirs.push(entry.path().to_string_lossy().to_string());
-        }
-    }
-    Ok(dirs)
+    let (configured, wsl_distros) = {
+        let guard = state.settings.lock().map_err(|e| e.to_string())?;
+        (guard.projects_dir.clone(), guard.wsl_distros.clone())
+    };
+    Ok(crate::wsl::collect_project_dirs(
+        configured.as_deref(),
+        &wsl_distros,
+    ))
 }
 
 /// Stop watching the current session.
