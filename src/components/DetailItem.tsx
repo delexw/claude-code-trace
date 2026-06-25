@@ -1,7 +1,7 @@
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import type { DisplayItem } from "../types";
-import { formatDuration, formatJson, firstLine, truncate } from "../lib/format";
+import { formatDuration, formatJson, firstLine, truncate, parseEditInput } from "../lib/format";
 import { getTeamColor } from "../lib/theme";
 import { StatsBar, useSubagentStats } from "./StatsBar";
 import { PopoutModal } from "./PopoutModal";
@@ -185,6 +185,38 @@ export function DetailItem({
   );
 }
 
+function EditDiffLines({ oldLines, newLines }: { oldLines: string[]; newLines: string[] }) {
+  const items: { key: string; className: string; marker: string; text: string }[] = [];
+  for (let i = 0; i < oldLines.length; i++) {
+    items.push({
+      key: `r${i}:${oldLines[i].slice(0, 32)}`,
+      className: "detail-item__diff-line detail-item__diff-line--removed",
+      marker: "-",
+      text: oldLines[i],
+    });
+  }
+  for (let i = 0; i < newLines.length; i++) {
+    items.push({
+      key: `a${i}:${newLines[i].slice(0, 32)}`,
+      className: "detail-item__diff-line detail-item__diff-line--added",
+      marker: "+",
+      text: newLines[i],
+    });
+  }
+  return (
+    <pre>
+      <code>
+        {items.map((it) => (
+          <div key={it.key} className={it.className}>
+            <span className="detail-item__diff-marker">{it.marker}</span>
+            {it.text}
+          </div>
+        ))}
+      </code>
+    </pre>
+  );
+}
+
 function DetailItemBody({ item }: { item: DisplayItem }) {
   switch (item.item_type) {
     case "Thinking":
@@ -203,18 +235,35 @@ function DetailItemBody({ item }: { item: DisplayItem }) {
           </div>
         </div>
       );
-    case "ToolCall":
+    case "ToolCall": {
+      const editDiff =
+        item.tool_name === "Edit" && item.tool_input ? parseEditInput(item.tool_input) : null;
       return (
         <div className="detail-item__body">
-          {item.tool_input && (
+          {editDiff ? (
             <div className="detail-item__section detail-item__section--input">
               <div className="detail-item__section-title">Input</div>
-              <div className="detail-item__json">
-                <pre>
-                  <code>{formatJson(item.tool_input)}</code>
-                </pre>
+              <div className="detail-item__diff">
+                <div className="detail-item__diff-header">
+                  {editDiff.filePath}
+                  {editDiff.replaceAll && (
+                    <span className="detail-item__diff-badge">replace all</span>
+                  )}
+                </div>
+                <EditDiffLines oldLines={editDiff.oldLines} newLines={editDiff.newLines} />
               </div>
             </div>
+          ) : (
+            item.tool_input && (
+              <div className="detail-item__section detail-item__section--input">
+                <div className="detail-item__section-title">Input</div>
+                <div className="detail-item__json">
+                  <pre>
+                    <code>{formatJson(item.tool_input)}</code>
+                  </pre>
+                </div>
+              </div>
+            )
           )}
           {(item.tool_result || item.tool_result_json) && (
             <div className="detail-item__section detail-item__section--output">
@@ -228,6 +277,7 @@ function DetailItemBody({ item }: { item: DisplayItem }) {
           )}
         </div>
       );
+    }
     case "Subagent":
       return (
         <div className="detail-item__body">

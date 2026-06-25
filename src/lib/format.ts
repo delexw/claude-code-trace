@@ -214,6 +214,36 @@ export function formatJson(input: string): string {
   }
 }
 
+export interface EditDiffData {
+  filePath: string;
+  oldLines: string[];
+  newLines: string[];
+  replaceAll: boolean;
+}
+
+export function parseEditInput(toolInput: string): EditDiffData | null {
+  try {
+    const parsed = JSON.parse(toolInput);
+    if (
+      typeof parsed !== "object" ||
+      parsed === null ||
+      typeof parsed.file_path !== "string" ||
+      typeof parsed.old_string !== "string" ||
+      typeof parsed.new_string !== "string"
+    ) {
+      return null;
+    }
+    return {
+      filePath: parsed.file_path,
+      oldLines: parsed.old_string.split("\n"),
+      newLines: parsed.new_string.split("\n"),
+      replaceAll: parsed.replace_all === true,
+    };
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Wraps bare JSON objects/arrays in ```json code fences for ReactMarkdown.
  * Delegates detection to the shared transformInlineJson utility.

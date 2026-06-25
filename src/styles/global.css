@@ -1671,6 +1671,77 @@ body {
   overflow-y: auto;
 }
 
+.detail-item__diff {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  overflow-x: auto;
+  max-height: 300px;
+  overflow-y: auto;
+  font-size: 12px;
+}
+
+.detail-item__diff-header {
+  padding: 6px 8px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.detail-item__diff-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--accent);
+  color: var(--bg);
+}
+
+.detail-item__diff pre {
+  margin: 0;
+  padding: 4px 0;
+}
+
+.detail-item__diff code {
+  font-family: inherit;
+}
+
+.detail-item__diff-line {
+  padding: 0 8px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.detail-item__diff-line--removed {
+  background: rgba(248, 81, 73, 0.15);
+  color: #f85149;
+}
+
+.detail-item__diff-line--added {
+  background: rgba(63, 185, 80, 0.15);
+  color: #3fb950;
+}
+
+.detail-item__diff-marker {
+  display: inline-block;
+  width: 16px;
+  user-select: none;
+  opacity: 0.7;
+}
+
+.popout-modal__body .detail-item__diff {
+  max-height: none;
+  overflow: visible;
+}
+
+.popout-modal__body .detail-item__diff pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .detail-item__subagent-badge {
   display: inline-flex;
   align-items: center;

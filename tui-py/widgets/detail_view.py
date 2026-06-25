@@ -155,6 +155,35 @@ def _md_code(s: str, lang: str = "") -> str:
     return f"```{lang}\n{s}\n```"
 
 
+def _format_edit_diff(tool_input: str) -> str | None:
+    """Try to format an Edit tool input as a diff block. Returns None if not applicable."""
+    import json as _json
+
+    try:
+        parsed = _json.loads(tool_input)
+    except Exception:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    file_path = parsed.get("file_path", "")
+    old_string = parsed.get("old_string")
+    new_string = parsed.get("new_string")
+    if not isinstance(old_string, str) or not isinstance(new_string, str):
+        return None
+
+    lines: list[str] = []
+    if file_path:
+        header = file_path
+        if parsed.get("replace_all"):
+            header += "  (replace all)"
+        lines.append(header)
+    for ln in old_string.split("\n"):
+        lines.append(f"- {ln}")
+    for ln in new_string.split("\n"):
+        lines.append(f"+ {ln}")
+    return "```diff\n" + "\n".join(lines) + "\n```"
+
+
 def _render_item_body(item: DisplayItem) -> str:
     """Render the full expanded body of an item as Markdown."""
     match item.item_type:
@@ -166,7 +195,11 @@ def _render_item_body(item: DisplayItem) -> str:
             parts: list[str] = []
             if item.tool_input:
                 parts.append("**Input**")
-                parts.append(_md_json(item.tool_input))
+                if item.tool_name == "Edit":
+                    diff = _format_edit_diff(item.tool_input)
+                    parts.append(diff if diff else _md_json(item.tool_input))
+                else:
+                    parts.append(_md_json(item.tool_input))
             if item.tool_result or item.tool_result_json:
                 label = "**Error**" if item.tool_error else "**Result**"
                 parts.append(label)

@@ -92,7 +92,7 @@ on `item_type` but use different layout primitives.
 | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `Thinking`        | `.detail-item__text--thinking` — single text block, falls back to "Thinking content is not recorded in session logs." when `text` is empty                                                                                                                        |
 | `Output`          | `.detail-item__text--markdown` — `<ReactMarkdown>{text}</ReactMarkdown>`                                                                                                                                                                                          |
-| `ToolCall`        | Two sections: `Input` (`<pre><code>{formatJson(tool_input)}</code></pre>`) and `Output` — `tool_result_json` as `<pre><code>` if set, else `formatJson(tool_result)` as `<pre><code>` if valid JSON, else plain text; `.detail-item__text--error` if `tool_error` |
+| `ToolCall`        | Two sections: `Input` and `Output`. **Edit tool** input renders as a diff view (`.detail-item__diff`) with file path header, red `−` removed lines, and green `+` added lines via `parseEditInput()` + `EditDiffLines`; shows a "replace all" badge when `replace_all` is true. **Other tools** render input as `<pre><code>{formatJson(tool_input)}</code></pre>`. Output: `tool_result_json` as `<pre><code>` if set, else `formatJson(tool_result)` as `<pre><code>` if valid JSON, else plain text; `.detail-item__text--error` if `tool_error` |
 | `Subagent`        | Up to 4 labelled sections: `Agent ID` (mono), `Description`, `Prompt`, `Content` (`text`)                                                                                                                                                                         |
 | `TeammateMessage` | Single text block (`text`)                                                                                                                                                                                                                                        |
 | `HookEvent`       | Three sections: `Hook` (`{hook_event}: {hook_name}`), `Command` (`<pre>` if present), `Metadata` (`<pre>` if present)                                                                                                                                             |
@@ -116,7 +116,7 @@ flowchart TD
 
     T -->|"Thinking"| TH["ScrollBlock\ncolor: itemThinking\nfallback text if empty"]
     T -->|"Output"| OUT["ScrollBlock\n(formatJson(text))"]
-    T -->|"ToolCall"| TC["concat:\n'Input:' + _md_json(tool_input)\n+ hrule\n+ ('Error:' or 'Result:') +\n  tool_result_json fenced block if set,\n  else _md_json(tool_result)\n→ ScrollBlock"]
+    T -->|"ToolCall"| TC["concat:\n'Input:' + (Edit tool → _format_edit_diff as ```diff fence,\n  else _md_json(tool_input))\n+ hrule\n+ ('Error:' or 'Result:') +\n  tool_result_json fenced block if set,\n  else _md_json(tool_result)\n→ ScrollBlock"]
     T -->|"Subagent"| SA["concat:\n'id: ...'\n'description: ...'\n'prompt: ...'\n+ hrule\n'Result: ...'\n→ ScrollBlock"]
     T -->|"TeammateMessage"| TM["ScrollBlock(text)"]
     T -->|"HookEvent"| HK["Three labelled rows:\nhook: {event}: {name}\ncmd: {command}\nmetadata: {metadata}"]

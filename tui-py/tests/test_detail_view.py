@@ -14,7 +14,7 @@ from textual.widgets import Collapsible, Static
 
 from data_types import DisplayItem, DisplayMessage
 from items import get_item_summary
-from widgets.detail_view import DetailView, _render_msg_title
+from widgets.detail_view import DetailView, _format_edit_diff, _render_msg_title
 
 
 class _DVApp(App):
@@ -155,3 +155,46 @@ async def test_output_item_expanded_even_when_not_in_expanded_set():
         await pilot.pause(0.2)
         coll = dv.query_one("#item-0", Collapsible)
         assert coll.collapsed is False
+
+
+# ---------------------------------------------------------------------------
+# _format_edit_diff
+# ---------------------------------------------------------------------------
+
+
+def test_format_edit_diff_produces_diff_block():
+    import json
+
+    inp = json.dumps(
+        {
+            "file_path": "/src/main.ts",
+            "old_string": "const x = 1;",
+            "new_string": "const x = 2;\nconst y = 3;",
+        }
+    )
+    result = _format_edit_diff(inp)
+    assert result is not None
+    assert result.startswith("```diff\n")
+    assert result.endswith("\n```")
+    assert "- const x = 1;" in result
+    assert "+ const x = 2;" in result
+    assert "+ const y = 3;" in result
+    assert "/src/main.ts" in result
+
+
+def test_format_edit_diff_shows_replace_all():
+    import json
+
+    inp = json.dumps(
+        {"file_path": "a.ts", "old_string": "foo", "new_string": "bar", "replace_all": True}
+    )
+    result = _format_edit_diff(inp)
+    assert result is not None
+    assert "(replace all)" in result
+
+
+def test_format_edit_diff_returns_none_for_non_edit():
+    import json
+
+    assert _format_edit_diff(json.dumps({"path": "file.ts"})) is None
+    assert _format_edit_diff("not json") is None
