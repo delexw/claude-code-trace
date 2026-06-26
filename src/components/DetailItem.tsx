@@ -1,7 +1,15 @@
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import type { DisplayItem } from "../types";
-import { formatDuration, formatJson, firstLine, truncate } from "../lib/format";
+import {
+  formatDuration,
+  formatJson,
+  firstLine,
+  truncate,
+  parseEditInput,
+  computeEditDiff,
+} from "../lib/format";
+import type { DiffLineKind } from "../lib/format";
 import { getTeamColor } from "../lib/theme";
 import { StatsBar, useSubagentStats } from "./StatsBar";
 import { PopoutModal } from "./PopoutModal";
@@ -185,6 +193,53 @@ export function DetailItem({
   );
 }
 
+const DIFF_MARKER: Record<DiffLineKind, string> = { context: " ", removed: "-", added: "+" };
+const DIFF_LINE_CLASS: Record<DiffLineKind, string> = {
+  context: "detail-item__diff-line detail-item__diff-line--context",
+  removed: "detail-item__diff-line detail-item__diff-line--removed",
+  added: "detail-item__diff-line detail-item__diff-line--added",
+};
+
+function EditDiffLines({ oldLines, newLines }: { oldLines: string[]; newLines: string[] }) {
+  // Precompute stable keys outside JSX so the index never appears in a `key`
+  // prop (lines and segments can repeat, so keys mix index + offset + content).
+  const rows = computeEditDiff(oldLines, newLines).map((line, i) => {
+    const lineKey = `${line.kind}${i}`;
+    let offset = 0;
+    const segs = line.segments.map((seg) => {
+      const segKey = `${lineKey}#${offset}`;
+      offset += seg.text.length;
+      return { key: segKey, changed: seg.changed, text: seg.text };
+    });
+    return {
+      key: lineKey,
+      className: DIFF_LINE_CLASS[line.kind],
+      marker: DIFF_MARKER[line.kind],
+      segs,
+    };
+  });
+  return (
+    <pre>
+      <code>
+        {rows.map((row) => (
+          <div key={row.key} className={row.className}>
+            <span className="detail-item__diff-marker">{row.marker}</span>
+            {row.segs.map((seg) =>
+              seg.changed ? (
+                <span key={seg.key} className="detail-item__diff-word">
+                  {seg.text}
+                </span>
+              ) : (
+                <span key={seg.key}>{seg.text}</span>
+              ),
+            )}
+          </div>
+        ))}
+      </code>
+    </pre>
+  );
+}
+
 function DetailItemBody({ item }: { item: DisplayItem }) {
   switch (item.item_type) {
     case "Thinking":
@@ -203,18 +258,35 @@ function DetailItemBody({ item }: { item: DisplayItem }) {
           </div>
         </div>
       );
-    case "ToolCall":
+    case "ToolCall": {
+      const editDiff =
+        item.tool_name === "Edit" && item.tool_input ? parseEditInput(item.tool_input) : null;
       return (
         <div className="detail-item__body">
-          {item.tool_input && (
+          {editDiff ? (
             <div className="detail-item__section detail-item__section--input">
               <div className="detail-item__section-title">Input</div>
-              <div className="detail-item__json">
-                <pre>
-                  <code>{formatJson(item.tool_input)}</code>
-                </pre>
+              <div className="detail-item__diff">
+                <div className="detail-item__diff-header">
+                  {editDiff.filePath}
+                  {editDiff.replaceAll && (
+                    <span className="detail-item__diff-badge">replace all</span>
+                  )}
+                </div>
+                <EditDiffLines oldLines={editDiff.oldLines} newLines={editDiff.newLines} />
               </div>
             </div>
+          ) : (
+            item.tool_input && (
+              <div className="detail-item__section detail-item__section--input">
+                <div className="detail-item__section-title">Input</div>
+                <div className="detail-item__json">
+                  <pre>
+                    <code>{formatJson(item.tool_input)}</code>
+                  </pre>
+                </div>
+              </div>
+            )
           )}
           {(item.tool_result || item.tool_result_json) && (
             <div className="detail-item__section detail-item__section--output">
@@ -228,6 +300,7 @@ function DetailItemBody({ item }: { item: DisplayItem }) {
           )}
         </div>
       );
+    }
     case "Subagent":
       return (
         <div className="detail-item__body">

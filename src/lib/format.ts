@@ -4,6 +4,8 @@
 import type { DisplayMessage } from "../types";
 import { transformInlineJson } from "../../shared/format";
 export { formatTokens, transformInlineJson } from "../../shared/format";
+export { computeEditDiff } from "../../shared/diff";
+export type { DiffLine, DiffSegment, DiffLineKind } from "../../shared/diff";
 
 /**
  * Turns "claude-opus-4-6" into "opus4.6".
@@ -211,6 +213,36 @@ export function formatJson(input: string): string {
     return JSON.stringify(JSON.parse(input), null, 2);
   } catch {
     return input;
+  }
+}
+
+export interface EditDiffData {
+  filePath: string;
+  oldLines: string[];
+  newLines: string[];
+  replaceAll: boolean;
+}
+
+export function parseEditInput(toolInput: string): EditDiffData | null {
+  try {
+    const parsed = JSON.parse(toolInput);
+    if (
+      typeof parsed !== "object" ||
+      parsed === null ||
+      typeof parsed.file_path !== "string" ||
+      typeof parsed.old_string !== "string" ||
+      typeof parsed.new_string !== "string"
+    ) {
+      return null;
+    }
+    return {
+      filePath: parsed.file_path,
+      oldLines: parsed.old_string.split("\n"),
+      newLines: parsed.new_string.split("\n"),
+      replaceAll: parsed.replace_all === true,
+    };
+  } catch {
+    return null;
   }
 }
 
