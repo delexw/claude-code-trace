@@ -14,7 +14,7 @@ from textual.widgets import Collapsible, Static
 
 from data_types import DisplayItem, DisplayMessage
 from items import get_item_summary
-from widgets.detail_view import DetailView, _format_edit_diff, _render_msg_title
+from widgets.detail_view import DetailView, _render_edit_diff, _render_msg_title
 
 
 class _DVApp(App):
@@ -158,11 +158,18 @@ async def test_output_item_expanded_even_when_not_in_expanded_set():
 
 
 # ---------------------------------------------------------------------------
-# _format_edit_diff
+# _render_edit_diff
 # ---------------------------------------------------------------------------
 
 
-def test_format_edit_diff_produces_diff_block():
+def _spans_with(text, needle):
+    """Return (covered_text, style) for spans whose style contains `needle`."""
+    return [
+        (text.plain[s.start : s.end], str(s.style)) for s in text.spans if needle in str(s.style)
+    ]
+
+
+def test_render_edit_diff_colors_lines_and_changed_words():
     import json
 
     inp = json.dumps(
@@ -172,20 +179,27 @@ def test_format_edit_diff_produces_diff_block():
             "new_string": "const x = 2;\nconst y = 3;",
         }
     )
-    result = _format_edit_diff(inp)
-    assert result is not None
-    assert "```diff\n" in result
-    assert result.endswith("\n```")
-    # File path is a Markdown header above the fence.
-    assert "`/src/main.ts`" in result
-    # Word-level change is marked with guillemets within the changed line.
-    assert "-const x = «1»;" in result
-    assert "+const x = «2»;" in result
-    # The unpaired inserted line has no word markers.
-    assert "+const y = 3;" in result
+    text = _render_edit_diff(inp)
+    assert text is not None
+    # No guillemets — colour conveys the change now.
+    assert "«" not in text.plain
+    # File path header is present and styled.
+    assert "/src/main.ts" in text.plain
+    # Unified diff markers and lines are in the plain text.
+    assert "-const x = 1;" in text.plain
+    assert "+const x = 2;" in text.plain
+    assert "+const y = 3;" in text.plain
+    # The changed token "1" carries the removed-word background tint.
+    removed_words = _spans_with(text, "#67060c")
+    assert ("1", "bold #f85149 on #67060c") in removed_words
+    # The changed token "2" carries the added-word background tint.
+    added_words = _spans_with(text, "#033a16")
+    assert ("2", "bold #3fb950 on #033a16") in added_words
+    # The unpaired inserted line has no changed-word spans (whole line, not a token).
+    assert all(covered != "const y = 3;" for covered, _ in added_words)
 
 
-def test_format_edit_diff_keeps_context_lines():
+def test_render_edit_diff_keeps_context_lines():
     import json
 
     inp = json.dumps(
@@ -195,28 +209,31 @@ def test_format_edit_diff_keeps_context_lines():
             "new_string": "keep\nfoo baz\ntail",
         }
     )
-    result = _format_edit_diff(inp)
-    assert result is not None
+    text = _render_edit_diff(inp)
+    assert text is not None
     # Unchanged lines are context (space-prefixed), not removed+added.
-    assert " keep" in result
-    assert " tail" in result
-    assert "-foo «bar»" in result
-    assert "+foo «baz»" in result
+    assert " keep" in text.plain
+    assert " tail" in text.plain
+    assert "-foo bar" in text.plain
+    assert "+foo baz" in text.plain
+    # Only the changed words are highlighted.
+    assert ("bar", "bold #f85149 on #67060c") in _spans_with(text, "#67060c")
+    assert ("baz", "bold #3fb950 on #033a16") in _spans_with(text, "#033a16")
 
 
-def test_format_edit_diff_shows_replace_all():
+def test_render_edit_diff_shows_replace_all():
     import json
 
     inp = json.dumps(
         {"file_path": "a.ts", "old_string": "foo", "new_string": "bar", "replace_all": True}
     )
-    result = _format_edit_diff(inp)
-    assert result is not None
-    assert "(replace all)" in result
+    text = _render_edit_diff(inp)
+    assert text is not None
+    assert "(replace all)" in text.plain
 
 
-def test_format_edit_diff_returns_none_for_non_edit():
+def test_render_edit_diff_returns_none_for_non_edit():
     import json
 
-    assert _format_edit_diff(json.dumps({"path": "file.ts"})) is None
-    assert _format_edit_diff("not json") is None
+    assert _render_edit_diff(json.dumps({"path": "file.ts"})) is None
+    assert _render_edit_diff("not json") is None

@@ -110,18 +110,18 @@ Turns with no `Output` items (e.g. tool-only or plain user/system messages) stil
 
 ### TUI (`DetailItemBody`)
 
-````mermaid
+```mermaid
 flowchart TD
     BODY["DetailItemBody(item, cols, scrollOffset)"]
     BODY --> T{"item_type?"}
 
     T -->|"Thinking"| TH["ScrollBlock\ncolor: itemThinking\nfallback text if empty"]
     T -->|"Output"| OUT["ScrollBlock\n(formatJson(text))"]
-    T -->|"ToolCall"| TC["concat:\n'Input:' + (Edit tool → _format_edit_diff:\n  compute_edit_diff() → ```diff fence with\n  context/removed/added lines, changed words\n  wrapped in «guillemets» (Markdown can't colour\n  sub-line spans); else _md_json(tool_input))\n+ hrule\n+ ('Error:' or 'Result:') +\n  tool_result_json fenced block if set,\n  else _md_json(tool_result)\n→ ScrollBlock"]
+    T -->|"ToolCall"| TC["concat:\n'Input:' + (Edit tool → _render_edit_diff:\n  compute_edit_diff() → coloured Rich Text Static:\n  context/removed/added lines coloured dim/red/green,\n  changed words carry a stronger bg tint span\n  (own renderer, not Markdown's uncoloured diff fence);\n  else _md_json(tool_input))\n+ hrule\n+ ('Error:' or 'Result:') +\n  tool_result_json fenced block if set,\n  else _md_json(tool_result)\n→ ScrollBlock"]
     T -->|"Subagent"| SA["concat:\n'id: ...'\n'description: ...'\n'prompt: ...'\n+ hrule\n'Result: ...'\n→ ScrollBlock"]
     T -->|"TeammateMessage"| TM["ScrollBlock(text)"]
     T -->|"HookEvent"| HK["Three labelled rows:\nhook: {event}: {name}\ncmd: {command}\nmetadata: {metadata}"]
-````
+```
 
 #### `ScrollBlock` (TUI only)
 
