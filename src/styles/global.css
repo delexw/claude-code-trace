@@ -2531,6 +2531,34 @@ body {
   letter-spacing: 0.5px;
 }
 
+.settings-modal__label--section {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.settings-modal__wsl {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.settings-modal__wsl-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.settings-modal__wsl-item input {
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+
 .settings-modal__input {
   width: 100%;
   padding: 6px 8px;

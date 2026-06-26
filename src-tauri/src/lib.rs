@@ -7,6 +7,7 @@ mod parser;
 mod settings;
 mod state;
 mod watcher;
+mod wsl;
 
 use std::sync::Arc;
 
@@ -68,6 +69,8 @@ pub fn run() {
             commands::debug::get_debug_log,
             commands::settings::get_settings,
             commands::settings::set_projects_dir,
+            commands::wsl::list_wsl_distros,
+            commands::wsl::set_wsl_distros,
             switch_to_browser,
         ])
         .setup(move |app| {

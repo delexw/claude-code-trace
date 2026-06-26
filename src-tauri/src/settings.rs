@@ -6,6 +6,10 @@ use std::path::PathBuf;
 pub struct Settings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub projects_dir: Option<String>,
+    /// Names of WSL distributions whose `~/.claude/projects` should also be
+    /// scanned for sessions (Windows host discovering sessions inside WSL).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub wsl_distros: Vec<String>,
 }
 
 fn settings_path() -> Result<PathBuf, String> {
@@ -49,6 +53,7 @@ mod tests {
 
         let settings = Settings {
             projects_dir: Some("/custom/path".to_string()),
+            ..Default::default()
         };
         let json = serde_json::to_string_pretty(&settings).unwrap();
         fs::write(&path, &json).unwrap();
@@ -63,5 +68,24 @@ mod tests {
     fn deserialize_empty_json_gives_defaults() {
         let settings: Settings = serde_json::from_str("{}").unwrap();
         assert!(settings.projects_dir.is_none());
+        assert!(settings.wsl_distros.is_empty());
+    }
+
+    #[test]
+    fn wsl_distros_roundtrip() {
+        let settings = Settings {
+            projects_dir: None,
+            wsl_distros: vec!["Ubuntu".to_string(), "Debian".to_string()],
+        };
+        let json = serde_json::to_string_pretty(&settings).unwrap();
+        let loaded: Settings = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded.wsl_distros, vec!["Ubuntu", "Debian"]);
+    }
+
+    #[test]
+    fn empty_wsl_distros_omitted_from_json() {
+        let settings = Settings::default();
+        let json = serde_json::to_string(&settings).unwrap();
+        assert!(!json.contains("wsl_distros"));
     }
 }

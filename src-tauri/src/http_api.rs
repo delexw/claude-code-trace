@@ -91,6 +91,10 @@ async fn run_server(state: Arc<HttpState>) {
     let mut router = Router::new()
         .route("/api/settings", get(api_get_settings))
         .route("/api/settings/dir", post(api_set_projects_dir))
+        .route(
+            "/api/wsl/distros",
+            get(api_list_wsl_distros).post(api_set_wsl_distros),
+        )
         .route("/api/project-dirs", get(api_get_project_dirs))
         .route("/api/sessions", post(api_discover_sessions))
         .route("/api/session", get(api_get_session_by_id))
@@ -205,31 +209,45 @@ async fn api_set_projects_dir(
 
 async fn api_get_project_dirs(State(state): State<Arc<HttpState>>) -> Response {
     let app_state = app_state(&state);
-    let configured = match app_state.settings.lock() {
-        Ok(g) => g.projects_dir.clone(),
+    let (configured, wsl_distros) = match app_state.settings.lock() {
+        Ok(g) => (g.projects_dir.clone(), g.wsl_distros.clone()),
         Err(e) => {
             return err_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
         }
     };
-    let projects_dir = match crate::parser::session::claude_projects_dir(configured.as_deref()) {
-        Ok(d) => d,
-        Err(e) => return err_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e),
-    };
-    if !projects_dir.exists() {
-        return ok_json(&Vec::<String>::new());
-    }
-    let entries = match std::fs::read_dir(&projects_dir) {
-        Ok(e) => e,
-        Err(e) => {
-            return err_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
-        }
-    };
-    let dirs: Vec<String> = entries
-        .flatten()
-        .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
-        .map(|e| e.path().to_string_lossy().to_string())
-        .collect();
+    let dirs = crate::wsl::collect_project_dirs(configured.as_deref(), &wsl_distros);
     ok_json(&dirs)
+}
+
+// ---------------------------------------------------------------------------
+// WSL distros
+// ---------------------------------------------------------------------------
+
+async fn api_list_wsl_distros() -> Response {
+    ok_json(&crate::wsl::list_distros())
+}
+
+#[derive(Deserialize)]
+struct SetWslBody {
+    distros: Vec<String>,
+}
+
+async fn api_set_wsl_distros(
+    State(state): State<Arc<HttpState>>,
+    Json(body): Json<SetWslBody>,
+) -> Response {
+    let app_state = app_state(&state);
+    let mut guard = match app_state.settings.lock() {
+        Ok(g) => g,
+        Err(e) => {
+            return err_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+        }
+    };
+    guard.wsl_distros = crate::commands::wsl::sanitize_distros(body.distros);
+    if let Err(e) = crate::settings::save_settings(&guard) {
+        return err_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e);
+    }
+    ok_json(&crate::commands::settings::build_response_pub(&guard))
 }
 
 // ---------------------------------------------------------------------------
@@ -338,31 +356,23 @@ async fn api_get_session_by_id(
     }
 
     let app_state = app_state(&state);
-    let configured = match app_state.settings.lock() {
-        Ok(g) => g.projects_dir.clone(),
+    let (configured, wsl_distros) = match app_state.settings.lock() {
+        Ok(g) => (g.projects_dir.clone(), g.wsl_distros.clone()),
         Err(e) => {
             return err_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
         }
     };
-    let projects_dir = match crate::parser::session::claude_projects_dir(configured.as_deref()) {
-        Ok(d) => d,
-        Err(e) => return err_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e),
-    };
 
-    // Search all project subdirs for <id>.jsonl
+    // Search every project dir (host + WSL distros) for <id>.jsonl
+    let project_dirs = crate::wsl::collect_project_dirs(configured.as_deref(), &wsl_distros);
     let filename = format!("{}.jsonl", q.id);
-    let found_path = std::fs::read_dir(&projects_dir).ok().and_then(|entries| {
-        entries.flatten().find_map(|entry| {
-            if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-                return None;
-            }
-            let candidate = entry.path().join(&filename);
-            if candidate.exists() {
-                Some(candidate.to_string_lossy().to_string())
-            } else {
-                None
-            }
-        })
+    let found_path = project_dirs.iter().find_map(|dir| {
+        let candidate = std::path::Path::new(dir).join(&filename);
+        if candidate.exists() {
+            Some(candidate.to_string_lossy().to_string())
+        } else {
+            None
+        }
     });
 
     let path = match found_path {

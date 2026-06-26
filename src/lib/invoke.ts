@@ -26,6 +26,12 @@ const routes: Record<string, Route> = {
     path: "/api/settings/dir",
     body: (a) => ({ path: a.path ?? null }),
   },
+  list_wsl_distros: { path: "/api/wsl/distros" },
+  set_wsl_distros: {
+    method: "POST",
+    path: "/api/wsl/distros",
+    body: (a) => ({ distros: (a.distros as string[]) ?? [] }),
+  },
   get_project_dirs: { path: "/api/project-dirs" },
   discover_sessions: {
     method: "POST",
