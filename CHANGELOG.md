@@ -3,6 +3,53 @@
 All notable changes to claude-code-trace are documented here. Versions follow
 [semantic versioning](https://semver.org/).
 
+## [0.9.0] — 2026-06-26
+
+This release widens where the viewer looks for sessions and sharpens how it shows what
+Claude changed. Windows users running Claude Code inside WSL can now surface those
+Linux-side sessions, Edit tool calls render as a proper colour-coded diff instead of raw
+JSON, and the JSONL parser keeps pace with another run of Claude Code releases
+(v2.1.178 through v2.1.183).
+
+### Added
+
+- **WSL session discovery**
+  ([`6912a6d`](https://github.com/delexw/claude-code-trace/commit/6912a6d), @RobotHanzo).
+  On Windows, Claude Code running inside a WSL distribution stores its projects under the
+  Linux home, out of reach of the host viewer. Trace can now opt in to discovering those
+  sessions: detected distributions appear as checkboxes in Settings, and the ones you
+  enable are folded into the project list alongside your host projects. All WSL access is
+  Windows-gated, so other platforms are unaffected.
+
+- **Structured diff view for Edit tool calls**
+  ([`6a6c2d9`](https://github.com/delexw/claude-code-trace/commit/6a6c2d9)). Edit tool
+  inputs used to render as raw `old_string` / `new_string` JSON. They now display as a
+  colour-coded diff — unchanged context lines are preserved, removed and added lines are
+  marked with `-`/`+`, and only the words that actually changed are highlighted within a
+  line. Both the web UI and the TUI get the new rendering.
+
+### Fixed
+
+- **Thinking-only and re-prompt entries from Claude Code v2.1.183**
+  ([`2c69c85`](https://github.com/delexw/claude-code-trace/commit/2c69c85)). v2.1.183
+  emits assistant entries that carry only thinking content, plus `isMeta`-flagged user
+  entries for re-prompts. These previously tripped up the parser; they are now recognised
+  and the transcript renders without gaps.
+
+- **Partial assistant entries with missing usage and token fields**
+  ([`d0581ee`](https://github.com/delexw/claude-code-trace/commit/d0581ee)). Some
+  assistant entries arrive mid-stream with null `usage` and token fields. The parser now
+  tolerates these instead of failing on them, so a live transcript no longer breaks while
+  a partial entry is still being written.
+
+- **Implicit team discovery for Claude Code v2.1.178**
+  ([`945deb4`](https://github.com/delexw/claude-code-trace/commit/945deb4)). v2.1.178
+  stopped writing the team header that discovery relied on, so sub-agent and team sessions
+  silently disappeared. Discovery now uses `agentName` as the primary signal and finds
+  those sessions again.
+
+[0.9.0]: https://github.com/delexw/claude-code-trace/releases/tag/v0.9.0
+
 ## [0.8.0] — 2026-06-16
 
 This release keeps the JSONL parser in step with another run of Claude Code releases
