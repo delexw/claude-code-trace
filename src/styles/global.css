@@ -1671,6 +1671,94 @@ body {
   overflow-y: auto;
 }
 
+.detail-item__diff {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  overflow-x: auto;
+  max-height: 300px;
+  overflow-y: auto;
+  font-size: 12px;
+}
+
+.detail-item__diff-header {
+  padding: 6px 8px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.detail-item__diff-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--accent);
+  color: var(--bg);
+}
+
+.detail-item__diff pre {
+  margin: 0;
+  padding: 4px 0;
+}
+
+.detail-item__diff code {
+  font-family: inherit;
+}
+
+.detail-item__diff-line {
+  padding: 0 8px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.detail-item__diff-line--context {
+  color: var(--text-dim);
+}
+
+.detail-item__diff-line--removed {
+  background: rgba(248, 81, 73, 0.15);
+  color: #f85149;
+}
+
+.detail-item__diff-line--added {
+  background: rgba(63, 185, 80, 0.15);
+  color: #3fb950;
+}
+
+/* Intra-line word-level change: a stronger tint over the exact changed span. */
+.detail-item__diff-word {
+  border-radius: 2px;
+}
+
+.detail-item__diff-line--removed .detail-item__diff-word {
+  background: rgba(248, 81, 73, 0.4);
+}
+
+.detail-item__diff-line--added .detail-item__diff-word {
+  background: rgba(63, 185, 80, 0.4);
+}
+
+.detail-item__diff-marker {
+  display: inline-block;
+  width: 16px;
+  user-select: none;
+  opacity: 0.7;
+}
+
+.popout-modal__body .detail-item__diff {
+  max-height: none;
+  overflow: visible;
+}
+
+.popout-modal__body .detail-item__diff pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .detail-item__subagent-badge {
   display: inline-flex;
   align-items: center;
@@ -2441,6 +2529,34 @@ body {
   color: var(--text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.5px;
+}
+
+.settings-modal__label--section {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.settings-modal__wsl {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.settings-modal__wsl-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.settings-modal__wsl-item input {
+  cursor: pointer;
+  accent-color: var(--accent);
 }
 
 .settings-modal__input {

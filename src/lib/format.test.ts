@@ -18,6 +18,7 @@ import {
   fenceInlineJson,
   projectKey,
   projectDisplayName,
+  parseEditInput,
 } from "./format";
 
 // ---------------------------------------------------------------------------
@@ -642,5 +643,47 @@ describe("fenceInlineJson", () => {
   it("leaves non-JSON curly brace content untouched", () => {
     const input = "Use template {name} for formatting.";
     expect(fenceInlineJson(input)).toBe(input);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parseEditInput
+// ---------------------------------------------------------------------------
+describe("parseEditInput", () => {
+  it("parses valid Edit tool input", () => {
+    const input = JSON.stringify({
+      file_path: "/src/main.ts",
+      old_string: "const x = 1;",
+      new_string: "const x = 2;\nconst y = 3;",
+    });
+    const result = parseEditInput(input);
+    expect(result).toEqual({
+      filePath: "/src/main.ts",
+      oldLines: ["const x = 1;"],
+      newLines: ["const x = 2;", "const y = 3;"],
+      replaceAll: false,
+    });
+  });
+
+  it("detects replace_all flag", () => {
+    const input = JSON.stringify({
+      file_path: "/src/main.ts",
+      old_string: "foo",
+      new_string: "bar",
+      replace_all: true,
+    });
+    expect(parseEditInput(input)?.replaceAll).toBe(true);
+  });
+
+  it("returns null for non-Edit JSON", () => {
+    expect(parseEditInput(JSON.stringify({ path: "file.ts" }))).toBeNull();
+  });
+
+  it("returns null for invalid JSON", () => {
+    expect(parseEditInput("not json")).toBeNull();
+  });
+
+  it("returns null when old_string or new_string is missing", () => {
+    expect(parseEditInput(JSON.stringify({ file_path: "a.ts", old_string: "x" }))).toBeNull();
   });
 });

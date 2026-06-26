@@ -60,6 +60,29 @@ describe("invoke (web/HTTP mode)", () => {
     expect(res).toEqual(dirs);
   });
 
+  it("list_wsl_distros calls GET /api/wsl/distros", async () => {
+    const distros = ["Ubuntu", "Debian"];
+    mockFetch(distros);
+    const { invoke } = await import("./invoke");
+
+    const res = await invoke<string[]>("list_wsl_distros");
+    expect(res).toEqual(distros);
+  });
+
+  it("set_wsl_distros calls POST /api/wsl/distros with distros body", async () => {
+    const fetchFn = mockFetch({ wsl_distros: ["Ubuntu"] });
+    const { invoke } = await import("./invoke");
+
+    await invoke("set_wsl_distros", { distros: ["Ubuntu"] });
+    expect(fetchFn).toHaveBeenCalledWith(
+      `${API_BASE}/api/wsl/distros`,
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ distros: ["Ubuntu"] }),
+      }),
+    );
+  });
+
   it("discover_sessions calls POST /api/sessions with dirs body", async () => {
     const fetchFn = mockFetch([]);
     const { invoke } = await import("./invoke");

@@ -124,6 +124,121 @@ describe("getItemSummary", () => {
   });
 });
 
+describe("Edit tool diff view", () => {
+  it("renders diff view for Edit tool calls with old_string and new_string", () => {
+    const editInput = JSON.stringify({
+      file_path: "/src/main.ts",
+      old_string: "const x = 1;",
+      new_string: "const x = 2;\nconst y = 3;",
+    });
+    const { container } = render(
+      <DetailItem
+        item={makeItem({ tool_name: "Edit", tool_input: editInput })}
+        index={0}
+        isSelected={false}
+        isExpanded={true}
+        onToggle={vi.fn()}
+        onToggleExpand={vi.fn()}
+        onSelect={vi.fn()}
+      />,
+    );
+    expect(container.querySelector(".detail-item__diff")).toBeInTheDocument();
+    expect(container.querySelector(".detail-item__diff-header")?.textContent).toContain(
+      "/src/main.ts",
+    );
+    const removed = container.querySelectorAll(".detail-item__diff-line--removed");
+    const added = container.querySelectorAll(".detail-item__diff-line--added");
+    expect(removed).toHaveLength(1);
+    expect(added).toHaveLength(2);
+  });
+
+  it("shows replace_all badge when replace_all is true", () => {
+    const editInput = JSON.stringify({
+      file_path: "/src/main.ts",
+      old_string: "foo",
+      new_string: "bar",
+      replace_all: true,
+    });
+    const { container } = render(
+      <DetailItem
+        item={makeItem({ tool_name: "Edit", tool_input: editInput })}
+        index={0}
+        isSelected={false}
+        isExpanded={true}
+        onToggle={vi.fn()}
+        onToggleExpand={vi.fn()}
+        onSelect={vi.fn()}
+      />,
+    );
+    expect(container.querySelector(".detail-item__diff-badge")).toBeInTheDocument();
+    expect(container.querySelector(".detail-item__diff-badge")?.textContent).toBe("replace all");
+  });
+
+  it("preserves unchanged lines as context (not removed+added)", () => {
+    const editInput = JSON.stringify({
+      file_path: "/a.ts",
+      old_string: "keep\nfoo bar\ntail",
+      new_string: "keep\nfoo baz\ntail",
+    });
+    const { container } = render(
+      <DetailItem
+        item={makeItem({ tool_name: "Edit", tool_input: editInput })}
+        index={0}
+        isSelected={false}
+        isExpanded={true}
+        onToggle={vi.fn()}
+        onToggleExpand={vi.fn()}
+        onSelect={vi.fn()}
+      />,
+    );
+    // Two unchanged lines stay as context; only the middle line changes.
+    expect(container.querySelectorAll(".detail-item__diff-line--context")).toHaveLength(2);
+    expect(container.querySelectorAll(".detail-item__diff-line--removed")).toHaveLength(1);
+    expect(container.querySelectorAll(".detail-item__diff-line--added")).toHaveLength(1);
+  });
+
+  it("word-highlights the changed token within a changed line", () => {
+    const editInput = JSON.stringify({
+      file_path: "/a.ts",
+      old_string: "foo bar",
+      new_string: "foo baz",
+    });
+    const { container } = render(
+      <DetailItem
+        item={makeItem({ tool_name: "Edit", tool_input: editInput })}
+        index={0}
+        isSelected={false}
+        isExpanded={true}
+        onToggle={vi.fn()}
+        onToggleExpand={vi.fn()}
+        onSelect={vi.fn()}
+      />,
+    );
+    const words = container.querySelectorAll(".detail-item__diff-word");
+    const texts = Array.from(words).map((w) => w.textContent);
+    expect(texts).toContain("bar");
+    expect(texts).toContain("baz");
+    // "foo " is shared and must not be highlighted.
+    expect(texts).not.toContain("foo ");
+  });
+
+  it("falls back to JSON view for non-Edit tool calls", () => {
+    const { container } = render(
+      <DetailItem
+        item={makeItem({ tool_name: "Read", tool_input: '{"path":"file.ts"}' })}
+        index={0}
+        isSelected={false}
+        isExpanded={true}
+        onToggle={vi.fn()}
+        onToggleExpand={vi.fn()}
+        onSelect={vi.fn()}
+      />,
+    );
+    expect(container.querySelector(".detail-item__diff")).not.toBeInTheDocument();
+    expect(container.querySelector(".detail-item__json")).toBeInTheDocument();
+  });
+});
+
 describe("DetailItem", () => {
   it("renders item name and summary", () => {
     render(

@@ -9,11 +9,16 @@ vi.mock("../lib/invoke", () => ({
 
 const DEFAULT_DIR = "/Users/x/.claude/projects";
 
-const makeSettings = (projects_dir: string | null, effective_dir_exists = true) => ({
+const makeSettings = (
+  projects_dir: string | null,
+  effective_dir_exists = true,
+  wsl_distros: string[] = [],
+) => ({
   projects_dir,
   default_dir: DEFAULT_DIR,
   effective_dir: projects_dir ?? DEFAULT_DIR,
   effective_dir_exists,
+  wsl_distros,
 });
 
 describe("SettingsModal", () => {
@@ -25,6 +30,8 @@ describe("SettingsModal", () => {
     mockInvoke.mockImplementation((cmd: string) => {
       if (cmd === "get_settings") return Promise.resolve(makeSettings(null));
       if (cmd === "set_projects_dir") return Promise.resolve(makeSettings(null));
+      if (cmd === "set_wsl_distros") return Promise.resolve(makeSettings(null));
+      if (cmd === "list_wsl_distros") return Promise.resolve([]);
       return Promise.resolve();
     });
   });
@@ -96,6 +103,50 @@ describe("SettingsModal", () => {
 
     await waitFor(() => {
       expect(mockInvoke).toHaveBeenCalledWith("set_projects_dir", { path: null });
+    });
+    expect(onSaved).toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("shows no-distros hint when WSL reports none", async () => {
+    render(<SettingsModal onClose={onClose} onSaved={onSaved} />);
+    await waitFor(() => {
+      expect(screen.getByText(/No WSL distributions detected/)).toBeInTheDocument();
+    });
+  });
+
+  it("renders detected WSL distros with configured ones checked", async () => {
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "get_settings") return Promise.resolve(makeSettings(null, true, ["Ubuntu"]));
+      if (cmd === "list_wsl_distros") return Promise.resolve(["Ubuntu", "Debian"]);
+      return Promise.resolve();
+    });
+    render(<SettingsModal onClose={onClose} onSaved={onSaved} />);
+
+    await waitFor(() => expect(screen.getByLabelText("Ubuntu")).toBeInTheDocument());
+    expect((screen.getByLabelText("Ubuntu") as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByLabelText("Debian") as HTMLInputElement).checked).toBe(false);
+  });
+
+  it("persists toggled WSL distros on save", async () => {
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "get_settings") return Promise.resolve(makeSettings(null, true, ["Ubuntu"]));
+      if (cmd === "list_wsl_distros") return Promise.resolve(["Ubuntu", "Debian"]);
+      if (cmd === "set_projects_dir") return Promise.resolve(makeSettings(null, true, ["Ubuntu"]));
+      if (cmd === "set_wsl_distros")
+        return Promise.resolve(makeSettings(null, true, ["Ubuntu", "Debian"]));
+      return Promise.resolve();
+    });
+    render(<SettingsModal onClose={onClose} onSaved={onSaved} />);
+
+    await waitFor(() => expect(screen.getByLabelText("Debian")).toBeInTheDocument());
+    fireEvent.click(screen.getByLabelText("Debian"));
+    fireEvent.click(screen.getByText("Save"));
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("set_wsl_distros", {
+        distros: ["Ubuntu", "Debian"],
+      });
     });
     expect(onSaved).toHaveBeenCalled();
     expect(onClose).toHaveBeenCalled();

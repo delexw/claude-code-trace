@@ -10,12 +10,14 @@ from __future__ import annotations
 import contextlib
 
 from rich.cells import cell_len
+from rich.text import Text
 from textual.app import ComposeResult
 from textual.widget import Widget
 from textual.widgets import Collapsible, ListItem, Markdown, Static
 
 import theme
 from data_types import DisplayItem, DisplayMessage
+from diff_utils import compute_edit_diff
 from format_utils import format_duration, format_tokens, role_icon
 from items import get_item_icon, get_item_name, get_item_summary
 from theme import get_item_color, get_role_border_color, get_team_color
@@ -155,6 +157,73 @@ def _md_code(s: str, lang: str = "") -> str:
     return f"```{lang}\n{s}\n```"
 
 
+# Per-line foreground colour for each diff line kind.
+_DIFF_LINE_STYLE = {
+    "context": theme.TEXT_MUTED,
+    "removed": "#f85149",
+    "added": "#3fb950",
+}
+# Stronger style (bold + background tint) for the exact changed words within a
+# removed/added line. Context lines never carry word-level changes.
+_DIFF_WORD_STYLE = {
+    "removed": "bold #f85149 on #67060c",
+    "added": "bold #3fb950 on #033a16",
+}
+_DIFF_MARKER = {"context": " ", "removed": "-", "added": "+"}
+
+
+def _render_edit_diff(tool_input: str) -> Text | None:
+    """Render an Edit tool input as a coloured Rich diff, or None.
+
+    Unchanged lines are kept as context; removed/added lines are coloured
+    red/green and the exact changed words carry a stronger background tint so
+    the intra-line edit is visible without Markdown's (uncoloured) diff fence.
+    """
+    import json as _json
+
+    try:
+        parsed = _json.loads(tool_input)
+    except Exception:
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    file_path = parsed.get("file_path", "")
+    old_string = parsed.get("old_string")
+    new_string = parsed.get("new_string")
+    if not isinstance(old_string, str) or not isinstance(new_string, str):
+        return None
+
+    text = Text()
+    if file_path:
+        text.append(file_path, style=f"bold {theme.ACCENT}")
+        if parsed.get("replace_all"):
+            text.append("  (replace all)", style=theme.TEXT_DIM)
+        text.append("\n")
+
+    diff_lines = compute_edit_diff(old_string.split("\n"), new_string.split("\n"))
+    last = len(diff_lines) - 1
+    for i, dl in enumerate(diff_lines):
+        line_style = _DIFF_LINE_STYLE[dl.kind]
+        word_style = _DIFF_WORD_STYLE.get(dl.kind)
+        text.append(_DIFF_MARKER[dl.kind], style=line_style)
+        for seg in dl.segments:
+            style = word_style if (seg.changed and word_style) else line_style
+            text.append(seg.text, style=style)
+        if i < last:
+            text.append("\n")
+    return text
+
+
+def _tool_result_md(item: DisplayItem) -> str:
+    """Markdown for a tool call's Result/Error section, or "" when absent."""
+    if not (item.tool_result or item.tool_result_json):
+        return ""
+    label = "**Error**" if item.tool_error else "**Result**"
+    if item.tool_result_json:
+        return f"{label}\n\n```json\n{item.tool_result_json}\n```"
+    return f"{label}\n\n{_md_json(item.tool_result)}"
+
+
 def _render_item_body(item: DisplayItem) -> str:
     """Render the full expanded body of an item as Markdown."""
     match item.item_type:
@@ -167,14 +236,8 @@ def _render_item_body(item: DisplayItem) -> str:
             if item.tool_input:
                 parts.append("**Input**")
                 parts.append(_md_json(item.tool_input))
-            if item.tool_result or item.tool_result_json:
-                label = "**Error**" if item.tool_error else "**Result**"
-                parts.append(label)
-                if item.tool_result_json:
-                    parts.append(f"```json\n{item.tool_result_json}\n```")
-                else:
-                    parts.append(_md_json(item.tool_result))
-            return "\n\n".join(parts)
+            parts.append(_tool_result_md(item))
+            return "\n\n".join(p for p in parts if p)
         case "Subagent":
             parts = []
             if item.agent_id:
@@ -197,6 +260,24 @@ def _render_item_body(item: DisplayItem) -> str:
             return "\n\n".join(parts)
         case _:
             return item.text
+
+
+def _item_body_widgets(item: DisplayItem) -> list[Widget]:
+    """Widgets to mount inside an item's Collapsible.
+
+    Edit tool calls render a coloured Rich diff (red/green lines + highlighted
+    changed words) as a Static, since Markdown can't colour a diff. Everything
+    else is a single Markdown widget.
+    """
+    if item.item_type == "ToolCall" and item.tool_name == "Edit" and item.tool_input:
+        diff = _render_edit_diff(item.tool_input)
+        if diff is not None:
+            widgets: list[Widget] = [Markdown("**Input**"), Static(diff, classes="diff-block")]
+            result_md = _tool_result_md(item)
+            if result_md:
+                widgets.append(Markdown(result_md))
+            return widgets
+    return [Markdown(_render_item_body(item))]
 
 
 # ---------------------------------------------------------------------------
@@ -228,6 +309,12 @@ class _ItemListView(HighlightListView):
         border: round $border;
         padding: 0 1;
         margin: 0 1;
+    }
+    _ItemListView Static.diff-block {
+        border: round $border;
+        padding: 0 1;
+        margin: 0 1;
+        width: 1fr;
     }
     """
 
@@ -412,12 +499,11 @@ class DetailView(Widget):
 
             for idx, item in enumerate(self._items):
                 title = _render_item_title(item, self._max_name_len)
-                body_md = _render_item_body(item)
                 collapsed = _item_collapsed(item, idx, self._expanded_items)
                 await lv.append(
                     ListItem(
                         Collapsible(
-                            Markdown(body_md),
+                            *_item_body_widgets(item),
                             title=title,
                             collapsed=collapsed,
                             id=f"item-{idx}",
