@@ -60,6 +60,10 @@ export interface DisplayItem {
   /** Tool result as pretty-printed JSON when the content is an object or array. */
   tool_result_json: string;
   is_orphan: boolean;
+  /** v2.1.186+: name of the background subagent that triggered a cross-session permission prompt. */
+  hook_source_agent_name: string;
+  /** v2.1.186+: session UUID of the background subagent requesting permission. */
+  hook_requesting_agent_uuid: string;
 }
 
 export interface LastOutput {

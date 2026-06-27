@@ -67,35 +67,39 @@ Each JSONL line is decoded into an `Entry` struct that mirrors the raw Claude Co
 
 ### Key Fields
 
-| Field                | Description                                                                                                                                     |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `uuid`               | Unique message identifier                                                                                                                       |
-| `entry_type`         | Discriminant: `user`, `assistant`, `system`, `hook_event`, etc.                                                                                 |
-| `role`               | Same as `entry_type` for most messages                                                                                                          |
-| `content`            | Message body (string or content-block array)                                                                                                    |
-| `model`              | Model string (assistant messages only)                                                                                                          |
-| `subtype`            | Hook subtype: `PreToolUse`, `PostToolUse`, `Stop`, …                                                                                            |
-| `hookEvent`          | Hook event name                                                                                                                                 |
-| `isCompactSummary`   | Compaction boundary marker                                                                                                                      |
-| `away_summary`       | Session-recap text                                                                                                                              |
-| `forkedFrom`         | Pre-v2.1.118 fork reference                                                                                                                     |
-| `tool_use_result`    | JSON object for tool results                                                                                                                    |
-| `background_tasks`   | v2.1.145+: running background task descriptors (Stop/SubagentStop hooks)                                                                        |
-| `session_crons`      | v2.1.145+: registered session cron jobs (Stop/SubagentStop hooks)                                                                               |
-| `hookSpecificOutput` | v2.1.163+: hook result payload; `additionalContext` sub-field carries feedback text injected back into the session                              |
-| `workflowId`         | v2.1.154+: workflow identifier on lifecycle entries                                                                                             |
-| `workflowName`       | v2.1.154+: workflow name on lifecycle entries                                                                                                   |
-| `workflowRunUrl`     | v2.1.154+: workflow run URL on lifecycle entries                                                                                                |
-| `workflowStatus`     | v2.1.154+: workflow run status on lifecycle entries                                                                                             |
-| `agentDepth`         | v2.1.172+: 1-indexed nesting depth for sidechain entries from deeply nested sub-agents (up to 5 levels)                                         |
-| `parentAgentName`    | v2.1.172+: name of the spawning agent for deeply nested sidechain attribution                                                                   |
-| `version`            | v2.1.141+: Claude Code version string (e.g. `"2.1.195"`) on all entries from SDK/background-agent sessions; acts as schema-version discriminant |
-| `entrypoint`         | v2.1.141+: how Claude Code was invoked (`"sdk-ts"`, `"cli"`, …); present on all background-agent session entries                                |
-| `sessionId`          | v2.1.141+: owning session UUID; on all background-agent entries and on `last-prompt`/`queue-operation` metadata                                 |
-| `agentId`            | v2.1.141+: opaque background-agent instance ID (distinct from the human-readable `agentName`)                                                   |
-| `userType`           | v2.1.141+: actor classification (`"external"` for SDK/background agents, `"human"` for interactive CLI)                                         |
-| `attributionSkill`   | v2.1.141+: skill name that spawned this background-agent session; absent for directly-launched agents                                           |
-| `lastPrompt`         | v2.1.195+: prompt text in `type:"last-prompt"` checkpoint entries; used by Claude Code for background-agent resume                              |
+| Field                 | Description                                                                                                                                     |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `uuid`                | Unique message identifier                                                                                                                       |
+| `entry_type`          | Discriminant: `user`, `assistant`, `system`, `hook_event`, etc.                                                                                 |
+| `role`                | Same as `entry_type` for most messages                                                                                                          |
+| `content`             | Message body (string or content-block array)                                                                                                    |
+| `model`               | Model string (assistant messages only)                                                                                                          |
+| `subtype`             | Hook subtype: `PreToolUse`, `PostToolUse`, `Stop`, …                                                                                            |
+| `hookEvent`           | Hook event name                                                                                                                                 |
+| `isCompactSummary`    | Compaction boundary marker                                                                                                                      |
+| `away_summary`        | Session-recap text                                                                                                                              |
+| `forkedFrom`          | Pre-v2.1.118 fork reference                                                                                                                     |
+| `tool_use_result`     | JSON object for tool results                                                                                                                    |
+| `background_tasks`    | v2.1.145+: running background task descriptors (Stop/SubagentStop hooks)                                                                        |
+| `session_crons`       | v2.1.145+: registered session cron jobs (Stop/SubagentStop hooks)                                                                               |
+| `hookSpecificOutput`  | v2.1.163+: hook result payload; `additionalContext` sub-field carries feedback text injected back into the session                              |
+| `workflowId`          | v2.1.154+: workflow identifier on lifecycle entries                                                                                             |
+| `workflowName`        | v2.1.154+: workflow name on lifecycle entries                                                                                                   |
+| `workflowRunUrl`      | v2.1.154+: workflow run URL on lifecycle entries                                                                                                |
+| `workflowStatus`      | v2.1.154+: workflow run status on lifecycle entries                                                                                             |
+| `agentDepth`          | v2.1.172+: 1-indexed nesting depth for sidechain entries from deeply nested sub-agents (up to 5 levels)                                         |
+| `parentAgentName`     | v2.1.172+: name of the spawning agent for deeply nested sidechain attribution                                                                   |
+| `version`             | v2.1.141+: Claude Code version string (e.g. `"2.1.195"`) on all entries from SDK/background-agent sessions; acts as schema-version discriminant |
+| `entrypoint`          | v2.1.141+: how Claude Code was invoked (`"sdk-ts"`, `"cli"`, …); present on all background-agent session entries                                |
+| `sessionId`           | v2.1.141+: owning session UUID; on all background-agent entries and on `last-prompt`/`queue-operation` metadata                                 |
+| `agentId`             | v2.1.141+: opaque background-agent instance ID (distinct from the human-readable `agentName`)                                                   |
+| `userType`            | v2.1.141+: actor classification (`"external"` for SDK/background agents, `"human"` for interactive CLI)                                         |
+| `attributionSkill`    | v2.1.141+: skill name that spawned this background-agent session; absent for directly-launched agents                                           |
+| `lastPrompt`          | v2.1.195+: prompt text in `type:"last-prompt"` checkpoint entries; used by Claude Code for background-agent resume                              |
+| `sourceAgentName`     | v2.1.186+: display name of the background subagent requesting a cross-session permission prompt                                                 |
+| `requestingAgentUuid` | v2.1.186+: session UUID of the background subagent requesting a cross-session permission prompt                                                 |
+| `reason`              | v2.1.193+: human-readable denial explanation in `auto-mode-denial` / `permission-denial` entries                                                |
+| `toolName`            | v2.1.193+: name of the blocked tool in `auto-mode-denial` entries                                                                               |
 
 ```mermaid
 classDiagram
@@ -153,7 +157,9 @@ flowchart TD
 | Thinking-only assistant entries (`content` = one `thinking` block, no `text`/`tool_use`)                                               | v2.1.183+    | Non-empty content array passes the empty-content guard; classified as `AIMsg` with `thinking_count=1` and empty `text`. Rendered with thinking block, no empty-bubble discard.                                                                                                                                                         |
 | Synthetic re-prompt `isMeta: true` user entries after thinking-only turns                                                              | v2.1.183+    | `classify()` returns `None` for `user` entries with `is_meta: true` that don't match a known pattern (Stop hook feedback). Prevents spurious meta-AI bubbles.                                                                                                                                                                          |
 | Background-agent sessions carry new top-level fields (`version`, `entrypoint`, `sessionId`, `agentId`, `userType`, `attributionSkill`) | v2.1.141+    | Added to `Entry` struct; silently ignored for display but captured for future use / forward-compat reasoning.                                                                                                                                                                                                                          |
+| Background subagent permission prompts appear in main session with `sourceAgentName` / `requestingAgentUuid`                           | v2.1.186+    | Both fields added to `Entry` with `#[serde(default)]`; propagated through `classify()` → `HookMsg` → `chunk.rs` → `FrontendDisplayItem`; `DetailItem` renders a "Requesting Agent" section when non-empty.                                                                                                                             |
 | `/rewind` support — new `rewind-pointer` entry type; `rewindable` + `checkpointUuid` fields on summary/compact_boundary                | v2.1.191+    | `rewind-pointer` added to `NOISE_ENTRY_TYPES`; `rewind_to_uuid`, `rewindable`, `checkpoint_uuid` captured on `Entry`. Chain resolver unchanged — `leafUuid` always points to the live tip; post-rewind entries have `parentUuid` pointing to the pre-clear anchor, so the backward walk naturally bypasses the dead post-clear branch. |
+| Auto-mode denial entries (`type:"auto-mode-denial"` / `"permission-denial"`) with `reason` and `toolName`                              | v2.1.193+    | Both fields added to `Entry` with `#[serde(default)]`; captured for display and future denial-history rendering.                                                                                                                                                                                                                       |
 | `type:"last-prompt"` checkpoint entry (background-agent resume state)                                                                  | v2.1.195+    | Added `"last-prompt"` to `NOISE_ENTRY_TYPES`; `lastPrompt` field added to `Entry`. Entry passes `parse_entry` (has `leafUuid`) but is explicitly discarded by classify before reaching conversation display.                                                                                                                           |
 
 ---

@@ -1661,6 +1661,11 @@ body {
   opacity: 0.8;
 }
 
+.detail-item__muted {
+  color: var(--text-muted);
+  opacity: 0.7;
+}
+
 .detail-item__json {
   background: var(--bg-elevated);
   border: 1px solid var(--border);

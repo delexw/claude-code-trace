@@ -40,6 +40,8 @@ function makeItem(overrides: Partial<DisplayItem> = {}): DisplayItem {
     hook_metadata: "",
     tool_result_json: "",
     is_orphan: false,
+    hook_source_agent_name: "",
+    hook_requesting_agent_uuid: "",
     ...overrides,
   };
 }

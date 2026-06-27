@@ -46,6 +46,9 @@ pub struct FrontendDisplayItem {
     pub is_orphan: bool,
     pub subagent_prompt: String,
     pub is_deferred: bool,
+    // v2.1.186+: agent attribution for cross-session permission prompts from background subagents.
+    pub hook_source_agent_name: String,
+    pub hook_requesting_agent_uuid: String,
 }
 
 /// Frontend last output.
@@ -273,6 +276,8 @@ fn convert_display_items(
                 is_orphan: it.is_orphan,
                 subagent_prompt: String::new(),
                 is_deferred: it.is_deferred,
+                hook_source_agent_name: it.hook_source_agent_name.clone(),
+                hook_requesting_agent_uuid: it.hook_requesting_agent_uuid.clone(),
             };
 
             // Link subagent process if available (Subagent items and ToolCall items like Skill).

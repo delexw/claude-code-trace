@@ -365,6 +365,17 @@ function DetailItemBody({ item }: { item: DisplayItem }) {
               </div>
             </div>
           )}
+          {item.hook_source_agent_name && (
+            <div className="detail-item__section">
+              <div className="detail-item__section-title">Requesting Agent</div>
+              <div className="detail-item__text detail-item__text--mono">
+                {item.hook_source_agent_name}
+                {item.hook_requesting_agent_uuid && (
+                  <span className="detail-item__muted"> ({item.hook_requesting_agent_uuid})</span>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       );
     default:

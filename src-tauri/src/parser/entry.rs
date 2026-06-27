@@ -205,6 +205,22 @@ pub struct Entry {
     // the checkpoint was written.
     #[serde(default, rename = "lastPrompt")]
     pub last_prompt: String,
+    // Present in auto-mode denial entries (v2.1.193+). When Claude Code's auto-mode denies a
+    // tool call, it writes a denial entry to the transcript for replay and /permissions recent
+    // denials display. `reason` holds the human-readable denial explanation; `tool_name` names
+    // the tool that was blocked (may also appear in progress data for the same event).
+    #[serde(default)]
+    pub reason: String,
+    #[serde(default, rename = "toolName")]
+    pub tool_name: String,
+    // Present in background subagent permission prompt entries (v2.1.186+). When a background
+    // subagent surfaces a permission prompt in the main session JSONL instead of being
+    // auto-denied, `source_agent_name` is the requesting subagent's display name and
+    // `requesting_agent_uuid` is its session UUID, allowing the UI to attribute the prompt.
+    #[serde(default, rename = "sourceAgentName")]
+    pub source_agent_name: String,
+    #[serde(default, rename = "requestingAgentUuid")]
+    pub requesting_agent_uuid: String,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -1550,6 +1566,60 @@ mod tests {
         assert_eq!(entry.message.stop_reason.as_deref(), Some("end_turn"));
     }
 
+    // --- Issue #168: v2.1.193+ auto-mode denial entries — reason and toolName fields ---
+
+    #[test]
+    fn parse_entry_captures_reason_and_tool_name_for_auto_mode_denial() {
+        // v2.1.193+: a new type:"auto-mode-denial" entry carries a top-level `reason` and
+        // `toolName` explaining why the tool call was blocked. Both must be captured.
+        let line = json!({
+            "type": "auto-mode-denial",
+            "uuid": "denial-uuid-001",
+            "timestamp": "2026-06-25T10:00:00Z",
+            "reason": "Bash is not allowed in auto mode",
+            "toolName": "Bash"
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("must parse auto-mode-denial entry");
+        assert_eq!(entry.entry_type, "auto-mode-denial");
+        assert_eq!(entry.reason, "Bash is not allowed in auto mode");
+        assert_eq!(entry.tool_name, "Bash");
+    }
+
+    #[test]
+    fn parse_entry_captures_reason_for_permission_denial_type() {
+        // v2.1.193+: alternative type name "permission-denial" with only a reason (no toolName).
+        let line = json!({
+            "type": "permission-denial",
+            "uuid": "denial-uuid-002",
+            "timestamp": "2026-06-25T10:01:00Z",
+            "reason": "Write access denied by permission policy"
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("must parse permission-denial entry");
+        assert_eq!(entry.entry_type, "permission-denial");
+        assert_eq!(entry.reason, "Write access denied by permission policy");
+        assert_eq!(
+            entry.tool_name, "",
+            "absent toolName must default to empty string"
+        );
+    }
+
+    #[test]
+    fn parse_entry_reason_and_tool_name_default_to_empty_when_absent() {
+        // Regular entries have no reason or toolName — both must default to "".
+        let line = json!({
+            "type": "user",
+            "uuid": "regular-uuid-no-denial",
+            "timestamp": "2026-06-25T10:00:00Z",
+            "message": {"role": "user", "content": "Hello"}
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("must parse regular entry");
+        assert_eq!(entry.reason, "", "reason must be empty when absent");
+        assert_eq!(entry.tool_name, "", "toolName must be empty when absent");
+    }
+
     #[test]
     fn parse_entry_sidechain_with_all_depth_fields_succeeds() {
         // Full payload as Claude Code v2.1.172+ might write for a depth-3 sidechain entry.
@@ -1884,5 +1954,55 @@ mod tests {
         assert_eq!(entry.message.model, "claude-opus-4-7");
         assert_eq!(entry.message.usage.input_tokens, 100);
         assert_eq!(entry.message.usage.output_tokens, 20);
+    }
+
+    // --- Issue #171: v2.1.186+ background subagent permission prompt attribution fields ---
+
+    #[test]
+    fn parse_entry_captures_source_agent_name_and_requesting_agent_uuid_v2_1_186() {
+        // v2.1.186+: background subagent permission prompts surfaced in the main session JSONL
+        // carry sourceAgentName and requestingAgentUuid so the UI can attribute the request.
+        let line = json!({
+            "type": "progress",
+            "uuid": "perm-prompt-uuid-001",
+            "timestamp": "2026-06-28T08:00:00Z",
+            "sourceAgentName": "background-explore-agent",
+            "requestingAgentUuid": "session-uuid-bg-001",
+            "data": {
+                "type": "hook_progress",
+                "hookEvent": "PreToolUse",
+                "hookName": "permission_check",
+                "command": ""
+            }
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("must parse progress entry with attribution");
+        assert_eq!(entry.source_agent_name, "background-explore-agent");
+        assert_eq!(entry.requesting_agent_uuid, "session-uuid-bg-001");
+    }
+
+    #[test]
+    fn parse_entry_source_agent_name_defaults_to_empty_when_absent() {
+        // Regular hook entries produced by the main agent have no attribution fields.
+        let line = json!({
+            "type": "attachment",
+            "uuid": "regular-hook-uuid",
+            "timestamp": "2026-06-28T08:01:00Z",
+            "attachment": {
+                "hookEvent": "PostToolUse",
+                "hookName": "format",
+                "type": "hook_success"
+            }
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("must parse attachment entry without attribution");
+        assert_eq!(
+            entry.source_agent_name, "",
+            "sourceAgentName must default to empty when absent"
+        );
+        assert_eq!(
+            entry.requesting_agent_uuid, "",
+            "requestingAgentUuid must default to empty when absent"
+        );
     }
 }

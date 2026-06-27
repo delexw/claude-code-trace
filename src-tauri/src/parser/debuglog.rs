@@ -251,6 +251,8 @@ pub fn extract_hook_msgs(session_path: &str) -> Vec<super::classify::ClassifiedM
                     hook_name,
                     command,
                     metadata: None,
+                    source_agent_name: String::new(),
+                    requesting_agent_uuid: String::new(),
                 },
             ))
         })
@@ -336,6 +338,8 @@ prompt captured\n\
                     hook_name,
                     command: e.extra.clone(),
                     metadata: None,
+                    source_agent_name: String::new(),
+                    requesting_agent_uuid: String::new(),
                 }))
             })
             .collect();
