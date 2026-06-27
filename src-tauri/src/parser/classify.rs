@@ -141,6 +141,11 @@ const NOISE_ENTRY_TYPES: &[&str] = &[
     // fork-context-ref) when the user rewinds past /clear. It carries no displayable content —
     // the post-rewind branch is resolved via leafUuid pointing to the resumed conversation tip.
     "rewind-pointer",
+    // v2.1.195+: Claude Code writes a last-prompt pointer entry to persist the most recent
+    // background-agent prompt for checkpoint/resume. The entry carries `lastPrompt` (the
+    // prompt text) and `leafUuid` (the last-message cursor) but has no conversational
+    // content — drop it silently like other structural metadata.
+    "last-prompt",
 ];
 
 const HARD_NOISE_TAGS: &[&str] = &["<local-command-caveat>", "<system-reminder>"];
@@ -2420,6 +2425,48 @@ mod tests {
                 );
             }
             other => panic!("Expected AI for entry with unknown stop_reason, got {other:?}"),
+        }
+    }
+
+    // --- Issue #170: v2.1.195+ last-prompt entry type ---
+
+    #[test]
+    fn classify_last_prompt_entry_returns_none() {
+        // v2.1.195+: type:"last-prompt" is a structural checkpoint entry — it carries
+        // `lastPrompt` and `leafUuid` for resume purposes but has no conversational content.
+        // classify must discard it via NOISE_ENTRY_TYPES rather than emitting any ClassifiedMsg.
+        let e = Entry {
+            entry_type: "last-prompt".to_string(),
+            leaf_uuid: "6515b150-20de-4361-a676-54fcca4fdbaa".to_string(),
+            last_prompt: "run the background task and report results".to_string(),
+            session_id: "ba0f2078-81b4-40ed-bb4a-c9a3758b968d".to_string(),
+            timestamp: "2026-06-26T10:00:00Z".to_string(),
+            ..Default::default()
+        };
+        assert!(
+            classify(e).is_none(),
+            "last-prompt entries must be discarded by classify"
+        );
+    }
+
+    #[test]
+    fn classify_background_agent_user_entry_produces_user_msg() {
+        // v2.1.195+: background-agent user entries carry new top-level fields (version,
+        // entrypoint, sessionId, agentId, userType) but otherwise have the same message
+        // structure as interactive user entries. classify must produce a UserMsg.
+        let content = json!("run the background task");
+        let mut e = make_entry("user", Some(content));
+        e.version = "2.1.195".to_string();
+        e.entrypoint = "sdk-ts".to_string();
+        e.session_id = "ba0f2078-81b4-40ed-bb4a-c9a3758b968d".to_string();
+        e.agent_id = "a783ece79822ccf59".to_string();
+        e.user_type = "external".to_string();
+        e.message.role = "user".to_string();
+        match classify(e) {
+            Some(ClassifiedMsg::User(u)) => {
+                assert_eq!(u.text, "run the background task");
+            }
+            other => panic!("Expected User for background-agent user entry, got {other:?}"),
         }
     }
 }
