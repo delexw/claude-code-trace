@@ -47,11 +47,15 @@ else
   cargo install --path src-tauri
 fi
 
-echo "==> Building TUI..."
-cd tui
-npm install
-npm run build
-cd ..
+if [[ -d tui ]]; then
+  echo "==> Building TUI..."
+  cd tui
+  npm install
+  npm run build
+  cd ..
+else
+  echo "==> Skipping TUI build (tui directory not found)."
+fi
 
 echo "==> Linking cctrace CLI..."
 npm link
