@@ -166,6 +166,26 @@ const AUTO_MODE_DENIAL_DATA_TYPES: &[&str] = &[
     "permission-denial",
 ];
 
+// v2.1.193+: auto-mode denial top-level entry types. Claude Code may use any of these;
+// guard all known variants so minor naming changes (kebab vs. underscore) are handled.
+const AUTO_MODE_DENIAL_ENTRY_TYPES: &[&str] = &[
+    "auto-mode-denial",
+    "auto_mode_denial",
+    "automode-denial",
+    "permission-denial",
+    "permission_denial",
+];
+
+// v2.1.193+: denial data.type values when the denial is embedded inside a progress entry.
+const AUTO_MODE_DENIAL_DATA_TYPES: &[&str] = &[
+    "auto_mode_denial",
+    "auto-mode-denial",
+    "automode_denial",
+    "automode-denial",
+    "permission_denial",
+    "permission-denial",
+];
+
 const HARD_NOISE_TAGS: &[&str] = &["<local-command-caveat>", "<system-reminder>"];
 
 const EMPTY_STDOUT: &str = "<local-command-stdout></local-command-stdout>";
@@ -183,6 +203,16 @@ pub fn parse_timestamp(s: &str) -> DateTime<Utc> {
     Utc::now() // fallback; ideally epoch but using now for simplicity
 }
 
+/// Build a human-readable denial notice from a reason string and an optional tool name.
+fn format_denial_output(reason: &str, tool_name: &str) -> String {
+    match (tool_name.trim(), reason.trim()) {
+        ("", "") => "Auto-mode denial (no details)".to_string(),
+        ("", r) => format!("Auto-mode denial: {r}"),
+        (t, "") => format!("Auto-mode denial: tool \"{t}\" not allowed"),
+        (t, r) => format!("Auto-mode denial: tool \"{t}\" — {r}"),
+    }
+}
+
 /// Classify maps a raw Entry to a ClassifiedMsg. Returns None for noise.
 pub fn classify(e: Entry) -> Option<ClassifiedMsg> {
     if e.is_sidechain {
@@ -197,7 +227,19 @@ pub fn classify(e: Entry) -> Option<ClassifiedMsg> {
     // are also rescued without needing to enumerate data.type values.
     if e.entry_type == "progress" {
         if let Some(ref data) = e.data {
+            // v2.1.193+: auto-mode denial reasons may be embedded in progress entries.
+            // Rescue them before the hook check so they surface as system notices.
             let data_type = data.get("type").and_then(|v| v.as_str()).unwrap_or("");
+            if AUTO_MODE_DENIAL_DATA_TYPES.contains(&data_type) {
+                let reason = data.get("reason").and_then(|v| v.as_str()).unwrap_or("");
+                let tool_name = data.get("toolName").and_then(|v| v.as_str()).unwrap_or("");
+                return Some(ClassifiedMsg::System(SystemMsg {
+                    timestamp: ts,
+                    output: format_denial_output(reason, tool_name),
+                    is_error: false,
+                }));
+            }
+
             let is_hook = data_type == "hook_progress" || data.get("hookEvent").is_some();
             if is_hook {
                 let hook_event = data
@@ -562,13 +604,12 @@ pub fn classify(e: Entry) -> Option<ClassifiedMsg> {
         }));
     }
 
-    // v2.1.193+: top-level auto-mode denial entries carry reason and toolName at the top level.
-    // Rescue them before the empty-role drop so they appear as system notices in the UI.
+    // v2.1.193+: top-level auto-mode denial entries have no message role but carry `reason`
+    // and `toolName`. Rescue them before the empty-role discard so they appear as system notices.
     if AUTO_MODE_DENIAL_ENTRY_TYPES.contains(&e.entry_type.as_str()) {
-        let output = format_denial_output(&e.tool_name, &e.reason);
         return Some(ClassifiedMsg::System(SystemMsg {
             timestamp: ts,
-            output,
+            output: format_denial_output(&e.reason, &e.tool_name),
             is_error: false,
         }));
     }
@@ -2816,5 +2857,199 @@ mod tests {
             }
             other => panic!("Expected Hook for regular attachment, got {other:?}"),
         }
+    }
+
+    // --- Issue #168: v2.1.193+ auto-mode denial entries written to transcript ---
+
+    #[test]
+    fn classify_top_level_auto_mode_denial_entry_emits_system_msg() {
+        // v2.1.193+: a top-level type:"auto-mode-denial" entry with reason and toolName must
+        // be emitted as a SystemMsg so it appears in the conversation transcript UI.
+        let e = Entry {
+            entry_type: "auto-mode-denial".to_string(),
+            uuid: "denial-uuid-001".to_string(),
+            timestamp: "2026-06-25T12:00:00Z".to_string(),
+            reason: "Tool not allowed in auto mode".to_string(),
+            tool_name: "Bash".to_string(),
+            ..Default::default()
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::System(s)) => {
+                assert!(
+                    s.output.contains("Bash"),
+                    "output must contain the denied tool name: {}",
+                    s.output
+                );
+                assert!(
+                    s.output.contains("not allowed"),
+                    "output must contain denial reason: {}",
+                    s.output
+                );
+                assert!(!s.is_error, "denial notice must not be flagged as error");
+            }
+            other => panic!("Expected System for auto-mode-denial entry, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_top_level_permission_denial_entry_emits_system_msg() {
+        // v2.1.193+: type:"permission-denial" is an alternative naming Claude Code may use.
+        let e = Entry {
+            entry_type: "permission-denial".to_string(),
+            uuid: "denial-uuid-002".to_string(),
+            timestamp: "2026-06-25T12:01:00Z".to_string(),
+            reason: "User denied the request".to_string(),
+            tool_name: "Write".to_string(),
+            ..Default::default()
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::System(s)) => {
+                assert!(
+                    s.output.contains("Write"),
+                    "output must contain the denied tool name: {}",
+                    s.output
+                );
+                assert!(!s.is_error);
+            }
+            other => panic!("Expected System for permission-denial entry, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_top_level_denial_entry_no_tool_name_emits_reason_only() {
+        // When toolName is absent, format_denial_output should still surface the reason.
+        let e = Entry {
+            entry_type: "auto-mode-denial".to_string(),
+            uuid: "denial-uuid-003".to_string(),
+            timestamp: "2026-06-25T12:02:00Z".to_string(),
+            reason: "auto-mode restrictions apply".to_string(),
+            ..Default::default()
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::System(s)) => {
+                assert!(
+                    s.output.contains("auto-mode restrictions apply"),
+                    "output must contain the reason: {}",
+                    s.output
+                );
+            }
+            other => panic!("Expected System for denial-without-tool, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_top_level_denial_entry_empty_reason_and_tool_emits_fallback() {
+        // When both reason and toolName are absent, emit a generic fallback notice.
+        let e = Entry {
+            entry_type: "auto-mode-denial".to_string(),
+            uuid: "denial-uuid-004".to_string(),
+            timestamp: "2026-06-25T12:03:00Z".to_string(),
+            ..Default::default()
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::System(s)) => {
+                assert!(
+                    s.output.contains("Auto-mode denial"),
+                    "output must contain generic denial text: {}",
+                    s.output
+                );
+            }
+            other => panic!("Expected System for empty denial entry, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_progress_embedded_denial_entry_emits_system_msg() {
+        // v2.1.193+: denial may be embedded in a progress entry as data.type="auto_mode_denial".
+        // The entry must be rescued before the progress noise filter drops it.
+        let e = Entry {
+            entry_type: "progress".to_string(),
+            uuid: "denial-progress-uuid-001".to_string(),
+            timestamp: "2026-06-25T12:04:00Z".to_string(),
+            data: Some(json!({
+                "type": "auto_mode_denial",
+                "reason": "not permitted in auto mode",
+                "toolName": "Glob"
+            })),
+            ..Default::default()
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::System(s)) => {
+                assert!(
+                    s.output.contains("Glob"),
+                    "output must contain denied tool name: {}",
+                    s.output
+                );
+                assert!(
+                    s.output.contains("not permitted in auto mode"),
+                    "output must contain reason: {}",
+                    s.output
+                );
+                assert!(!s.is_error);
+            }
+            other => panic!("Expected System for progress-embedded denial, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_progress_embedded_denial_kebab_variant_emits_system_msg() {
+        // v2.1.193+: kebab-case data.type variant "auto-mode-denial" must also be rescued.
+        let e = Entry {
+            entry_type: "progress".to_string(),
+            uuid: "denial-progress-uuid-002".to_string(),
+            timestamp: "2026-06-25T12:05:00Z".to_string(),
+            data: Some(json!({
+                "type": "auto-mode-denial",
+                "reason": "auto-mode restriction",
+                "toolName": "Read"
+            })),
+            ..Default::default()
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::System(s)) => {
+                assert!(
+                    s.output.contains("Read"),
+                    "output must contain denied tool name: {}",
+                    s.output
+                );
+            }
+            other => panic!("Expected System for progress kebab denial, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_progress_with_non_denial_data_type_is_still_dropped() {
+        // Ensure ordinary progress entries that are not hook or denial are still discarded.
+        let e = Entry {
+            entry_type: "progress".to_string(),
+            uuid: "progress-noise-uuid".to_string(),
+            timestamp: "2026-06-25T12:06:00Z".to_string(),
+            data: Some(json!({ "type": "workflow_update", "status": "running" })),
+            ..Default::default()
+        };
+        assert!(
+            classify(e).is_none(),
+            "non-denial, non-hook progress entries must be discarded"
+        );
+    }
+
+    #[test]
+    fn format_denial_output_produces_correct_strings() {
+        assert_eq!(
+            format_denial_output("", ""),
+            "Auto-mode denial (no details)"
+        );
+        assert_eq!(
+            format_denial_output("not allowed", ""),
+            "Auto-mode denial: not allowed"
+        );
+        assert_eq!(
+            format_denial_output("", "Bash"),
+            "Auto-mode denial: tool \"Bash\" not allowed"
+        );
+        assert_eq!(
+            format_denial_output("auto-mode restrictions", "Write"),
+            "Auto-mode denial: tool \"Write\" — auto-mode restrictions"
+        );
     }
 }

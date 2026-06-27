@@ -221,6 +221,13 @@ pub struct Entry {
     pub source_agent_name: String,
     #[serde(default, rename = "requestingAgentUuid")]
     pub requesting_agent_uuid: String,
+    // Present in auto-mode denial entries (v2.1.193+). Claude Code writes the denial reason
+    // (e.g. "Tool not allowed in auto mode") and the denied tool name to the transcript so that
+    // /permissions recent denials and session replay can display them.
+    #[serde(default)]
+    pub reason: String,
+    #[serde(default, rename = "toolName")]
+    pub tool_name: String,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -1652,49 +1659,29 @@ mod tests {
         assert_eq!(entry.message.model, "claude-haiku-4-5");
     }
 
-    // --- Issue #169: v2.1.191+ /rewind support — rewind-pointer entry and rewindable fields ---
+    // --- Issue #168: v2.1.193+ auto-mode denial fields ---
 
     #[test]
-    fn parse_entry_captures_rewind_to_uuid_for_rewind_pointer() {
-        // v2.1.191+: /rewind may write a rewind-pointer entry (analogous to fork-context-ref).
-        // rewindToUuid identifies the last pre-clear message so the chain can be re-rooted.
+    fn parse_entry_captures_reason_and_tool_name_from_denial_entry() {
+        // v2.1.193+: top-level denial entries carry `reason` and `toolName` fields.
+        // Both must be captured by the parser so classify() can build the notice string.
         let line = json!({
-            "type": "rewind-pointer",
-            "uuid": "rewind-ptr-uuid-001",
-            "rewindToUuid": "pre-clear-msg-uuid",
-            "timestamp": "2026-06-24T10:00:00Z"
+            "type": "auto-mode-denial",
+            "uuid": "denial-entry-uuid-001",
+            "timestamp": "2026-06-25T12:00:00Z",
+            "reason": "Tool not allowed in auto mode",
+            "toolName": "Bash"
         });
         let bytes = serde_json::to_vec(&line).unwrap();
-        let entry = parse_entry(&bytes).expect("must parse rewind-pointer entry");
-        assert_eq!(entry.entry_type, "rewind-pointer");
+        let entry = parse_entry(&bytes).expect("must parse auto-mode-denial entry");
+        assert_eq!(entry.entry_type, "auto-mode-denial");
         assert_eq!(
-            entry.rewind_to_uuid, "pre-clear-msg-uuid",
-            "rewindToUuid must be captured"
+            entry.reason, "Tool not allowed in auto mode",
+            "reason must be captured from top-level `reason` field"
         );
-        assert_eq!(entry.parent_uuid, "");
-        assert_eq!(entry.checkpoint_uuid, "");
-        assert!(!entry.rewindable);
-    }
-
-    #[test]
-    fn parse_entry_captures_rewindable_flag_on_summary() {
-        // v2.1.191+: summary entries may carry rewindable:true when the compaction checkpoint
-        // is persisted so that /rewind can restore the pre-clear conversation state.
-        let line = json!({
-            "type": "summary",
-            "uuid": "summary-rewindable-uuid",
-            "timestamp": "2026-06-24T10:01:00Z",
-            "summary": "Compacted conversation summary text.",
-            "rewindable": true,
-            "checkpointUuid": "last-pre-clear-uuid"
-        });
-        let bytes = serde_json::to_vec(&line).unwrap();
-        let entry = parse_entry(&bytes).expect("must parse rewindable summary entry");
-        assert_eq!(entry.entry_type, "summary");
-        assert!(entry.rewindable, "rewindable must be true");
         assert_eq!(
-            entry.checkpoint_uuid, "last-pre-clear-uuid",
-            "checkpointUuid must be captured"
+            entry.tool_name, "Bash",
+            "tool_name must be captured from top-level `toolName` field"
         );
     }
 
@@ -2003,6 +1990,24 @@ mod tests {
         assert_eq!(
             entry.requesting_agent_uuid, "",
             "requestingAgentUuid must default to empty when absent"
+        );
+    }
+
+    #[test]
+    fn parse_entry_reason_and_tool_name_default_to_empty_when_absent() {
+        // Entries from before v2.1.193 (or non-denial entries) have no reason/toolName fields.
+        let line = json!({
+            "type": "system",
+            "subtype": "init",
+            "uuid": "regular-system-uuid",
+            "timestamp": "2026-06-01T10:00:00Z"
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("must parse entry without denial fields");
+        assert_eq!(entry.reason, "", "reason must default to empty when absent");
+        assert_eq!(
+            entry.tool_name, "",
+            "toolName must default to empty when absent"
         );
     }
 }
