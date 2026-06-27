@@ -13,6 +13,8 @@ permissions = [
   "allow-get-project-dirs",
   "allow-get-settings",
   "allow-set-projects-dir",
+  "allow-list-wsl-distros",
+  "allow-set-wsl-distros",
   "allow-switch-to-browser",
 ]
 
@@ -75,6 +77,16 @@ commands.allow = ["get_settings"]
 identifier = "allow-set-projects-dir"
 description = "Allow setting the projects directory"
 commands.allow = ["set_projects_dir"]
+
+[[permission]]
+identifier = "allow-list-wsl-distros"
+description = "Allow listing installed WSL distributions"
+commands.allow = ["list_wsl_distros"]
+
+[[permission]]
+identifier = "allow-set-wsl-distros"
+description = "Allow setting the WSL distributions to discover"
+commands.allow = ["set_wsl_distros"]
 
 [[permission]]
 identifier = "allow-switch-to-browser"
