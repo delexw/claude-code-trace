@@ -1,1 +1,0 @@
-{"default":{"identifier":"default","description":"Default permissions for claude-code-trace","local":true,"windows":["main"],"permissions":["core:default","fs:default","fs:allow-read-file","fs:allow-exists","fs:allow-read-dir","fs:allow-stat","core:event:default","opener:default","default"]}}
