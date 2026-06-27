@@ -3,6 +3,29 @@
 All notable changes to claude-code-trace are documented here. Versions follow
 [semantic versioning](https://semver.org/).
 
+## [0.9.1] — 2026-06-27
+
+A maintenance release that repairs two regressions from the 0.9.0 WSL and packaging
+work: the WSL distro settings now actually save on the desktop build, and `install.sh`
+no longer fails on setups that don't carry the legacy `tui/` directory.
+
+### Fixed
+
+- **WSL distro settings now save on the desktop build**
+  ([`2917f29`](https://github.com/delexw/claude-code-trace/commit/2917f29), @RobotHanzo).
+  The WSL discovery commands shipped in 0.9.0 were wired into the Tauri handler but never
+  granted in the ACL permission set, so on the desktop build saving the Settings modal
+  failed with "Command set_wsl_distros not allowed by ACL" and the distro listing was
+  silently blocked. The commands are now ACL-granted, and a regression test cross-checks
+  every registered command against the permission set so a missing grant fails CI instead
+  of at runtime.
+
+- **`install.sh` no longer breaks when the `tui/` directory is absent**
+  ([`a6ec94e`](https://github.com/delexw/claude-code-trace/commit/a6ec94e), @DoTTak). The
+  installer unconditionally `cd`'d into `tui/` to build the TUI, which aborted the install
+  on checkouts that no longer carry that directory (the TUI moved to `tui-py/`). The build
+  step is now guarded — it runs when `tui/` exists and prints a skip notice otherwise.
+
 ## [0.9.0] — 2026-06-26
 
 This release widens where the viewer looks for sessions and sharpens how it shows what
@@ -48,6 +71,7 @@ JSON, and the JSONL parser keeps pace with another run of Claude Code releases
   silently disappeared. Discovery now uses `agentName` as the primary signal and finds
   those sessions again.
 
+[0.9.1]: https://github.com/delexw/claude-code-trace/releases/tag/v0.9.1
 [0.9.0]: https://github.com/delexw/claude-code-trace/releases/tag/v0.9.0
 
 ## [0.8.0] — 2026-06-16
