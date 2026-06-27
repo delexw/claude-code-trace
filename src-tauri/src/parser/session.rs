@@ -1315,9 +1315,23 @@ fn is_tool_use_rejection(raw: &Value) -> bool {
 mod tests {
     use super::*;
     use std::env;
+    use std::sync::{Mutex, OnceLock};
+
+    /// Serializes tests that mutate the process-global `CLAUDE_PROJECTS_DIR` env var.
+    /// Cargo runs tests multithreaded, so without this lock they race on the shared
+    /// variable — one test clearing it while another sets it produces flaky failures.
+    /// Recovers from poisoning so a panicking test surfaces its own assertion rather
+    /// than cascading a poison error into the others.
+    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+    }
 
     #[test]
     fn claude_projects_dir_defaults_to_home() {
+        let _guard = env_lock();
         env::remove_var("CLAUDE_PROJECTS_DIR");
         let dir = claude_projects_dir(None).unwrap();
         let home = dirs::home_dir().unwrap();
@@ -1335,6 +1349,7 @@ mod tests {
 
     #[test]
     fn claude_projects_dir_uses_env_var_when_valid() {
+        let _guard = env_lock();
         let tmp = env::temp_dir().join("tail-test-projects-dir");
         std::fs::create_dir_all(&tmp).unwrap();
         env::set_var("CLAUDE_PROJECTS_DIR", tmp.to_str().unwrap());
@@ -1346,6 +1361,7 @@ mod tests {
 
     #[test]
     fn claude_projects_dir_configured_takes_priority_over_env() {
+        let _guard = env_lock();
         let tmp_configured = env::temp_dir().join("tail-test-configured-priority");
         let tmp_env = env::temp_dir().join("tail-test-env-priority");
         std::fs::create_dir_all(&tmp_configured).unwrap();
@@ -1360,6 +1376,7 @@ mod tests {
 
     #[test]
     fn claude_projects_dir_falls_back_when_env_path_missing() {
+        let _guard = env_lock();
         env::set_var(
             "CLAUDE_PROJECTS_DIR",
             "/nonexistent/path/that/does/not/exist",
