@@ -38,6 +38,9 @@ debug/
 .DS_Store
 Thumbs.db
 .gitnexus
+
+# Pre-commit hook confirmation flag (worktree-relative, per session)
+.precommit-confirmed-*
 .claude/*
 !.claude/settings.json
 !.claude/hooks/

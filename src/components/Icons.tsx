@@ -32,7 +32,9 @@ import { MdOutlineGeneratingTokens } from "react-icons/md";
 import { FaSackDollar } from "react-icons/fa6";
 import { GoGitBranch, GoGitMerge } from "react-icons/go";
 import { AiOutlineRobot } from "react-icons/ai";
-import { Claude } from "@thesvg/react";
+// Import the single icon from its subpath, not the 6139-export barrel (@thesvg/react),
+// so the bundler never has to resolve the entire barrel. See LARGE_BARREL_MODULES warning.
+import Claude from "@thesvg/react/claude";
 
 // Tool category icons
 export const toolCategoryIcons: Record<string, ReactNode> = {

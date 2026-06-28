@@ -47,14 +47,14 @@ else
   cargo install --path src-tauri
 fi
 
-if [[ -d tui ]]; then
-  echo "==> Building TUI..."
-  cd tui
-  npm install
-  npm run build
-  cd ..
-else
-  echo "==> Skipping TUI build (tui directory not found)."
+# The TUI is a Python/Textual app under tui-py/. Pre-build its virtualenv (tui-py/.venv)
+# and install dependencies now via the same helper the launcher uses at runtime
+# (bin/python-venv.mjs), so the first `cctrace --tui` starts instantly. Best-effort:
+# Python 3 is a runtime prerequisite for the TUI only, so a missing interpreter must not
+# fail a desktop/web install — warn and carry on; the launcher retries on first run.
+echo "==> Setting up Python TUI dependencies (tui-py/.venv)..."
+if ! node -e 'import("./bin/python-venv.mjs").then((m) => m.ensureTuiVenv(process.cwd()))'; then
+  echo "    Skipped: no usable Python 3 found. Install Python 3 to enable 'cctrace --tui'." >&2
 fi
 
 echo "==> Linking cctrace CLI..."
@@ -64,7 +64,7 @@ echo ""
 echo "Installed! Run:"
 echo "  cctrace          # desktop app (default)"
 echo "  cctrace --web    # web mode (opens browser)"
-echo "  cctrace --tui    # terminal UI"
+echo "  cctrace --tui    # terminal UI (sets up the Python venv on first run; needs Python 3)"
 if [[ "$(uname -s)" == "Darwin" ]]; then
   echo ""
   echo "You can also launch the installed app from /Applications/${APP_NAME}.app"
