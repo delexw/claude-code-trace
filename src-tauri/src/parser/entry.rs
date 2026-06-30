@@ -221,13 +221,6 @@ pub struct Entry {
     pub source_agent_name: String,
     #[serde(default, rename = "requestingAgentUuid")]
     pub requesting_agent_uuid: String,
-    // Present in auto-mode denial entries (v2.1.193+). Claude Code writes the denial reason
-    // (e.g. "Tool not allowed in auto mode") and the denied tool name to the transcript so that
-    // /permissions recent denials and session replay can display them.
-    #[serde(default)]
-    pub reason: String,
-    #[serde(default, rename = "toolName")]
-    pub tool_name: String,
 }
 
 #[derive(Debug, Deserialize, Default)]
