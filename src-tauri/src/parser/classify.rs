@@ -155,17 +155,6 @@ const NOISE_ENTRY_TYPES: &[&str] = &[
     "last-prompt",
 ];
 
-// v2.1.193+: auto-mode denial reasons written to transcript. The entry may use one of these
-// top-level type values, or appear as a progress entry with data.type set to one of them.
-const AUTO_MODE_DENIAL_ENTRY_TYPES: &[&str] = &["auto-mode-denial", "permission-denial"];
-// data.type values used when the denial is embedded inside a progress entry.
-const AUTO_MODE_DENIAL_DATA_TYPES: &[&str] = &[
-    "auto_mode_denial",
-    "auto-mode-denial",
-    "permission_denial",
-    "permission-denial",
-];
-
 // v2.1.193+: auto-mode denial top-level entry types. Claude Code may use any of these;
 // guard all known variants so minor naming changes (kebab vs. underscore) are handled.
 const AUTO_MODE_DENIAL_ENTRY_TYPES: &[&str] = &[
@@ -269,25 +258,6 @@ pub fn classify(e: Entry) -> Option<ClassifiedMsg> {
                     metadata,
                     source_agent_name,
                     requesting_agent_uuid,
-                }));
-            }
-            // v2.1.193+: auto-mode denial reasons may be embedded inside a progress entry.
-            if AUTO_MODE_DENIAL_DATA_TYPES.contains(&data_type) {
-                let reason = data
-                    .get("reason")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let tool_name = data
-                    .get("toolName")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let output = format_denial_output(&tool_name, &reason);
-                return Some(ClassifiedMsg::System(SystemMsg {
-                    timestamp: ts,
-                    output,
-                    is_error: false,
                 }));
             }
         }
@@ -657,16 +627,6 @@ fn extract_teammate_content(s: &str) -> String {
         .and_then(|c| c.get(1))
         .map(|m| m.as_str().trim().to_string())
         .unwrap_or_else(|| s.to_string())
-}
-
-/// Format a denial reason for display. Combines tool name and reason into a single notice string.
-fn format_denial_output(tool_name: &str, reason: &str) -> String {
-    match (tool_name.is_empty(), reason.is_empty()) {
-        (false, false) => format!("Auto-mode denied {tool_name}: {reason}"),
-        (false, true) => format!("Auto-mode denied {tool_name}"),
-        (true, false) => format!("Auto-mode denial: {reason}"),
-        (true, true) => "Auto-mode denial".to_string(),
-    }
 }
 
 /// Parse a "Stop hook feedback:\n[command]: output\n" string into (hook_name, command).
