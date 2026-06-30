@@ -125,8 +125,10 @@ export function SessionPicker({
                     <span className="picker__session-icon">
                       <BsClaude />
                     </span>
-                    <span className="picker__session-preview">
-                      {truncate(session.first_message || session.session_id, 80)}
+                    <span
+                      className={`picker__session-preview${session.name ? " picker__session-preview--named" : ""}`}
+                    >
+                      {truncate(session.name || session.first_message || session.session_id, 80)}
                     </span>
                     {session.is_ongoing && (
                       <span className="picker__session-ongoing">
@@ -144,6 +146,11 @@ export function SessionPicker({
                       Detail <ForwardIcon />
                     </button>
                   </div>
+                  {session.name && session.first_message && (
+                    <div className="picker__session-subtitle">
+                      {truncate(session.first_message, 80)}
+                    </div>
+                  )}
                   <div className="picker__session-meta">
                     <span className="picker__session-model" style={{ color: modelClr }}>
                       {model}

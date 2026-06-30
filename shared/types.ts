@@ -85,6 +85,9 @@ export interface SessionInfo {
   session_id: string;
   mod_time: string;
   first_message: string;
+  /** User-assigned session name (Claude Code `/rename`), joined from the live
+   *  session registry. `null` when never named or no longer running. */
+  name?: string | null;
   turn_count: number;
   is_ongoing: boolean;
   total_tokens: number;

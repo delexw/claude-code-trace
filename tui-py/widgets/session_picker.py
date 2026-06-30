@@ -61,11 +61,13 @@ def _render_session(s: SessionInfo, anim_frame: int = 0) -> object:
     """Render a session as a Rich Group with full-width separator."""
     model_str = short_model(s.model) if s.model else ""
     model_clr = get_model_color(s.model) if s.model else theme.TEXT_DIM
-    msg_text = s.first_message or s.session_id
 
-    # Line 1: message preview — full text, no truncation, wraps naturally
+    # Line 1: title. Prefer the user-assigned /rename name (accent-highlighted);
+    # otherwise use the first message. When a name is shown, the first message is
+    # kept as the subtitle.
+    title = s.name or s.first_message or s.session_id
     line1 = Text()
-    line1.append(msg_text, style=theme.TEXT_PRIMARY)
+    line1.append(title, style=theme.ACCENT if s.name else theme.TEXT_PRIMARY)
     if s.is_ongoing:
         line1.append(f"  {theme.SPIN[anim_frame]}", style=theme.ONGOING)
 
@@ -84,7 +86,11 @@ def _render_session(s: SessionInfo, anim_frame: int = 0) -> object:
     line2.append(f" {ICON_SESSION} {s.session_id[:8]}", style=theme.TEXT_DIM)
     line2.append(f" {ICON_CLOCK} {time_ago(s.mod_time)}", style=theme.TEXT_DIM)
 
-    content = Text.assemble(line1, "\n", line2)
+    if s.name and s.first_message:
+        subtitle = Text(s.first_message, style=theme.TEXT_DIM)
+        content = Text.assemble(line1, "\n", subtitle, "\n", line2)
+    else:
+        content = Text.assemble(line1, "\n", line2)
     sep = Rule(style=theme.TEXT_MUTED, characters="─")
     return Group(content, sep)
 

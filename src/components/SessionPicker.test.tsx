@@ -122,6 +122,41 @@ describe("SessionPicker", () => {
     expect(screen.getByText(/Hello world/)).toBeInTheDocument();
   });
 
+  it("prefers the session name as title, with first_message as subtitle", () => {
+    const sessions = [makeSession({ name: "valkey-admin-contribution" })];
+    render(
+      <SessionPicker
+        sessions={sessions}
+        loading={false}
+        searchQuery=""
+        selectedIndex={0}
+        onSelect={vi.fn()}
+        onSearchChange={vi.fn()}
+      />,
+    );
+    // Name is the primary title; first_message survives as the subtitle.
+    const title = screen.getByText("valkey-admin-contribution");
+    expect(title).toBeInTheDocument();
+    // Named sessions get the accent-highlight modifier class.
+    expect(title).toHaveClass("picker__session-preview--named");
+    expect(screen.getByText(/Hello world/)).toBeInTheDocument();
+  });
+
+  it("falls back to first_message when no name is set", () => {
+    const sessions = [makeSession({ name: null })];
+    render(
+      <SessionPicker
+        sessions={sessions}
+        loading={false}
+        searchQuery=""
+        selectedIndex={0}
+        onSelect={vi.fn()}
+        onSearchChange={vi.fn()}
+      />,
+    );
+    expect(screen.getByText(/Hello world/)).toBeInTheDocument();
+  });
+
   it("shows active badge for ongoing sessions", () => {
     const sessions = [makeSession({ is_ongoing: true })];
     render(

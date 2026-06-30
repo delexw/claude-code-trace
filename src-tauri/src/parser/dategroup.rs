@@ -81,6 +81,7 @@ mod tests {
             session_id: format!("session-{}", mod_time.timestamp()),
             path: "/tmp/test.jsonl".to_string(),
             first_message: "test".to_string(),
+            name: None,
             mod_time,
             turn_count: 1,
             model: "claude-sonnet-4-20250514".to_string(),
