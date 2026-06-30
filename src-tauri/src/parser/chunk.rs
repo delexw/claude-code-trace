@@ -50,6 +50,9 @@ pub struct DisplayItem {
     /// True when the session was suspended via a "defer" PreToolUse permission decision
     /// before a tool_result arrived for this tool_use block.
     pub is_deferred: bool,
+    // v2.1.186+: agent attribution for cross-session permission prompts from background subagents.
+    pub hook_source_agent_name: String,
+    pub hook_requesting_agent_uuid: String,
 }
 
 impl Default for DisplayItem {
@@ -78,6 +81,8 @@ impl Default for DisplayItem {
             tool_result_json: None,
             is_orphan: false,
             is_deferred: false,
+            hook_source_agent_name: String::new(),
+            hook_requesting_agent_uuid: String::new(),
         }
     }
 }
@@ -214,6 +219,8 @@ pub fn build_chunks(msgs: &[ClassifiedMsg]) -> Vec<Chunk> {
                         tool_name: m.hook_name.clone(),
                         tool_id: m.hook_event.clone(),
                         hook_metadata: m.metadata.clone(),
+                        hook_source_agent_name: m.source_agent_name.clone(),
+                        hook_requesting_agent_uuid: m.requesting_agent_uuid.clone(),
                         ..Default::default()
                     }],
                     usage: Usage::default(),
@@ -370,6 +377,8 @@ fn merge_ai_buffer(buf: &[AIMsg], orphan_pending: bool) -> Chunk {
                             hook_name: b.tool_name.clone(),
                             hook_command: b.text.clone(),
                             hook_metadata: b.hook_metadata.clone(),
+                            hook_source_agent_name: b.hook_source_agent_name.clone(),
+                            hook_requesting_agent_uuid: b.hook_requesting_agent_uuid.clone(),
                             ..Default::default()
                         });
                     }

@@ -44,6 +44,9 @@ pub struct ContentBlock {
     pub hook_metadata: Option<Value>,
     /// For tool_result blocks: raw content value before stringification.
     pub content_json: Option<Value>,
+    /// For hook_event blocks (v2.1.186+): attribution for cross-session permission prompts.
+    pub hook_source_agent_name: String,
+    pub hook_requesting_agent_uuid: String,
 }
 
 /// Classified message types.
@@ -109,6 +112,10 @@ pub struct HookMsg {
     /// All key-value pairs from the hook attachment JSON (stdout, stderr, command,
     /// exitCode, durationMs, additionalContext, decision, reason, …).
     pub metadata: Option<Value>,
+    // v2.1.186+: when a background subagent surfaces a permission prompt in the main session,
+    // these fields identify the requesting agent. Empty on all non-cross-session hook entries.
+    pub source_agent_name: String,
+    pub requesting_agent_uuid: String,
 }
 
 pub const SYSTEM_OUTPUT_TAGS: &[&str] = &[
@@ -148,6 +155,17 @@ const NOISE_ENTRY_TYPES: &[&str] = &[
     "last-prompt",
 ];
 
+// v2.1.193+: auto-mode denial reasons written to transcript. The entry may use one of these
+// top-level type values, or appear as a progress entry with data.type set to one of them.
+const AUTO_MODE_DENIAL_ENTRY_TYPES: &[&str] = &["auto-mode-denial", "permission-denial"];
+// data.type values used when the denial is embedded inside a progress entry.
+const AUTO_MODE_DENIAL_DATA_TYPES: &[&str] = &[
+    "auto_mode_denial",
+    "auto-mode-denial",
+    "permission_denial",
+    "permission-denial",
+];
+
 const HARD_NOISE_TAGS: &[&str] = &["<local-command-caveat>", "<system-reminder>"];
 
 const EMPTY_STDOUT: &str = "<local-command-stdout></local-command-stdout>";
@@ -179,8 +197,8 @@ pub fn classify(e: Entry) -> Option<ClassifiedMsg> {
     // are also rescued without needing to enumerate data.type values.
     if e.entry_type == "progress" {
         if let Some(ref data) = e.data {
-            let is_hook = data.get("type").and_then(|v| v.as_str()) == Some("hook_progress")
-                || data.get("hookEvent").is_some();
+            let data_type = data.get("type").and_then(|v| v.as_str()).unwrap_or("");
+            let is_hook = data_type == "hook_progress" || data.get("hookEvent").is_some();
             if is_hook {
                 let hook_event = data
                     .get("hookEvent")
@@ -198,12 +216,36 @@ pub fn classify(e: Entry) -> Option<ClassifiedMsg> {
                     .unwrap_or_default();
                 // v2.1.163+: hookSpecificOutput may be nested inside data for progress entries.
                 let metadata = data.get("hookSpecificOutput").cloned();
+                // v2.1.186+: attribution fields surface on the entry itself (not inside data).
+                let source_agent_name = e.source_agent_name.clone();
+                let requesting_agent_uuid = e.requesting_agent_uuid.clone();
                 return Some(ClassifiedMsg::Hook(HookMsg {
                     timestamp: ts,
                     hook_event,
                     hook_name,
                     command,
                     metadata,
+                    source_agent_name,
+                    requesting_agent_uuid,
+                }));
+            }
+            // v2.1.193+: auto-mode denial reasons may be embedded inside a progress entry.
+            if AUTO_MODE_DENIAL_DATA_TYPES.contains(&data_type) {
+                let reason = data
+                    .get("reason")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let tool_name = data
+                    .get("toolName")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let output = format_denial_output(&tool_name, &reason);
+                return Some(ClassifiedMsg::System(SystemMsg {
+                    timestamp: ts,
+                    output,
+                    is_error: false,
                 }));
             }
         }
@@ -243,6 +285,8 @@ pub fn classify(e: Entry) -> Option<ClassifiedMsg> {
                     hook_name,
                     command: String::new(),
                     metadata,
+                    source_agent_name: String::new(),
+                    requesting_agent_uuid: String::new(),
                 }));
             }
             // hook_progress: written in verbose/stream-json mode for mid-session hooks.
@@ -255,6 +299,8 @@ pub fn classify(e: Entry) -> Option<ClassifiedMsg> {
                     hook_name: e.hook_name.clone(),
                     command: String::new(),
                     metadata,
+                    source_agent_name: e.source_agent_name.clone(),
+                    requesting_agent_uuid: e.requesting_agent_uuid.clone(),
                 }));
             }
             // hookEvent present on any system entry (forward-compat for future hook types).
@@ -267,6 +313,8 @@ pub fn classify(e: Entry) -> Option<ClassifiedMsg> {
                     hook_name: e.hook_name.clone(),
                     command: String::new(),
                     metadata,
+                    source_agent_name: e.source_agent_name.clone(),
+                    requesting_agent_uuid: e.requesting_agent_uuid.clone(),
                 }));
             }
             _ => {}
@@ -310,12 +358,26 @@ pub fn classify(e: Entry) -> Option<ClassifiedMsg> {
                 // additionalContext (when stdout is parsed JSON), decision, reason, etc.
                 // Any nested JSON strings (e.g. stdout) are left for the frontend to expand.
                 let metadata = Some(att.clone());
+                // v2.1.186+: attribution fields may also appear on attachment entries when a
+                // background subagent surfaces its permission prompt in the main session.
+                let source_agent_name = att
+                    .get("sourceAgentName")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let requesting_agent_uuid = att
+                    .get("requestingAgentUuid")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 return Some(ClassifiedMsg::Hook(HookMsg {
                     timestamp: ts,
                     hook_event: hook_event.to_string(),
                     hook_name,
                     command,
                     metadata,
+                    source_agent_name,
+                    requesting_agent_uuid,
                 }));
             }
         }
@@ -360,6 +422,8 @@ pub fn classify(e: Entry) -> Option<ClassifiedMsg> {
                 hook_name,
                 command,
                 metadata: None,
+                source_agent_name: String::new(),
+                requesting_agent_uuid: String::new(),
             }));
         }
         // v2.1.183+: synthetic re-prompt user entries are internal Claude Code markers
@@ -498,6 +562,17 @@ pub fn classify(e: Entry) -> Option<ClassifiedMsg> {
         }));
     }
 
+    // v2.1.193+: top-level auto-mode denial entries carry reason and toolName at the top level.
+    // Rescue them before the empty-role drop so they appear as system notices in the UI.
+    if AUTO_MODE_DENIAL_ENTRY_TYPES.contains(&e.entry_type.as_str()) {
+        let output = format_denial_output(&e.tool_name, &e.reason);
+        return Some(ClassifiedMsg::System(SystemMsg {
+            timestamp: ts,
+            output,
+            is_error: false,
+        }));
+    }
+
     // Unknown entry types with no message role (e.g. rate_limit_event, CwdChanged,
     // FileChanged, --channels injected entries) are structural metadata — drop them.
     if e.message.role.is_empty() {
@@ -541,6 +616,16 @@ fn extract_teammate_content(s: &str) -> String {
         .and_then(|c| c.get(1))
         .map(|m| m.as_str().trim().to_string())
         .unwrap_or_else(|| s.to_string())
+}
+
+/// Format a denial reason for display. Combines tool name and reason into a single notice string.
+fn format_denial_output(tool_name: &str, reason: &str) -> String {
+    match (tool_name.is_empty(), reason.is_empty()) {
+        (false, false) => format!("Auto-mode denied {tool_name}: {reason}"),
+        (false, true) => format!("Auto-mode denied {tool_name}"),
+        (true, false) => format!("Auto-mode denial: {reason}"),
+        (true, true) => "Auto-mode denial".to_string(),
+    }
 }
 
 /// Parse a "Stop hook feedback:\n[command]: output\n" string into (hook_name, command).
@@ -2449,6 +2534,137 @@ mod tests {
         );
     }
 
+    // --- Issue #168: v2.1.193+ auto-mode denial entries surface as SystemMsg ---
+
+    #[test]
+    fn classify_auto_mode_denial_top_level_type_produces_system_msg() {
+        // v2.1.193+: a new type:"auto-mode-denial" entry must be rescued from the
+        // unknown-type discard path and rendered as a SystemMsg so it appears in the UI.
+        let mut e = make_entry("user", None);
+        e.entry_type = "auto-mode-denial".to_string();
+        e.message.role = String::new();
+        e.reason = "Bash is not allowed in auto mode".to_string();
+        e.tool_name = "Bash".to_string();
+        match classify(e) {
+            Some(ClassifiedMsg::System(s)) => {
+                assert!(
+                    s.output.contains("Bash"),
+                    "output must mention the denied tool"
+                );
+                assert!(
+                    s.output.contains("not allowed in auto mode"),
+                    "output must include the denial reason"
+                );
+                assert!(!s.is_error, "denial is informational, not an error");
+            }
+            other => panic!("Expected System for auto-mode-denial entry, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_permission_denial_top_level_type_produces_system_msg() {
+        // v2.1.193+: alternative type:"permission-denial" must also produce SystemMsg.
+        let mut e = make_entry("user", None);
+        e.entry_type = "permission-denial".to_string();
+        e.message.role = String::new();
+        e.reason = "Write access denied by permission policy".to_string();
+        match classify(e) {
+            Some(ClassifiedMsg::System(s)) => {
+                assert!(
+                    s.output.contains("Write access denied"),
+                    "output must include the denial reason"
+                );
+                assert!(!s.is_error);
+            }
+            other => panic!("Expected System for permission-denial entry, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_auto_mode_denial_in_progress_entry_produces_system_msg() {
+        // v2.1.193+: denial reason embedded inside a progress entry (data.type="auto_mode_denial")
+        // must be rescued before the progress noise filter drops it.
+        let mut e = make_entry("user", None);
+        e.entry_type = "progress".to_string();
+        e.message.role = String::new();
+        e.data = Some(json!({
+            "type": "auto_mode_denial",
+            "reason": "Bash is not allowed in auto mode",
+            "toolName": "Bash"
+        }));
+        match classify(e) {
+            Some(ClassifiedMsg::System(s)) => {
+                assert!(
+                    s.output.contains("Bash"),
+                    "output must mention the denied tool"
+                );
+                assert!(
+                    s.output.contains("not allowed in auto mode"),
+                    "output must include the denial reason"
+                );
+                assert!(!s.is_error);
+            }
+            other => panic!("Expected System for progress auto_mode_denial entry, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_auto_mode_denial_progress_with_kebab_data_type_produces_system_msg() {
+        // The data.type value may also use kebab-case ("auto-mode-denial").
+        let mut e = make_entry("user", None);
+        e.entry_type = "progress".to_string();
+        e.message.role = String::new();
+        e.data = Some(json!({
+            "type": "auto-mode-denial",
+            "reason": "Tool not permitted",
+            "toolName": "Write"
+        }));
+        match classify(e) {
+            Some(ClassifiedMsg::System(s)) => {
+                assert!(s.output.contains("Write"), "output must mention the tool");
+                assert!(
+                    s.output.contains("Tool not permitted"),
+                    "output must include reason"
+                );
+            }
+            other => {
+                panic!("Expected System for kebab progress auto-mode-denial entry, got {other:?}")
+            }
+        }
+    }
+
+    #[test]
+    fn classify_auto_mode_denial_without_reason_produces_fallback_system_msg() {
+        // When neither reason nor toolName is present, a generic notice must still be emitted.
+        let mut e = make_entry("user", None);
+        e.entry_type = "auto-mode-denial".to_string();
+        e.message.role = String::new();
+        match classify(e) {
+            Some(ClassifiedMsg::System(s)) => {
+                assert!(
+                    !s.output.is_empty(),
+                    "a non-empty fallback notice must be emitted"
+                );
+                assert!(!s.is_error);
+            }
+            other => panic!("Expected System for bare auto-mode-denial entry, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_auto_mode_denial_sidechain_is_dropped() {
+        // Sidechain entries are always dropped regardless of type — denial entries in
+        // sidechain sessions must not leak into the main conversation view.
+        let mut e = make_entry("user", None);
+        e.entry_type = "auto-mode-denial".to_string();
+        e.is_sidechain = true;
+        e.reason = "should be dropped".to_string();
+        assert!(
+            classify(e).is_none(),
+            "sidechain auto-mode-denial must be dropped"
+        );
+    }
+
     #[test]
     fn classify_background_agent_user_entry_produces_user_msg() {
         // v2.1.195+: background-agent user entries carry new top-level fields (version,
@@ -2467,6 +2683,138 @@ mod tests {
                 assert_eq!(u.text, "run the background task");
             }
             other => panic!("Expected User for background-agent user entry, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_progress_hook_entry_still_produces_hook_msg_after_denial_rescue() {
+        // Regression: adding the denial rescue inside the progress block must not
+        // break hook_progress entries that were already classified correctly.
+        let mut e = make_entry("user", None);
+        e.entry_type = "progress".to_string();
+        e.message.role = String::new();
+        e.data = Some(json!({
+            "type": "hook_progress",
+            "hookEvent": "PreToolUse",
+            "hookName": "my-hook",
+            "command": "~/.claude/hooks/guard.sh"
+        }));
+        match classify(e) {
+            Some(ClassifiedMsg::Hook(h)) => {
+                assert_eq!(h.hook_event, "PreToolUse");
+                assert_eq!(h.hook_name, "my-hook");
+            }
+            other => panic!(
+                "hook_progress must still produce HookMsg after denial rescue, got {other:?}"
+            ),
+        }
+    }
+
+    // --- Issue #171: v2.1.186+ background subagent permission prompt attribution ---
+
+    #[test]
+    fn classify_hook_progress_carries_source_agent_attribution_v2_1_186() {
+        // v2.1.186+: when a background subagent surfaces a permission prompt via a
+        // hook_progress system entry, sourceAgentName / requestingAgentUuid on the entry
+        // must propagate into HookMsg so the UI can attribute the request.
+        let mut e2 = Entry {
+            entry_type: "system".to_string(),
+            subtype: "hook_progress".to_string(),
+            hook_event: "PreToolUse".to_string(),
+            hook_name: "permission_check".to_string(),
+            source_agent_name: "background-explore-agent".to_string(),
+            requesting_agent_uuid: "session-uuid-bg-001".to_string(),
+            ..make_entry("user", None)
+        };
+        e2.message.role = String::new();
+        match classify(e2) {
+            Some(ClassifiedMsg::Hook(h)) => {
+                assert_eq!(
+                    h.source_agent_name, "background-explore-agent",
+                    "source_agent_name must propagate from entry to HookMsg"
+                );
+                assert_eq!(
+                    h.requesting_agent_uuid, "session-uuid-bg-001",
+                    "requesting_agent_uuid must propagate from entry to HookMsg"
+                );
+            }
+            other => panic!("Expected Hook for hook_progress with attribution, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_progress_hook_carries_source_agent_attribution_from_entry_v2_1_186() {
+        // v2.1.186+: progress entries with hook data may also carry top-level attribution.
+        // The source_agent_name / requesting_agent_uuid on the Entry must propagate.
+        let mut e = make_entry("user", None);
+        e.entry_type = "progress".to_string();
+        e.message.role = String::new();
+        e.source_agent_name = "bg-task-agent".to_string();
+        e.requesting_agent_uuid = "agent-uuid-002".to_string();
+        e.data = Some(json!({
+            "type": "hook_progress",
+            "hookEvent": "PreToolUse",
+            "hookName": "perm-check",
+            "command": ""
+        }));
+        match classify(e) {
+            Some(ClassifiedMsg::Hook(h)) => {
+                assert_eq!(h.source_agent_name, "bg-task-agent");
+                assert_eq!(h.requesting_agent_uuid, "agent-uuid-002");
+            }
+            other => panic!("Expected Hook for progress hook with attribution, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_hook_attachment_carries_source_agent_attribution_from_attachment_v2_1_186() {
+        // v2.1.186+: attachment entries may embed sourceAgentName / requestingAgentUuid
+        // inside the attachment object for cross-session permission prompts.
+        let e = Entry {
+            entry_type: "attachment".to_string(),
+            attachment: Some(json!({
+                "type": "hook_success",
+                "hookEvent": "PreToolUse",
+                "hookName": "permission_check",
+                "sourceAgentName": "bg-explore",
+                "requestingAgentUuid": "uuid-attach-003"
+            })),
+            ..make_entry("user", None)
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::Hook(h)) => {
+                assert_eq!(h.source_agent_name, "bg-explore");
+                assert_eq!(h.requesting_agent_uuid, "uuid-attach-003");
+            }
+            other => panic!("Expected Hook for attachment with attribution fields, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_regular_hook_has_empty_attribution_fields() {
+        // Non-cross-session hooks must have empty attribution so the UI does not show
+        // a phantom "Requesting Agent" section.
+        let e = Entry {
+            entry_type: "attachment".to_string(),
+            attachment: Some(json!({
+                "type": "hook_success",
+                "hookEvent": "PostToolUse",
+                "hookName": "my-hook"
+            })),
+            ..make_entry("user", None)
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::Hook(h)) => {
+                assert!(
+                    h.source_agent_name.is_empty(),
+                    "source_agent_name must be empty for a regular hook"
+                );
+                assert!(
+                    h.requesting_agent_uuid.is_empty(),
+                    "requesting_agent_uuid must be empty for a regular hook"
+                );
+            }
+            other => panic!("Expected Hook for regular attachment, got {other:?}"),
         }
     }
 }

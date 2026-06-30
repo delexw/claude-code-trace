@@ -31,6 +31,8 @@ function makeItem(overrides: Partial<DisplayItem> = {}): DisplayItem {
     hook_metadata: "",
     tool_result_json: "",
     is_orphan: false,
+    hook_source_agent_name: "",
+    hook_requesting_agent_uuid: "",
     ...overrides,
   };
 }
@@ -479,5 +481,49 @@ describe("DetailItem", () => {
     expect(screen.getByText("Hook")).toBeInTheDocument();
     expect(screen.getByText("Command")).toBeInTheDocument();
     expect(screen.getByText("prettier --write .")).toBeInTheDocument();
+  });
+
+  it("shows Requesting Agent section when hook_source_agent_name is set (v2.1.186+)", () => {
+    render(
+      <DetailItem
+        item={makeItem({
+          item_type: "HookEvent",
+          hook_event: "PreToolUse",
+          hook_name: "permission_check",
+          hook_source_agent_name: "background-explore-agent",
+          hook_requesting_agent_uuid: "session-uuid-bg-001",
+        })}
+        index={0}
+        isSelected={false}
+        isExpanded={true}
+        onToggle={vi.fn()}
+        onToggleExpand={vi.fn()}
+        onSelect={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Requesting Agent")).toBeInTheDocument();
+    expect(screen.getByText("background-explore-agent")).toBeInTheDocument();
+    expect(screen.getByText(/session-uuid-bg-001/)).toBeInTheDocument();
+  });
+
+  it("omits Requesting Agent section when hook_source_agent_name is empty", () => {
+    render(
+      <DetailItem
+        item={makeItem({
+          item_type: "HookEvent",
+          hook_event: "PostToolUse",
+          hook_name: "my-hook",
+          hook_source_agent_name: "",
+          hook_requesting_agent_uuid: "",
+        })}
+        index={0}
+        isSelected={false}
+        isExpanded={true}
+        onToggle={vi.fn()}
+        onToggleExpand={vi.fn()}
+        onSelect={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText("Requesting Agent")).not.toBeInTheDocument();
   });
 });
