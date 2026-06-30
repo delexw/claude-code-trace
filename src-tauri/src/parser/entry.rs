@@ -168,6 +168,43 @@ pub struct Entry {
         deserialize_with = "null_as_default"
     )]
     pub checkpoint_uuid: String,
+    // Background-agent session fields added to all entry types in Claude Code v2.1.141+.
+    // When a session is written by the Claude Code SDK or a background agent, every entry
+    // carries these fields so the session can be attributed and versioned independently
+    // of the main interactive session.
+    //
+    // `version` is the Claude Code version string that wrote the entry (e.g. "2.1.141").
+    // It acts as a schema-version discriminant: parsers can gate forward-compat logic on it
+    // without requiring a separate metadata file.
+    #[serde(default)]
+    pub version: String,
+    // `entrypoint` identifies how Claude Code was invoked when the entry was written.
+    // Common values: "sdk-ts" (TypeScript SDK / background agent), "cli" (interactive CLI).
+    #[serde(default)]
+    pub entrypoint: String,
+    // `sessionId` is the owning session's UUID. Present on all background-agent entries and
+    // on type:"last-prompt" / type:"queue-operation" structural metadata entries.
+    #[serde(default, rename = "sessionId")]
+    pub session_id: String,
+    // `agentId` identifies the specific background-agent instance that wrote the entry.
+    // Distinct from `agentName` (a human-readable label): agentId is an opaque identifier
+    // assigned by Claude Code at agent creation time.
+    #[serde(default, rename = "agentId")]
+    pub agent_id: String,
+    // `userType` classifies the actor that submitted the prompt. Common values:
+    // "external" (SDK / background agent), "human" (interactive CLI user).
+    #[serde(default, rename = "userType")]
+    pub user_type: String,
+    // `attributionSkill` names the Claude Code skill that spawned this background-agent
+    // session. Absent when the agent was launched directly rather than via a skill.
+    #[serde(default, rename = "attributionSkill")]
+    pub attribution_skill: Option<String>,
+    // Present in type:"last-prompt" entries (v2.1.195+). Claude Code writes a last-prompt
+    // entry to persist the most recent prompt text for background-agent checkpoint/resume.
+    // The entry's `leafUuid` points to the last message in the conversation at the time
+    // the checkpoint was written.
+    #[serde(default, rename = "lastPrompt")]
+    pub last_prompt: String,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -1642,6 +1679,80 @@ mod tests {
         );
     }
 
+    // --- Issue #170: v2.1.195+ background-agent session fields ---
+
+    #[test]
+    fn parse_entry_captures_background_agent_fields_v2_1_195() {
+        // Background-agent sessions written by Claude Code v2.1.141+ carry several new
+        // top-level fields on every entry: version (schema discriminant), entrypoint
+        // (invocation method), sessionId, agentId, userType, and attributionSkill.
+        // All must be captured by the parser so downstream code can use them.
+        let line = json!({
+            "type": "user",
+            "uuid": "bg-user-uuid-001",
+            "parentUuid": null,
+            "isSidechain": false,
+            "timestamp": "2026-06-26T10:00:00Z",
+            "version": "2.1.195",
+            "entrypoint": "sdk-ts",
+            "sessionId": "ba0f2078-81b4-40ed-bb4a-c9a3758b968d",
+            "agentId": "a783ece79822ccf59",
+            "userType": "external",
+            "attributionSkill": "my-skill",
+            "message": {"role": "user", "content": "run the background task"}
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("must parse background-agent user entry");
+        assert_eq!(entry.version, "2.1.195");
+        assert_eq!(entry.entrypoint, "sdk-ts");
+        assert_eq!(entry.session_id, "ba0f2078-81b4-40ed-bb4a-c9a3758b968d");
+        assert_eq!(entry.agent_id, "a783ece79822ccf59");
+        assert_eq!(entry.user_type, "external");
+        assert_eq!(
+            entry.attribution_skill.as_deref(),
+            Some("my-skill"),
+            "attributionSkill must be captured"
+        );
+    }
+
+    #[test]
+    fn parse_entry_background_agent_fields_default_to_empty_when_absent() {
+        // Entries from interactive CLI sessions (pre-v2.1.141 or non-SDK invocations)
+        // have no background-agent fields — all must default gracefully.
+        let line = json!({
+            "type": "user",
+            "uuid": "interactive-uuid-001",
+            "timestamp": "2026-06-26T10:00:00Z",
+            "message": {"role": "user", "content": "Hello"}
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("must parse interactive CLI entry");
+        assert!(
+            entry.version.is_empty(),
+            "version must be empty when absent"
+        );
+        assert!(
+            entry.entrypoint.is_empty(),
+            "entrypoint must be empty when absent"
+        );
+        assert!(
+            entry.session_id.is_empty(),
+            "sessionId must be empty when absent"
+        );
+        assert!(
+            entry.agent_id.is_empty(),
+            "agentId must be empty when absent"
+        );
+        assert!(
+            entry.user_type.is_empty(),
+            "userType must be empty when absent"
+        );
+        assert!(
+            entry.attribution_skill.is_none(),
+            "attributionSkill must be None when absent"
+        );
+    }
+
     #[test]
     fn parse_entry_rewind_pointer_with_null_rewind_to_uuid_succeeds() {
         // rewindToUuid:null must be treated as empty string (same null_as_default contract
@@ -1655,5 +1766,123 @@ mod tests {
         let bytes = serde_json::to_vec(&line).unwrap();
         let entry = parse_entry(&bytes).expect("must parse rewind-pointer with null rewindToUuid");
         assert_eq!(entry.rewind_to_uuid, "");
+    }
+
+    #[test]
+    fn parse_entry_attribution_skill_defaults_to_none_when_absent() {
+        // attributionSkill is absent for agents launched directly (not via a skill).
+        let line = json!({
+            "type": "assistant",
+            "uuid": "bg-assist-no-skill",
+            "timestamp": "2026-06-26T10:00:01Z",
+            "version": "2.1.195",
+            "agentId": "b894ece79822ccf60",
+            "userType": "external",
+            "message": {
+                "role": "assistant",
+                "model": "claude-sonnet-4-6",
+                "content": [{"type": "text", "text": "working"}],
+                "stop_reason": "end_turn",
+                "usage": {"input_tokens": 10, "output_tokens": 5}
+            }
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("must parse background-agent entry without skill");
+        assert!(
+            entry.attribution_skill.is_none(),
+            "attributionSkill must be None when absent"
+        );
+        assert_eq!(entry.agent_id, "b894ece79822ccf60");
+        assert_eq!(entry.user_type, "external");
+    }
+
+    #[test]
+    fn parse_entry_last_prompt_type_captures_leaf_uuid_and_prompt() {
+        // v2.1.195+: Claude Code writes a type:"last-prompt" checkpoint entry to persist
+        // the most recent background-agent prompt for resume. The entry has leafUuid (the
+        // conversation cursor) and lastPrompt (the prompt text) but no uuid or message —
+        // parse_entry must return Some (leafUuid is not empty) and capture both fields.
+        let line = json!({
+            "type": "last-prompt",
+            "lastPrompt": "run the background task and report results",
+            "leafUuid": "6515b150-20de-4361-a676-54fcca4fdbaa",
+            "sessionId": "ba0f2078-81b4-40ed-bb4a-c9a3758b968d"
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("must parse last-prompt entry");
+        assert_eq!(entry.entry_type, "last-prompt");
+        assert_eq!(entry.leaf_uuid, "6515b150-20de-4361-a676-54fcca4fdbaa");
+        assert_eq!(
+            entry.last_prompt,
+            "run the background task and report results"
+        );
+        assert_eq!(entry.session_id, "ba0f2078-81b4-40ed-bb4a-c9a3758b968d");
+        assert!(
+            entry.uuid.is_empty(),
+            "last-prompt entries have no uuid field"
+        );
+    }
+
+    #[test]
+    fn parse_entry_last_prompt_without_leaf_uuid_returns_none() {
+        // A last-prompt entry with no leafUuid (and no uuid) must be discarded —
+        // it has no anchor in the conversation chain.
+        let line = json!({
+            "type": "last-prompt",
+            "lastPrompt": "some prompt",
+            "sessionId": "ba0f2078-81b4-40ed-bb4a-c9a3758b968d"
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        assert!(
+            parse_entry(&bytes).is_none(),
+            "last-prompt with no leafUuid must return None"
+        );
+    }
+
+    #[test]
+    fn parse_entry_background_agent_assistant_with_all_new_fields() {
+        // Full assistant entry as Claude Code v2.1.195 writes for a background agent.
+        // Verifies all new background-agent fields round-trip correctly alongside the
+        // existing token-usage and model fields.
+        let line = json!({
+            "type": "assistant",
+            "uuid": "bg-assist-full-uuid",
+            "parentUuid": "bg-user-uuid-001",
+            "isSidechain": false,
+            "timestamp": "2026-06-26T10:00:01Z",
+            "version": "2.1.195",
+            "entrypoint": "sdk-ts",
+            "sessionId": "ba0f2078-81b4-40ed-bb4a-c9a3758b968d",
+            "agentId": "a783ece79822ccf59",
+            "userType": "external",
+            "cwd": "/workspace/project",
+            "gitBranch": "main",
+            "requestId": "req-bg-001",
+            "message": {
+                "role": "assistant",
+                "model": "claude-opus-4-7",
+                "content": [{"type": "text", "text": "Background task complete."}],
+                "stop_reason": "end_turn",
+                "usage": {
+                    "input_tokens": 100,
+                    "output_tokens": 20,
+                    "cache_read_input_tokens": 50,
+                    "cache_creation_input_tokens": 10
+                }
+            }
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("must parse full background-agent assistant entry");
+        assert_eq!(entry.entry_type, "assistant");
+        assert_eq!(entry.version, "2.1.195");
+        assert_eq!(entry.entrypoint, "sdk-ts");
+        assert_eq!(entry.session_id, "ba0f2078-81b4-40ed-bb4a-c9a3758b968d");
+        assert_eq!(entry.agent_id, "a783ece79822ccf59");
+        assert_eq!(entry.user_type, "external");
+        assert_eq!(entry.cwd, "/workspace/project");
+        assert_eq!(entry.git_branch, "main");
+        assert_eq!(entry.message.model, "claude-opus-4-7");
+        assert_eq!(entry.message.usage.input_tokens, 100);
+        assert_eq!(entry.message.usage.output_tokens, 20);
     }
 }
