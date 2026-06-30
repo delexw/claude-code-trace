@@ -1002,6 +1002,22 @@ body {
   text-overflow: ellipsis;
 }
 
+/* A user-assigned /rename name uses the accent color and a heavier weight to
+   distinguish it from a title taken from the first message. */
+.picker__session-preview--named {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.picker__session-subtitle {
+  margin-top: 2px;
+  color: var(--text-dim);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .picker__session-ongoing {
   display: inline-flex;
   align-items: center;

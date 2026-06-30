@@ -125,18 +125,32 @@ impl AppState {
         project_dirs: &[String],
     ) -> Result<Vec<SessionInfo>, String> {
         let mut cache = self.sessions_cache.lock().map_err(|e| e.to_string())?;
-        if let Some(ref c) = *cache {
-            if c.dirs == project_dirs && c.cached_at.elapsed() < SESSIONS_CACHE_TTL {
-                return Ok(c.sessions.clone());
-            }
-        }
-        let session_cache = self.session_cache.lock().map_err(|e| e.to_string())?;
-        let sessions = session_cache.discover_all_project_sessions(project_dirs)?;
-        *cache = Some(SessionsCache {
-            dirs: project_dirs.to_vec(),
-            cached_at: Instant::now(),
-            sessions: sessions.clone(),
-        });
+        let fresh = cache
+            .as_ref()
+            .is_some_and(|c| c.dirs == project_dirs && c.cached_at.elapsed() < SESSIONS_CACHE_TTL);
+        let mut sessions = if fresh {
+            cache.as_ref().unwrap().sessions.clone()
+        } else {
+            let session_cache = self.session_cache.lock().map_err(|e| e.to_string())?;
+            let sessions = session_cache.discover_all_project_sessions(project_dirs)?;
+            *cache = Some(SessionsCache {
+                dirs: project_dirs.to_vec(),
+                cached_at: Instant::now(),
+                sessions: sessions.clone(),
+            });
+            sessions
+        };
+        // Release the cache lock before the filesystem work below, so concurrent
+        // callers don't serialize behind it.
+        drop(cache);
+        // Join the live `/rename` names on every call. Names live in the pid-keyed
+        // `~/.claude/sessions/*.json` registry, which the transcript-file cache does
+        // not track (a rename never touches the JSONL), so the join runs after the
+        // cache rather than being baked into the cached `SessionInfo`.
+        crate::parser::session::apply_session_names(
+            &mut sessions,
+            &crate::parser::session::live_session_names(),
+        );
         Ok(sessions)
     }
 

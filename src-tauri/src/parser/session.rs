@@ -18,6 +18,14 @@ pub struct SessionInfo {
     pub session_id: String,
     pub mod_time: DateTime<Utc>,
     pub first_message: String,
+    /// User-assigned session name (Claude Code `/rename`), joined from the
+    /// `~/.claude/sessions/*.json` registry. `None` when the session was never
+    /// named or has no entry in the registry. The registry is pid-keyed and
+    /// written by running sessions; an entry normally disappears when a session
+    /// ends. A stale file (process exited uncleanly) keeps a name visible until
+    /// it is removed, which is harmless because the match uses the unique
+    /// `sessionId`.
+    pub name: Option<String>,
     pub turn_count: i32,
     pub is_ongoing: bool,
     pub total_tokens: i64,
@@ -361,6 +369,7 @@ pub fn discover_project_sessions(project_dir: &str) -> Result<Vec<SessionInfo>, 
             session_id,
             mod_time,
             first_message: meta.first_msg,
+            name: None,
             turn_count: meta.turn_count,
             is_ongoing,
             total_tokens: meta.total_tokens,
@@ -393,6 +402,66 @@ pub fn discover_all_project_sessions(project_dirs: &[String]) -> Result<Vec<Sess
     Ok(all)
 }
 
+/// Read the live session-name registry (`~/.claude/sessions/*.json`) and return a
+/// `session_id -> name` map for every running session that has a `/rename` name.
+///
+/// The name is not stored in the transcript JSONL; it lives only in this
+/// pid-keyed, live registry. The map joins on the `sessionId` field inside each
+/// file (not the pid filename), so a recycled pid cannot attach the wrong name.
+/// Entries without a non-empty `name` are skipped. The registry always lives
+/// under the real `~/.claude/sessions`, regardless of any `CLAUDE_PROJECTS_DIR`
+/// override.
+pub fn live_session_names() -> HashMap<String, String> {
+    match dirs::home_dir() {
+        Some(home) => session_names_from_dir(&home.join(".claude").join("sessions")),
+        None => HashMap::new(),
+    }
+}
+
+/// Build the `session_id -> name` map from a session registry directory. Split
+/// out from [`live_session_names`] so it can be unit-tested against a fixture dir.
+pub(crate) fn session_names_from_dir(dir: &std::path::Path) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    let entries = match fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return map,
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        let content = match fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        let value: Value = match serde_json::from_str(&content) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let session_id = value.get("sessionId").and_then(|v| v.as_str());
+        let name = value
+            .get("name")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        if let (Some(session_id), Some(name)) = (session_id, name) {
+            map.insert(session_id.to_string(), name.to_string());
+        }
+    }
+    map
+}
+
+/// Fill in `SessionInfo::name` from a `session_id -> name` map. Sessions absent
+/// from the map keep `name: None` (never named, or no longer running).
+pub fn apply_session_names(sessions: &mut [SessionInfo], names: &HashMap<String, String>) {
+    for session in sessions.iter_mut() {
+        if let Some(name) = names.get(&session.session_id) {
+            session.name = Some(name.clone());
+        }
+    }
+}
+
 /// Convert scanned metadata into a SessionInfo struct.
 /// Public for use by SessionCache.
 pub fn session_info_from_metadata(
@@ -416,6 +485,7 @@ pub fn session_info_from_metadata(
         session_id,
         mod_time: mod_time_chrono,
         first_message: meta.first_msg,
+        name: None,
         turn_count: meta.turn_count,
         is_ongoing,
         total_tokens: meta.total_tokens,
@@ -1327,6 +1397,80 @@ mod tests {
         LOCK.get_or_init(|| Mutex::new(()))
             .lock()
             .unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn make_info(session_id: &str) -> SessionInfo {
+        SessionInfo {
+            path: format!("/p/{session_id}.jsonl"),
+            session_id: session_id.to_string(),
+            mod_time: Utc::now(),
+            first_message: "first".to_string(),
+            name: None,
+            turn_count: 0,
+            is_ongoing: false,
+            total_tokens: 0,
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
+            cost_usd: 0.0,
+            duration_ms: 0,
+            model: String::new(),
+            cwd: String::new(),
+            git_branch: String::new(),
+            permission_mode: String::new(),
+        }
+    }
+
+    #[test]
+    fn session_names_from_dir_joins_on_session_id() {
+        let dir = tempfile::tempdir().unwrap();
+        // Named session. The pid filename differs from the session id on purpose:
+        // the match uses the sessionId field inside the file, never the filename.
+        fs::write(
+            dir.path().join("41090.json"),
+            r#"{"pid":41090,"sessionId":"sid-a","name":"my-cache"}"#,
+        )
+        .unwrap();
+        // Unnamed session: present but no name -> excluded.
+        fs::write(
+            dir.path().join("41091.json"),
+            r#"{"pid":41091,"sessionId":"sid-b","status":"idle"}"#,
+        )
+        .unwrap();
+        // Empty/whitespace name -> excluded.
+        fs::write(
+            dir.path().join("41092.json"),
+            r#"{"pid":41092,"sessionId":"sid-c","name":"   "}"#,
+        )
+        .unwrap();
+        // Non-JSON and non-.json files -> skipped, no panic.
+        fs::write(dir.path().join("garbage.json"), "not json").unwrap();
+        fs::write(dir.path().join("notes.txt"), "ignored").unwrap();
+
+        let map = session_names_from_dir(dir.path());
+        assert_eq!(map.get("sid-a").map(String::as_str), Some("my-cache"));
+        assert_eq!(map.get("sid-b"), None);
+        assert_eq!(map.get("sid-c"), None);
+        assert_eq!(map.len(), 1);
+    }
+
+    #[test]
+    fn session_names_from_dir_missing_dir_is_empty() {
+        let map = session_names_from_dir(std::path::Path::new("/no/such/sessions/dir"));
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn apply_session_names_fills_only_matches() {
+        let mut sessions = vec![make_info("sid-a"), make_info("sid-b")];
+        let mut names = HashMap::new();
+        names.insert("sid-a".to_string(), "my-cache".to_string());
+
+        apply_session_names(&mut sessions, &names);
+
+        assert_eq!(sessions[0].name.as_deref(), Some("my-cache"));
+        assert_eq!(sessions[1].name, None);
     }
 
     #[test]

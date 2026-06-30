@@ -102,6 +102,7 @@ export function usePicker(selectedProject: string | null = null) {
   let filteredSessions = state.searchQuery
     ? state.sessions.filter(
         (s) =>
+          (s.name?.toLowerCase().includes(state.searchQuery.toLowerCase()) ?? false) ||
           s.first_message.toLowerCase().includes(state.searchQuery.toLowerCase()) ||
           s.session_id.toLowerCase().includes(state.searchQuery.toLowerCase()) ||
           s.model.toLowerCase().includes(state.searchQuery.toLowerCase()),
