@@ -137,6 +137,10 @@ const NOISE_ENTRY_TYPES: &[&str] = &[
     "workflow-complete",
     "workflow-cancelled",
     "workflow-error",
+    // v2.1.191+: /rewind support. Claude Code may write a rewind-pointer entry (analogous to
+    // fork-context-ref) when the user rewinds past /clear. It carries no displayable content —
+    // the post-rewind branch is resolved via leafUuid pointing to the resumed conversation tip.
+    "rewind-pointer",
 ];
 
 const HARD_NOISE_TAGS: &[&str] = &["<local-command-caveat>", "<system-reminder>"];

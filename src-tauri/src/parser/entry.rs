@@ -149,6 +149,25 @@ pub struct Entry {
     pub agent_depth: Option<u32>,
     #[serde(default, rename = "parentAgentName")]
     pub parent_agent_name: String,
+    // Present in type:"rewind-pointer" entries (v2.1.191+). When /rewind is used to resume a
+    // conversation from before /clear was run, Claude Code may write a rewind-pointer entry.
+    // rewindToUuid identifies the last pre-clear message UUID so the chain resolver can
+    // understand where the post-rewind conversation re-roots.
+    #[serde(default, rename = "rewindToUuid", deserialize_with = "null_as_default")]
+    pub rewind_to_uuid: String,
+    // Present in summary or compact_boundary entries (v2.1.191+). When true, the compaction
+    // checkpoint is persisted and the pre-clear state can be resumed via /rewind.
+    #[serde(default)]
+    pub rewindable: bool,
+    // Present in summary or compact_boundary entries when rewindable:true (v2.1.191+).
+    // Points to the UUID of the last pre-clear message — the anchor for /rewind. Enables
+    // the chain resolver to re-root a post-rewind conversation at the correct entry.
+    #[serde(
+        default,
+        rename = "checkpointUuid",
+        deserialize_with = "null_as_default"
+    )]
+    pub checkpoint_uuid: String,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -1524,5 +1543,117 @@ mod tests {
         assert_eq!(entry.agent_name, "deep-worker");
         assert_eq!(entry.parent_agent_name, "mid-level-agent");
         assert_eq!(entry.message.model, "claude-haiku-4-5");
+    }
+
+    // --- Issue #169: v2.1.191+ /rewind support — rewind-pointer entry and rewindable fields ---
+
+    #[test]
+    fn parse_entry_captures_rewind_to_uuid_for_rewind_pointer() {
+        // v2.1.191+: /rewind may write a rewind-pointer entry (analogous to fork-context-ref).
+        // rewindToUuid identifies the last pre-clear message so the chain can be re-rooted.
+        let line = json!({
+            "type": "rewind-pointer",
+            "uuid": "rewind-ptr-uuid-001",
+            "rewindToUuid": "pre-clear-msg-uuid",
+            "timestamp": "2026-06-24T10:00:00Z"
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("must parse rewind-pointer entry");
+        assert_eq!(entry.entry_type, "rewind-pointer");
+        assert_eq!(
+            entry.rewind_to_uuid, "pre-clear-msg-uuid",
+            "rewindToUuid must be captured"
+        );
+        assert_eq!(entry.parent_uuid, "");
+        assert_eq!(entry.checkpoint_uuid, "");
+        assert!(!entry.rewindable);
+    }
+
+    #[test]
+    fn parse_entry_captures_rewindable_flag_on_summary() {
+        // v2.1.191+: summary entries may carry rewindable:true when the compaction checkpoint
+        // is persisted so that /rewind can restore the pre-clear conversation state.
+        let line = json!({
+            "type": "summary",
+            "uuid": "summary-rewindable-uuid",
+            "timestamp": "2026-06-24T10:01:00Z",
+            "summary": "Compacted conversation summary text.",
+            "rewindable": true,
+            "checkpointUuid": "last-pre-clear-uuid"
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("must parse rewindable summary entry");
+        assert_eq!(entry.entry_type, "summary");
+        assert!(entry.rewindable, "rewindable must be true");
+        assert_eq!(
+            entry.checkpoint_uuid, "last-pre-clear-uuid",
+            "checkpointUuid must be captured"
+        );
+    }
+
+    #[test]
+    fn parse_entry_captures_checkpoint_uuid_on_compact_boundary() {
+        // v2.1.191+: compact_boundary entries may carry checkpointUuid identifying the last
+        // pre-clear message UUID so the chain resolver can handle /rewind anchors.
+        let line = json!({
+            "type": "system",
+            "subtype": "compact_boundary",
+            "uuid": "compact-boundary-rewind-uuid",
+            "parentUuid": null,
+            "logicalParentUuid": "last-pre-clear-uuid",
+            "rewindable": true,
+            "checkpointUuid": "last-pre-clear-uuid",
+            "timestamp": "2026-06-24T10:02:00Z"
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("must parse compact_boundary with rewind fields");
+        assert_eq!(entry.subtype, "compact_boundary");
+        assert!(entry.rewindable, "rewindable flag must be captured");
+        assert_eq!(
+            entry.checkpoint_uuid, "last-pre-clear-uuid",
+            "checkpointUuid must be captured"
+        );
+        assert_eq!(
+            entry.logical_parent_uuid, "last-pre-clear-uuid",
+            "logicalParentUuid must still be captured"
+        );
+    }
+
+    #[test]
+    fn parse_entry_rewind_fields_default_to_empty_when_absent() {
+        // Entries from before v2.1.191 (or non-rewind entries) have no rewind fields.
+        // All three fields must default to their zero values.
+        let line = json!({
+            "type": "user",
+            "uuid": "regular-no-rewind-uuid",
+            "timestamp": "2026-06-24T10:03:00Z",
+            "message": {"role": "user", "content": "Hello"}
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("must parse regular entry without rewind fields");
+        assert_eq!(
+            entry.rewind_to_uuid, "",
+            "rewindToUuid must default to empty string"
+        );
+        assert!(!entry.rewindable, "rewindable must default to false");
+        assert_eq!(
+            entry.checkpoint_uuid, "",
+            "checkpointUuid must default to empty string"
+        );
+    }
+
+    #[test]
+    fn parse_entry_rewind_pointer_with_null_rewind_to_uuid_succeeds() {
+        // rewindToUuid:null must be treated as empty string (same null_as_default contract
+        // as parentUuid and logicalParentUuid).
+        let line = json!({
+            "type": "rewind-pointer",
+            "uuid": "rewind-ptr-null-uuid",
+            "rewindToUuid": null,
+            "timestamp": "2026-06-24T10:04:00Z"
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("must parse rewind-pointer with null rewindToUuid");
+        assert_eq!(entry.rewind_to_uuid, "");
     }
 }

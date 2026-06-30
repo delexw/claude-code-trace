@@ -1790,6 +1790,137 @@ mod tests {
         assert!(!set.contains("X"), "dead-end branch must be excluded");
     }
 
+    // --- Issue #169: v2.1.191+ /rewind support — split-chain resolution ---
+
+    fn make_rewind_pointer(uuid: &str, rewind_to_uuid: &str) -> Entry {
+        Entry {
+            uuid: uuid.to_string(),
+            parent_uuid: String::new(),
+            entry_type: "rewind-pointer".to_string(),
+            rewind_to_uuid: rewind_to_uuid.to_string(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn live_chain_post_rewind_branch_excludes_pre_rewind_dead_end() {
+        // Scenario: user ran /clear (creating compact_boundary D), then /rewind to go back to C.
+        // After rewind, new conversation continues from C: G (parentUuid=C) → H (parentUuid=G).
+        // leafUuid=H marks the post-rewind tip.
+        //
+        // File order:
+        //   A → B → C → compact_boundary(D, logParent=C) → E (compact summary) → F (dead end)
+        //   rewind-pointer(RP, rewindToUuid=C)
+        //   G (parentUuid=C) → H (parentUuid=G, leafUuid=H)
+        //
+        // Expected live set: {A, B, C, G, H}  — D, E, F, RP are dead-end / structural.
+        let mut h = make_entry("H", "G", "", false);
+        h.leaf_uuid = "H".to_string();
+        let entries = vec![
+            make_entry("A", "", "", false),
+            make_entry("B", "A", "", false),
+            make_entry("C", "B", "", false),
+            make_compact_boundary("D", "C"),
+            make_entry("E", "D", "", false), // compact summary after /clear
+            make_entry("F", "E", "", false), // last pre-rewind assistant turn (now dead)
+            make_rewind_pointer("RP", "C"),
+            make_entry("G", "C", "", false), // first post-rewind user message
+            h,
+        ];
+        let set = resolve_live_chain_uuids(&entries);
+
+        assert!(
+            set.contains("H"),
+            "post-rewind live leaf must be in live set"
+        );
+        assert!(
+            set.contains("G"),
+            "post-rewind user entry must be in live set"
+        );
+        assert!(
+            set.contains("C"),
+            "rewind anchor (last pre-clear entry) must be in live set"
+        );
+        assert!(set.contains("B"), "pre-clear entry must be in live set");
+        assert!(set.contains("A"), "root must be in live set");
+
+        assert!(
+            !set.contains("D"),
+            "compact_boundary must be excluded (dead branch after rewind)"
+        );
+        assert!(
+            !set.contains("E"),
+            "compact summary must be excluded (dead branch after rewind)"
+        );
+        assert!(
+            !set.contains("F"),
+            "pre-rewind assistant turn must be excluded"
+        );
+        assert!(
+            !set.contains("RP"),
+            "rewind-pointer must be excluded (structural marker)"
+        );
+        assert_eq!(set.len(), 5);
+    }
+
+    #[test]
+    fn live_chain_floating_rewind_pointer_does_not_disrupt_resolution() {
+        // A rewind-pointer with no parentUuid is a floating structural marker. When leafUuid
+        // correctly identifies the live tip, the pointer must not appear in the live set.
+        // Main chain: A → B → C → G → H (H is live tip, leafUuid=H)
+        // Floating:   rewind-pointer RP (no parentUuid, rewindToUuid=B)
+        let mut h = make_entry("H", "G", "", false);
+        h.leaf_uuid = "H".to_string();
+        let entries = vec![
+            make_entry("A", "", "", false),
+            make_entry("B", "A", "", false),
+            make_entry("C", "B", "", false),
+            make_entry("G", "C", "", false),
+            h,
+            make_rewind_pointer("RP", "B"), // written after H — floating marker
+        ];
+        let set = resolve_live_chain_uuids(&entries);
+
+        assert!(set.contains("H"), "live tip must be in live set");
+        assert!(set.contains("G"));
+        assert!(set.contains("C"));
+        assert!(set.contains("B"));
+        assert!(set.contains("A"));
+        assert!(
+            !set.contains("RP"),
+            "floating rewind-pointer must not be in live set"
+        );
+        assert_eq!(set.len(), 5);
+    }
+
+    #[test]
+    fn live_chain_rewind_with_leafuuid_set_to_rewind_target() {
+        // When Claude Code sets leafUuid to the rewind target (e.g., C) at the moment of
+        // /rewind before the user types a new message, the chain walks from C backward.
+        // This is the transient state between /rewind and the next user turn.
+        //
+        // File: A → B → C → D(compact) → E → F(dead), leafUuid=C
+        let mut c = make_entry("C", "B", "", false);
+        c.leaf_uuid = "C".to_string(); // Claude Code rewound leafUuid to the rewind target
+        let entries = vec![
+            make_entry("A", "", "", false),
+            make_entry("B", "A", "", false),
+            c,
+            make_compact_boundary("D", "C"),
+            make_entry("E", "D", "", false),
+            make_entry("F", "E", "", false), // dead branch
+        ];
+        let set = resolve_live_chain_uuids(&entries);
+
+        assert!(set.contains("C"), "rewind target must be the live leaf");
+        assert!(set.contains("B"));
+        assert!(set.contains("A"));
+        assert!(!set.contains("D"), "compact_boundary must be excluded");
+        assert!(!set.contains("E"), "post-clear entry must be excluded");
+        assert!(!set.contains("F"), "post-clear entry must be excluded");
+        assert_eq!(set.len(), 3);
+    }
+
     #[test]
     fn incremental_read_does_not_advance_past_partial_line() {
         let tmp = env::temp_dir().join("tail-test-partial-line");
