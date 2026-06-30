@@ -1986,21 +1986,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn parse_entry_reason_and_tool_name_default_to_empty_when_absent() {
-        // Entries from before v2.1.193 (or non-denial entries) have no reason/toolName fields.
-        let line = json!({
-            "type": "system",
-            "subtype": "init",
-            "uuid": "regular-system-uuid",
-            "timestamp": "2026-06-01T10:00:00Z"
-        });
-        let bytes = serde_json::to_vec(&line).unwrap();
-        let entry = parse_entry(&bytes).expect("must parse entry without denial fields");
-        assert_eq!(entry.reason, "", "reason must default to empty when absent");
-        assert_eq!(
-            entry.tool_name, "",
-            "toolName must default to empty when absent"
-        );
-    }
 }

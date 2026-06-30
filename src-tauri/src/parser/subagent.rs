@@ -1841,7 +1841,7 @@ mod tests {
 
     #[test]
     fn extract_team_specs_includes_implicit_team_agents() {
-        use crate::parser::chunk::{build_chunks, Chunk, ChunkType, DisplayItem, DisplayItemType};
+        use crate::parser::chunk::{Chunk, ChunkType, DisplayItem, DisplayItemType};
 
         let item = DisplayItem {
             item_type: DisplayItemType::Subagent,
