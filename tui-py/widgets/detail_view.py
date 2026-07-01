@@ -12,6 +12,8 @@ import contextlib
 from rich.cells import cell_len
 from rich.text import Text
 from textual.app import ComposeResult
+from textual.content import Content
+from textual.highlight import highlight
 from textual.widget import Widget
 from textual.widgets import Collapsible, ListItem, Markdown, Static
 
@@ -157,6 +159,24 @@ def _md_code(s: str, lang: str = "") -> str:
     return f"```{lang}\n{s}\n```"
 
 
+def _json_text(s: str) -> Content:
+    """Pretty-print JSON as word-wrapped, syntax-highlighted Content.
+
+    Markdown fenced code blocks (MarkdownFence) force `overflow: scroll
+    hidden`, which cuts off long JSON/tool-output lines instead of wrapping
+    them. Highlighting the same string with Textual's own tokenizer and
+    mounting it in a plain Static (no scroll override) keeps the JSON syntax
+    colours but wraps at the pane width, like the web UI does.
+    """
+    import json as _json
+
+    try:
+        pretty = _json.dumps(_json.loads(s), indent=2)
+        return highlight(pretty, language="json")
+    except Exception:
+        return highlight(s, language="text")
+
+
 # Per-line foreground colour for each diff line kind.
 _DIFF_LINE_STYLE = {
     "context": theme.TEXT_MUTED,
@@ -214,14 +234,23 @@ def _render_edit_diff(tool_input: str) -> Text | None:
     return text
 
 
-def _tool_result_md(item: DisplayItem) -> str:
-    """Markdown for a tool call's Result/Error section, or "" when absent."""
+def _label(text: str) -> Static:
+    """An unbordered heading line for the box below it (e.g. "Input", "Result").
+
+    Markdown widgets in `_ItemListView` always get a bordered box (so fenced
+    code renders in one); using Static here keeps the label itself outside
+    any box — only the JSON/diff content below it is boxed.
+    """
+    return Static(text, classes="item-label")
+
+
+def _tool_result_widgets(item: DisplayItem) -> list[Widget]:
+    """Widgets for a tool call's Result/Error section, or [] when absent."""
     if not (item.tool_result or item.tool_result_json):
-        return ""
-    label = "**Error**" if item.tool_error else "**Result**"
-    if item.tool_result_json:
-        return f"{label}\n\n```json\n{item.tool_result_json}\n```"
-    return f"{label}\n\n{_md_json(item.tool_result)}"
+        return []
+    label = "Error" if item.tool_error else "Result"
+    body = item.tool_result_json or item.tool_result
+    return [_label(label), Static(_json_text(body), classes="diff-block")]
 
 
 def _render_item_body(item: DisplayItem) -> str:
@@ -231,13 +260,6 @@ def _render_item_body(item: DisplayItem) -> str:
             return item.text or "*Thinking content is not recorded in session logs.*"
         case "Output":
             return _md_json(item.text) if item.text else ""
-        case "ToolCall":
-            parts: list[str] = []
-            if item.tool_input:
-                parts.append("**Input**")
-                parts.append(_md_json(item.tool_input))
-            parts.append(_tool_result_md(item))
-            return "\n\n".join(p for p in parts if p)
         case "Subagent":
             parts = []
             if item.agent_id:
@@ -251,13 +273,6 @@ def _render_item_body(item: DisplayItem) -> str:
             return "\n\n".join(parts)
         case "TeammateMessage":
             return item.text
-        case "HookEvent":
-            parts = [f"**hook:** `{item.hook_event}` · `{item.hook_name}`"]
-            if item.hook_command:
-                parts.append(f"**cmd**\n\n{_md_json(item.hook_command)}")
-            if item.hook_metadata:
-                parts.append(f"**metadata**\n\n{_md_json(item.hook_metadata)}")
-            return "\n\n".join(parts)
         case _:
             return item.text
 
@@ -266,17 +281,36 @@ def _item_body_widgets(item: DisplayItem) -> list[Widget]:
     """Widgets to mount inside an item's Collapsible.
 
     Edit tool calls render a coloured Rich diff (red/green lines + highlighted
-    changed words) as a Static, since Markdown can't colour a diff. Everything
-    else is a single Markdown widget.
+    changed words) as a Static, since Markdown can't colour a diff. Other
+    ToolCall/HookEvent bodies render their JSON payloads as word-wrapped Static
+    text instead of Markdown fenced code blocks, which scroll horizontally
+    rather than wrap. Everything else is a single Markdown widget.
     """
     if item.item_type == "ToolCall" and item.tool_name == "Edit" and item.tool_input:
         diff = _render_edit_diff(item.tool_input)
         if diff is not None:
-            widgets: list[Widget] = [Markdown("**Input**"), Static(diff, classes="diff-block")]
-            result_md = _tool_result_md(item)
-            if result_md:
-                widgets.append(Markdown(result_md))
+            widgets: list[Widget] = [_label("Input"), Static(diff, classes="diff-block")]
+            widgets.extend(_tool_result_widgets(item))
             return widgets
+
+    if item.item_type == "ToolCall":
+        widgets = []
+        if item.tool_input:
+            widgets.append(_label("Input"))
+            widgets.append(Static(_json_text(item.tool_input), classes="diff-block"))
+        widgets.extend(_tool_result_widgets(item))
+        return widgets
+
+    if item.item_type == "HookEvent":
+        widgets = [Markdown(f"**hook:** `{item.hook_event}` · `{item.hook_name}`")]
+        if item.hook_command:
+            widgets.append(_label("cmd"))
+            widgets.append(Static(_json_text(item.hook_command), classes="diff-block"))
+        if item.hook_metadata:
+            widgets.append(_label("metadata"))
+            widgets.append(Static(_json_text(item.hook_metadata), classes="diff-block"))
+        return widgets
+
     return [Markdown(_render_item_body(item))]
 
 
@@ -315,6 +349,12 @@ class _ItemListView(HighlightListView):
         padding: 0 1;
         margin: 0 1;
         width: 1fr;
+    }
+    _ItemListView Static.item-label {
+        padding: 0 1;
+        margin: 1 1 0 1;
+        color: $text-muted;
+        text-style: bold;
     }
     """
 
@@ -425,16 +465,14 @@ class DetailView(Widget):
         if items_unchanged:
             self.call_after_refresh(self._sync_expanded_only)
         else:
-            # Eagerly clear the previous message's items + content so the user
-            # never sees stale data while the view switches and the async
-            # _rebuild is still pending. The LoadingIndicator covers the
-            # whole pane until _rebuild finishes.
+            # Eagerly clear the previous items so the user never sees stale
+            # data while the view switches and the async _rebuild is still
+            # pending. The LoadingIndicator (set below) covers the whole pane
+            # until _rebuild finishes, so #msg-content is left untouched here
+            # — emptying a Collapsible's children makes Textual treat it as
+            # a non-container and briefly render its raw CSS identifier.
             with contextlib.suppress(Exception):
                 self.query_one("#items-list", _ItemListView).clear()
-            with contextlib.suppress(Exception):
-                msg_coll = self.query_one("#msg-content", Collapsible)
-                msg_coll.title = ""
-                msg_coll.remove_children()
             self.loading = True
             self.call_after_refresh(self._rebuild)
 

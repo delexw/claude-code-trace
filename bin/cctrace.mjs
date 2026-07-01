@@ -148,10 +148,17 @@ switch (mode) {
       // different port via VITE_PORT so the headless Vite doesn't conflict.
       // The headless backend doesn't serve a browser UI, so any port is fine.
       const vitePort = (await isPortInUse(1420)) ? "0" : "";
+      // `detached: true` makes this process the leader of its own process
+      // group, so the whole tree it spawns (npx -> tauri CLI -> Vite + the
+      // Rust backend) shares that group and can be killed together below.
+      // Without it, backend.kill() only signals the immediate npx process —
+      // Vite and the Rust backend survive as orphans still holding their
+      // ports, which is why a later `cctrace --web` failed with EADDRINUSE.
       backend = spawn("npx", ["tauri", "dev", "--", "--", "--headless"], {
         stdio: "inherit",
         cwd: root,
         env: { ...process.env, ...(vitePort ? { VITE_PORT: vitePort } : {}) },
+        detached: true,
       });
     }
 
@@ -168,10 +175,21 @@ switch (mode) {
     });
 
     tui.on("exit", (code) => {
-      if (backend) backend.kill();
+      killBackendTree(backend);
       process.exit(code ?? 0);
     });
     if (backend) backend.on("exit", () => tui.kill());
     break;
+  }
+}
+
+/** Kill a detached backend's whole process group (npx -> tauri CLI -> Vite +
+ * Rust backend), not just the immediate child — see the spawn() call above. */
+function killBackendTree(backend) {
+  if (!backend) return;
+  try {
+    process.kill(-backend.pid, "SIGTERM");
+  } catch {
+    // Group already gone (e.g. backend process exited on its own first).
   }
 }

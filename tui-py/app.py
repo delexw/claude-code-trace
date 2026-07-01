@@ -28,7 +28,6 @@ from data_types import (
     SessionInfo,
     SessionMeta,
     SessionTotals,
-    session_update_from_dict,
 )
 from format_utils import project_key as _project_key
 from sse import SSEClient
@@ -237,21 +236,24 @@ class CCTraceApp(App):
             except Exception:
                 pass
 
-    async def _on_session_update(self, payload) -> None:
-        if not isinstance(payload, dict):
+    async def _on_session_update(self, _payload) -> None:
+        """`session-update` is a lightweight refresh signal (message count +
+        roles only, no message bodies) — the client re-fetches the session on
+        receipt. Re-fetching here (instead of trusting the signal payload)
+        keeps `self.messages` authoritative; the backend's light cache makes
+        repeated fetches during an active stream cheap.
+        """
+        if not self.session_path:
             return
-        messages, ongoing, permission_mode, teams, totals = session_update_from_dict(payload)
-        self.messages = messages
-        self.ongoing = ongoing
-        self.totals = totals
-        if teams:
-            self.teams = teams
-        if permission_mode:
-            self.meta = SessionMeta(
-                cwd=self.meta.cwd,
-                git_branch=self.meta.git_branch,
-                permission_mode=permission_mode,
-            )
+        try:
+            result = await api_client.load_session(self.session_path)
+        except Exception:
+            return
+        self.teams = result.teams
+        self.ongoing = result.ongoing
+        self.meta = result.meta
+        self.totals = result.session_totals
+        self.messages = result.messages
         self._sync_all_widgets()
 
     # ----------------------------------------------------------------
@@ -279,6 +281,7 @@ class CCTraceApp(App):
             self.meta = result.meta
             self.totals = result.session_totals
             self.expanded_messages = set()
+            self._detail_full_message = None
             self.messages = result.messages
             # Pre-populate the MessageList synchronously (awaited) so it's
             # fully built before we flip the view.
@@ -417,6 +420,9 @@ class CCTraceApp(App):
                     self._sync_subagent_message_list()
                     self.view = "list"
                 else:
+                    # Leaving the top-level detail view entirely — release the
+                    # full (heavy-body) message it held.
+                    self._detail_full_message = None
                     self.view = "list"
             case "team" | "debug":
                 self.view = "list"
@@ -672,11 +678,11 @@ class CCTraceApp(App):
     def _active_detail_message(self) -> DisplayMessage | None:
         if self.subagent_detail_msg:
             return self.subagent_detail_msg
-        if self.messages:
-            idx = getattr(self, "_detail_msg_idx", 0)
-            if 0 <= idx < len(self.messages):
-                return self.messages[idx]
-        return None
+        # `self.messages` (from load_session) has tool bodies stripped for the
+        # list view — the detail view shows the on-demand full-body fetch
+        # instead (None while it's still loading; DetailView renders its own
+        # loading state for that).
+        return getattr(self, "_detail_full_message", None)
 
     # ----------------------------------------------------------------
     # Session filter
@@ -797,8 +803,38 @@ class CCTraceApp(App):
             pass
 
     def _sync_detail_view_for_message_index(self, msg_idx: int) -> None:
-        """Store which message index was opened and rebuild detail view."""
+        """Store which message index was opened and rebuild detail view.
+
+        Clears any previously fetched full message first (so the view shows
+        its loading state, not stale data from the last message), then
+        fetches the new one on demand — `self.messages` only has lightened
+        bodies.
+        """
         self._detail_msg_idx = msg_idx
+        self._detail_full_message = None
+        self._sync_detail_view()
+        if self.session_path:
+            self.run_worker(
+                self._fetch_detail_message(self.session_path, msg_idx),
+                exclusive=True,
+                group="load_detail_message",
+                name="load_detail_message",
+            )
+
+    async def _fetch_detail_message(self, path: str, msg_idx: int) -> None:
+        try:
+            msg = await api_client.load_message(path, msg_idx)
+        except Exception:
+            msg = None
+        # Stale if the user moved on (closed detail, opened a different
+        # message, or switched sessions) while this was in flight.
+        if (
+            self.session_path != path
+            or getattr(self, "_detail_msg_idx", None) != msg_idx
+            or self.view != "detail"
+        ):
+            return
+        self._detail_full_message = msg
         self._sync_detail_view()
 
     def _sync_content_view(self) -> None:

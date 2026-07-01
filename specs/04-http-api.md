@@ -280,15 +280,29 @@ sequenceDiagram
 
 #### `session-update` Payload
 
+A lightweight refresh **signal**, not a data dump: it carries the total
+message `count` and the per-message `roles` index (so a virtualized client
+can resize its list and refetch the visible window) plus session-level
+fields, but never the heavy message bodies. Clients re-fetch the window
+they're viewing (`SessionUpdatePayload` in `src-tauri/src/watcher.rs`).
+
 ```json
 {
-  "messages": [ /* DisplayMessage[] */ ],
+  "count": 42,
+  "roles": [ /* string[], one per message, length == count */ ],
+  "context_tokens": 12345,
   "teams": [ /* TeamSnapshot[] */ ],
   "ongoing": true,
   "permission_mode": "default",
   "session_totals": { "total_tokens": ..., "cost_usd": ..., "model": "..." }
 }
 ```
+
+There is no `messages` field. The web frontend re-fetches its current
+window via `POST /api/session/load` on receipt. The TUI (`tui-py/app.py`'s
+`_on_session_update`) does the same — it re-fetches the whole session via
+`load_session` rather than reading this payload, since it doesn't paginate
+the way the web frontend does.
 
 ---
 

@@ -267,6 +267,12 @@ def _item_from_dict(d: dict) -> DisplayItem:
     )
 
 
+def message_from_dict(d: dict) -> DisplayMessage:
+    """Public entry point for parsing a single message dict, e.g. the
+    full-body response from `POST /api/session/message`."""
+    return _msg_from_dict(d)
+
+
 def _msg_from_dict(d: dict) -> DisplayMessage:
     lo_raw = d.get("last_output")
     last_output: LastOutput | None = None
@@ -383,24 +389,3 @@ def debug_entry_from_dict(d: dict) -> DebugEntry:
         line_num=int(d.get("line_num", 0)),
         count=int(d.get("count", 1)),
     )
-
-
-def session_update_from_dict(
-    d: dict,
-) -> tuple[list[DisplayMessage], bool, str, list[TeamSnapshot], SessionTotals]:
-    """Parse a session-update SSE payload."""
-    messages = [_msg_from_dict(m) for m in (d.get("messages") or [])]
-    ongoing = bool(d.get("ongoing", False))
-    permission_mode = d.get("permission_mode", "")
-    teams = [_team_from_dict(t) for t in (d.get("teams") or [])]
-    tot_d = d.get("session_totals") or {}
-    totals = SessionTotals(
-        total_tokens=int(tot_d.get("total_tokens", 0)),
-        input_tokens=int(tot_d.get("input_tokens", 0)),
-        output_tokens=int(tot_d.get("output_tokens", 0)),
-        cache_read_tokens=int(tot_d.get("cache_read_tokens", 0)),
-        cache_creation_tokens=int(tot_d.get("cache_creation_tokens", 0)),
-        cost_usd=float(tot_d.get("cost_usd", 0.0)),
-        model=tot_d.get("model", ""),
-    )
-    return messages, ongoing, permission_mode, teams, totals

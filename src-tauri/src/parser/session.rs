@@ -159,15 +159,50 @@ fn resolve_live_chain_uuids(entries: &[Entry]) -> HashSet<String> {
             break; // cycle guard
         }
         live_set.insert(current.clone());
-        let parent = match uuid_idx.get(&current).and_then(|&i| entries.get(i)) {
-            Some(e) if !e.parent_uuid.is_empty() => e.parent_uuid.clone(),
-            Some(e) if !e.logical_parent_uuid.is_empty() => e.logical_parent_uuid.clone(),
-            _ => break,
+        let idx = uuid_idx.get(&current).copied();
+        let parent = match idx.and_then(|i| entries.get(i)) {
+            Some(e) if !e.parent_uuid.is_empty() => Some(e.parent_uuid.clone()),
+            Some(e) if !e.logical_parent_uuid.is_empty() => {
+                let candidate = e.logical_parent_uuid.clone();
+                if live_set.contains(&candidate) {
+                    // Observed in the wild: some auto-compaction events write a
+                    // logicalParentUuid that points into their own post-compaction
+                    // descendant chain (e.g. the tail of `preservedSegment`)
+                    // instead of the true pre-compaction predecessor, closing a
+                    // cycle back through the boundary. Following it as-is would
+                    // hit the cycle guard above and truncate the walk right at
+                    // this boundary, silently dropping everything before it —
+                    // fall back to the nearest earlier entry in file order that
+                    // isn't already on the live chain instead.
+                    idx.and_then(|i| fallback_predecessor(entries, i, &live_set))
+                } else {
+                    Some(candidate)
+                }
+            }
+            _ => None,
         };
-        current = parent;
+        match parent {
+            Some(p) => current = p,
+            None => break,
+        }
     }
 
     live_set
+}
+
+/// Nearest entry before `idx` (in file order) that hasn't already been added
+/// to the live chain — used as a fallback predecessor when a compact_boundary's
+/// `logicalParentUuid` cyclically points back into the chain already walked.
+fn fallback_predecessor(
+    entries: &[Entry],
+    idx: usize,
+    live_set: &HashSet<String>,
+) -> Option<String> {
+    entries[..idx]
+        .iter()
+        .rev()
+        .find(|e| !e.uuid.is_empty() && !e.is_sidechain && !live_set.contains(&e.uuid))
+        .map(|e| e.uuid.clone())
 }
 
 /// Read new lines from a session file starting at the given byte offset.
@@ -2017,6 +2052,39 @@ mod tests {
             "all entries across both compactions must be in live set"
         );
         for id in &["A", "B", "C", "D", "E", "F", "G", "H", "I"] {
+            assert!(set.contains(*id), "{id} must be in live set");
+        }
+    }
+
+    #[test]
+    fn live_chain_compact_boundary_logical_parent_cycle_falls_back_to_file_order() {
+        // Observed in the wild: a compact_boundary's logicalParentUuid can point
+        // into its own post-compaction descendant chain instead of the true
+        // pre-compaction predecessor, closing a cycle back through the boundary.
+        //
+        // Pre-compact (true history): A → B → C
+        // compact_boundary: D (logicalParentUuid=G, its OWN descendant — the bug)
+        // Post-compact: D → E (summary) → F → G → H (H is the live leaf)
+        let entries = vec![
+            make_entry("A", "", "", false),
+            make_entry("B", "A", "", false),
+            make_entry("C", "B", "", false),
+            make_compact_boundary("D", "G"),
+            make_entry("E", "D", "", false),
+            make_entry("F", "E", "", false),
+            make_entry("G", "F", "", false),
+            make_entry("H", "G", "", false), // live leaf
+        ];
+        let set = resolve_live_chain_uuids(&entries);
+
+        // Without a fallback, the walk would hit the cycle (G already visited)
+        // right at the boundary and stop there, losing A/B/C entirely.
+        assert_eq!(
+            set.len(),
+            8,
+            "pre-compact history must survive a cyclic logicalParentUuid"
+        );
+        for id in &["A", "B", "C", "D", "E", "F", "G", "H"] {
             assert!(set.contains(*id), "{id} must be in live set");
         }
     }
