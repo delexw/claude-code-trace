@@ -24,6 +24,7 @@ const makeSettings = (
 describe("SettingsModal", () => {
   const onClose = vi.fn();
   const onSaved = vi.fn();
+  const onFontScaleChange = vi.fn();
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -37,7 +38,14 @@ describe("SettingsModal", () => {
   });
 
   it("shows empty input and default hint when no config exists", async () => {
-    render(<SettingsModal onClose={onClose} onSaved={onSaved} />);
+    render(
+      <SettingsModal
+        onClose={onClose}
+        onSaved={onSaved}
+        fontScale={1}
+        onFontScaleChange={onFontScaleChange}
+      />,
+    );
     await waitFor(() => {
       expect(screen.getByText(`Default: ${DEFAULT_DIR}`)).toBeInTheDocument();
     });
@@ -47,7 +55,14 @@ describe("SettingsModal", () => {
   });
 
   it("shows active path when effective dir exists", async () => {
-    render(<SettingsModal onClose={onClose} onSaved={onSaved} />);
+    render(
+      <SettingsModal
+        onClose={onClose}
+        onSaved={onSaved}
+        fontScale={1}
+        onFontScaleChange={onFontScaleChange}
+      />,
+    );
     await waitFor(() => {
       expect(screen.getByText(new RegExp(`✓ Active:`))).toBeInTheDocument();
     });
@@ -58,7 +73,14 @@ describe("SettingsModal", () => {
       if (cmd === "get_settings") return Promise.resolve(makeSettings(null, false));
       return Promise.resolve();
     });
-    render(<SettingsModal onClose={onClose} onSaved={onSaved} />);
+    render(
+      <SettingsModal
+        onClose={onClose}
+        onSaved={onSaved}
+        fontScale={1}
+        onFontScaleChange={onFontScaleChange}
+      />,
+    );
     await waitFor(() => {
       expect(screen.getByText(new RegExp(`✗ Not found:`))).toBeInTheDocument();
     });
@@ -69,14 +91,28 @@ describe("SettingsModal", () => {
       if (cmd === "get_settings") return Promise.resolve(makeSettings("/custom/path"));
       return Promise.resolve();
     });
-    render(<SettingsModal onClose={onClose} onSaved={onSaved} />);
+    render(
+      <SettingsModal
+        onClose={onClose}
+        onSaved={onSaved}
+        fontScale={1}
+        onFontScaleChange={onFontScaleChange}
+      />,
+    );
     await waitFor(() => {
       expect(screen.getByDisplayValue("/custom/path")).toBeInTheDocument();
     });
   });
 
   it("calls set_projects_dir on save", async () => {
-    render(<SettingsModal onClose={onClose} onSaved={onSaved} />);
+    render(
+      <SettingsModal
+        onClose={onClose}
+        onSaved={onSaved}
+        fontScale={1}
+        onFontScaleChange={onFontScaleChange}
+      />,
+    );
     await waitFor(() => expect(screen.getByText(`Default: ${DEFAULT_DIR}`)).toBeInTheDocument());
 
     const input = screen.getByLabelText("Projects Directory");
@@ -96,7 +132,14 @@ describe("SettingsModal", () => {
       if (cmd === "set_projects_dir") return Promise.resolve(makeSettings(null));
       return Promise.resolve();
     });
-    render(<SettingsModal onClose={onClose} onSaved={onSaved} />);
+    render(
+      <SettingsModal
+        onClose={onClose}
+        onSaved={onSaved}
+        fontScale={1}
+        onFontScaleChange={onFontScaleChange}
+      />,
+    );
     await waitFor(() => expect(screen.getByDisplayValue("/custom/path")).toBeInTheDocument());
 
     fireEvent.click(screen.getByText("Reset to Default"));
@@ -109,7 +152,14 @@ describe("SettingsModal", () => {
   });
 
   it("shows no-distros hint when WSL reports none", async () => {
-    render(<SettingsModal onClose={onClose} onSaved={onSaved} />);
+    render(
+      <SettingsModal
+        onClose={onClose}
+        onSaved={onSaved}
+        fontScale={1}
+        onFontScaleChange={onFontScaleChange}
+      />,
+    );
     await waitFor(() => {
       expect(screen.getByText(/No WSL distributions detected/)).toBeInTheDocument();
     });
@@ -121,7 +171,14 @@ describe("SettingsModal", () => {
       if (cmd === "list_wsl_distros") return Promise.resolve(["Ubuntu", "Debian"]);
       return Promise.resolve();
     });
-    render(<SettingsModal onClose={onClose} onSaved={onSaved} />);
+    render(
+      <SettingsModal
+        onClose={onClose}
+        onSaved={onSaved}
+        fontScale={1}
+        onFontScaleChange={onFontScaleChange}
+      />,
+    );
 
     await waitFor(() => expect(screen.getByLabelText("Ubuntu")).toBeInTheDocument());
     expect((screen.getByLabelText("Ubuntu") as HTMLInputElement).checked).toBe(true);
@@ -137,7 +194,14 @@ describe("SettingsModal", () => {
         return Promise.resolve(makeSettings(null, true, ["Ubuntu", "Debian"]));
       return Promise.resolve();
     });
-    render(<SettingsModal onClose={onClose} onSaved={onSaved} />);
+    render(
+      <SettingsModal
+        onClose={onClose}
+        onSaved={onSaved}
+        fontScale={1}
+        onFontScaleChange={onFontScaleChange}
+      />,
+    );
 
     await waitFor(() => expect(screen.getByLabelText("Debian")).toBeInTheDocument());
     fireEvent.click(screen.getByLabelText("Debian"));
@@ -152,13 +216,37 @@ describe("SettingsModal", () => {
     expect(onClose).toHaveBeenCalled();
   });
 
+  it("highlights the active font scale and applies a new one on click", async () => {
+    render(
+      <SettingsModal
+        onClose={onClose}
+        onSaved={onSaved}
+        fontScale={1}
+        onFontScaleChange={onFontScaleChange}
+      />,
+    );
+    await waitFor(() => expect(screen.getByText(`Default: ${DEFAULT_DIR}`)).toBeInTheDocument());
+
+    expect(screen.getByRole("button", { name: "100%", pressed: true })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "150%" }));
+    expect(onFontScaleChange).toHaveBeenCalledWith(1.5);
+  });
+
   it("shows error when save fails", async () => {
     mockInvoke.mockImplementation((cmd: string) => {
       if (cmd === "get_settings") return Promise.resolve(makeSettings(null));
       if (cmd === "set_projects_dir") return Promise.reject("path does not exist: /bad");
       return Promise.resolve();
     });
-    render(<SettingsModal onClose={onClose} onSaved={onSaved} />);
+    render(
+      <SettingsModal
+        onClose={onClose}
+        onSaved={onSaved}
+        fontScale={1}
+        onFontScaleChange={onFontScaleChange}
+      />,
+    );
     await waitFor(() => expect(screen.getByText(`Default: ${DEFAULT_DIR}`)).toBeInTheDocument());
 
     const input = screen.getByLabelText("Projects Directory");

@@ -1,9 +1,43 @@
 import { describe, it, expect, vi } from "vitest";
-import { createRef } from "react";
+import { createRef, type ReactNode } from "react";
 import { render, screen, fireEvent } from "@testing-library/react";
-import { MessageList } from "./MessageList";
+import { MessageList, selectionScrollTarget } from "./MessageList";
 import type { DisplayMessage } from "../types";
 import type { ViewActions } from "../hooks/useViewActions";
+
+// react-virtuoso virtualises by measured height, which jsdom does not provide,
+// so it would render nothing in tests. Mock it to render every row via
+// itemContent(index, undefined, context) — these tests exercise MessageList's
+// row rendering/callbacks, not the windowing.
+vi.mock("react-virtuoso", () => ({
+  Virtuoso: ({
+    totalCount = 0,
+    itemContent,
+    context,
+    className,
+    isScrolling,
+  }: {
+    totalCount?: number;
+    itemContent: (index: number, data: unknown, context: unknown) => ReactNode;
+    context?: unknown;
+    className?: string;
+    isScrolling?: (scrolling: boolean) => void;
+  }) => (
+    <div className={className}>
+      {/* Test-only hooks to simulate Virtuoso reporting scroll start/stop. */}
+      <button type="button" data-testid="simulate-scrolling" onClick={() => isScrolling?.(true)} />
+      <button
+        type="button"
+        data-testid="simulate-scroll-stop"
+        onClick={() => isScrolling?.(false)}
+      />
+      {Array.from({ length: totalCount }, (_, index) => (
+        // oxlint-disable-next-line react/no-array-index-key
+        <div key={index}>{itemContent(index, undefined, context)}</div>
+      ))}
+    </div>
+  ),
+}));
 
 function makeMessage(overrides: Partial<DisplayMessage> = {}): DisplayMessage {
   return {
@@ -31,19 +65,27 @@ function makeMessage(overrides: Partial<DisplayMessage> = {}): DisplayMessage {
   };
 }
 
-function defaultProps(overrides: Partial<Parameters<typeof MessageList>[0]> = {}) {
+/** Build MessageList props from a plain messages array (test convenience): the
+ * component now takes count/getMessage/roles rather than the array itself. */
+function defaultProps(
+  overrides: { messages?: DisplayMessage[] } & Partial<Parameters<typeof MessageList>[0]> = {},
+) {
+  const { messages = [], ...rest } = overrides;
   return {
-    messages: [] as DisplayMessage[],
+    count: messages.length,
+    getMessage: (index: number): DisplayMessage | undefined => messages[index],
+    roles: messages.map((m) => m.role),
     selectedIndex: -1,
     expandedSet: new Set<number>(),
     ongoing: false,
+    onRangeChange: vi.fn(),
     onSelect: vi.fn(),
     onToggle: vi.fn(),
     onOpenDetail: vi.fn(),
     viewActionsRef: createRef() as React.MutableRefObject<ViewActions>,
     onExpandAll: vi.fn(),
     onCollapseAll: vi.fn(),
-    ...overrides,
+    ...rest,
   };
 }
 
@@ -215,9 +257,85 @@ describe("MessageList", () => {
     expect(dots.length).toBe(1);
   });
 
+  it("renders a role-aware placeholder skeleton for an unloaded index", () => {
+    const { container } = render(
+      <MessageList
+        {...defaultProps({
+          count: 2,
+          roles: ["user", "claude"],
+          getMessage: () => undefined,
+        })}
+      />,
+    );
+    const placeholders = container.querySelectorAll(".message--placeholder");
+    expect(placeholders.length).toBe(2);
+    expect(placeholders[0]).toHaveClass("message--user");
+    expect(placeholders[1]).toHaveClass("message--claude");
+    // Multi-line skeleton (header + content + short line), not a single sliver,
+    // so the swap to real content is a small reflow rather than a large jump.
+    expect(placeholders[0].querySelectorAll(".message__placeholder-line").length).toBe(3);
+  });
+
+  it("adds the scrolling class when Virtuoso reports isScrolling(true)", () => {
+    const messages = [makeMessage({ content: "Hi" })];
+    const { container, getByTestId } = render(<MessageList {...defaultProps({ messages })} />);
+
+    expect(container.querySelector(".message-list")).not.toHaveClass("message-list--scrolling");
+    fireEvent.click(getByTestId("simulate-scrolling"));
+    expect(container.querySelector(".message-list")).toHaveClass("message-list--scrolling");
+  });
+
+  it("forces a hover recompute at the last cursor position once scrolling settles", async () => {
+    vi.useFakeTimers();
+    const messages = [makeMessage({ content: "Hi" })];
+    const { getByTestId } = render(<MessageList {...defaultProps({ messages })} />);
+    const dispatchSpy = vi.spyOn(document, "dispatchEvent");
+    const rafSpy = vi
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation((cb) => window.setTimeout(() => cb(0), 0));
+
+    fireEvent.mouseMove(window, { clientX: 42, clientY: 17 });
+    fireEvent.click(getByTestId("simulate-scrolling"));
+    fireEvent.click(getByTestId("simulate-scroll-stop"));
+    vi.runAllTimers();
+
+    const dispatched = dispatchSpy.mock.calls
+      .map((call) => call[0])
+      .find((event) => event.type === "mousemove") as MouseEvent | undefined;
+    expect(dispatched).toBeDefined();
+    expect(dispatched?.clientX).toBe(42);
+    expect(dispatched?.clientY).toBe(17);
+
+    rafSpy.mockRestore();
+    dispatchSpy.mockRestore();
+    vi.useRealTimers();
+  });
+
   it("does not show ongoing dots when ongoing=false", () => {
     const messages = [makeMessage({ content: "No spinner" })];
     const { container } = render(<MessageList {...defaultProps({ messages, ongoing: false })} />);
     expect(container.querySelector(".ongoing-dots")).not.toBeInTheDocument();
+  });
+});
+
+describe("selectionScrollTarget", () => {
+  const range = { startIndex: 5, endIndex: 10 };
+
+  it("returns null when nothing is selected", () => {
+    expect(selectionScrollTarget(-1, range)).toBeNull();
+  });
+
+  it("returns null when the selection is within the rendered window", () => {
+    expect(selectionScrollTarget(5, range)).toBeNull();
+    expect(selectionScrollTarget(7, range)).toBeNull();
+    expect(selectionScrollTarget(10, range)).toBeNull();
+  });
+
+  it("aligns to the top when the selection is above the window", () => {
+    expect(selectionScrollTarget(2, range)).toEqual({ index: 2, align: "start" });
+  });
+
+  it("aligns to the end when the selection is below the window", () => {
+    expect(selectionScrollTarget(15, range)).toEqual({ index: 15, align: "end" });
   });
 });

@@ -3,6 +3,7 @@ description = "Default permissions for all claude-code-trace commands"
 permissions = [
   "allow-discover-sessions",
   "allow-load-session",
+  "allow-load-message",
   "allow-get-session-meta",
   "allow-watch-session",
   "allow-unwatch-session",
@@ -27,6 +28,11 @@ commands.allow = ["discover_sessions"]
 identifier = "allow-load-session"
 description = "Allow loading a session file"
 commands.allow = ["load_session"]
+
+[[permission]]
+identifier = "allow-load-message"
+description = "Allow loading a single full (heavy-body) message by index"
+commands.allow = ["load_message"]
 
 [[permission]]
 identifier = "allow-get-session-meta"

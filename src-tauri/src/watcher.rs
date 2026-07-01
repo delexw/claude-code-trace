@@ -6,13 +6,8 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::mpsc;
 
-use crate::convert::*;
-use crate::parser::chunk::build_chunks;
-use crate::parser::classify::ClassifiedMsg;
-use crate::parser::ongoing::OngoingChecker;
-use crate::parser::session::{read_session_with_debug_hooks, IncrementalTokenScanner};
-use crate::parser::subagent::{discover_and_link_all, inject_orphan_subagents};
-use crate::parser::team::reconstruct_teams;
+use crate::parser::session::IncrementalTokenScanner;
+use crate::session_load::{build_view, TimeFilter};
 use crate::state::AppState;
 
 const WATCHER_DEBOUNCE: Duration = Duration::from_millis(1000);
@@ -70,10 +65,20 @@ impl WatcherHandle {
     }
 }
 
-/// Serializable session update event.
+/// Serializable session-update signal.
+///
+/// This is a lightweight signal, not a data dump: it carries the total message
+/// `count` and the per-message `roles` index (so a virtualized client can resize
+/// its list and refetch the visible window), plus session-level fields, but
+/// never the heavy message bodies. Clients re-fetch the window they're viewing.
 #[derive(Clone, serde::Serialize)]
 struct SessionUpdatePayload {
-    messages: Vec<DisplayMessage>,
+    /// Total number of messages after the update.
+    count: usize,
+    /// Role of every message, in order (length == `count`).
+    roles: Vec<String>,
+    /// Latest Claude context-window fill (tokens); 0 if none.
+    context_tokens: i64,
     teams: Vec<crate::parser::team::TeamSnapshot>,
     ongoing: bool,
     permission_mode: String,
@@ -180,35 +185,29 @@ pub fn start_session_watcher(
                     }
                     prev_file_size = file_size;
 
-                    // Re-read the full session from scratch on every event.
+                    // Re-build the display view from scratch on every event.
                     // Using a local variable (dropped at end of each iteration)
                     // avoids holding all classified messages in memory for the
                     // entire session lifetime — which caused multi-GB growth
-                    // for long sessions with large tool inputs/outputs.
-                    let all_classified = match read_session_with_debug_hooks(&path_for_rebuild) {
-                        Ok((msgs, _, _)) => msgs,
+                    // for long sessions with large tool inputs/outputs. The
+                    // heavy message bodies are used only to derive count/roles
+                    // and are never sent — clients refetch the window they view.
+                    let view = match build_view(&path_for_rebuild, TimeFilter::default()) {
+                        Ok(v) => v,
                         Err(_) => continue,
                     };
 
-                    let mut chunks = build_chunks(&all_classified);
-
-                    let (mut all_procs, color_map) = discover_and_link_all(&path_for_rebuild, &chunks);
-                    inject_orphan_subagents(&mut chunks, &mut all_procs);
-
-                    let ongoing = OngoingChecker::new(&chunks, &all_procs, &path_for_rebuild).is_ongoing();
+                    let ongoing = view.ongoing;
 
                     // Share ongoing status with AppState so the picker can use it.
                     state.set_watched_ongoing(path_for_rebuild.clone(), ongoing);
-
-                    let teams = reconstruct_teams(&chunks, &all_procs);
-                    let messages = chunks_to_messages(&chunks, &all_procs, &color_map);
 
                     // Skip emit if nothing meaningful changed.
                     // Track both message count and total item count so that hook
                     // events (which are added inside existing AI chunks without
                     // creating a new top-level message) still trigger an emit.
-                    let msg_count = messages.len();
-                    let item_count: usize = messages.iter().map(|m| m.items.len()).sum();
+                    let msg_count = view.messages.len();
+                    let item_count: usize = view.messages.iter().map(|m| m.items.len()).sum();
                     if msg_count == prev_msg_count
                         && item_count == prev_item_count
                         && !ongoing
@@ -223,23 +222,22 @@ pub fn start_session_watcher(
                     prev_item_count = item_count;
                     prev_ongoing = ongoing;
 
-                    // Extract last permission_mode from UserMsg entries.
-                    let mut permission_mode = String::from("default");
-                    for msg in all_classified.iter().rev() {
-                        if let ClassifiedMsg::User(u) = msg {
-                            if !u.permission_mode.is_empty() {
-                                permission_mode = u.permission_mode.clone();
-                                break;
-                            }
-                        }
-                    }
+                    let permission_mode = if view.permission_mode.is_empty() {
+                        String::from("default")
+                    } else {
+                        view.permission_mode.clone()
+                    };
+                    let roles = crate::session_load::message_roles(&view.messages);
+                    let context_tokens = crate::session_load::latest_context_tokens(&view.messages);
 
                     // Incrementally scan only new bytes for token totals.
                     let session_totals = token_scanner.scan_new_bytes(&path_for_rebuild);
 
                     let payload = SessionUpdatePayload {
-                        messages,
-                        teams,
+                        count: msg_count,
+                        roles,
+                        context_tokens,
+                        teams: view.teams,
                         ongoing,
                         permission_mode,
                         session_totals,

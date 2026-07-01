@@ -23,6 +23,7 @@ graph TB
         GET_DIRS["GET /api/project-dirs"]
         POST_SESSIONS["POST /api/sessions"]
         POST_LOAD["POST /api/session/load"]
+        POST_MESSAGE["POST /api/session/message"]
         GET_META["GET /api/session/meta"]
         POST_WATCH["POST /api/session/watch"]
         POST_UNWATCH["POST /api/session/unwatch"]
@@ -40,6 +41,7 @@ graph TB
     ROUTER --> GET_DIRS
     ROUTER --> POST_SESSIONS
     ROUTER --> POST_LOAD
+    ROUTER --> POST_MESSAGE
     ROUTER --> GET_META
     ROUTER --> POST_WATCH
     ROUTER --> POST_UNWATCH
@@ -120,21 +122,31 @@ Results are cached for 2 seconds (see [03-state-management.md](03-state-manageme
 
 ### `POST /api/session/load`
 
-Fully parses a session JSONL file and returns display-ready messages.
+Fully parses a session JSONL file and returns a windowed slice of display-ready messages,
+plus a lightweight full-session index so virtualized clients can size and scroll the list
+without holding every message's heavy body in memory.
 
 **Request**
 
 ```json
-{ "path": "/path/to/session.jsonl" }
+{ "path": "/path/to/session.jsonl", "start": 0, "limit": 200 }
 ```
+
+`start`/`limit` are optional and request an index window into the message list — `start`
+defaults to `0`, `limit` defaults to unset (load to the end). Omit both to load the whole
+session.
 
 **Response**
 
 ```json
 {
   "messages": [
-    /* DisplayMessage[] */
+    /* DisplayMessage[] — only the requested window */
   ],
+  "count": 5000,
+  "start": 0,
+  "roles": ["user", "assistant", "..."],
+  "context_tokens": 12345,
   "teams": [
     /* TeamSnapshot[] */
   ],
@@ -142,6 +154,35 @@ Fully parses a session JSONL file and returns display-ready messages.
   "meta": { "cwd": "...", "git_branch": "main", "permission_mode": "default" },
   "session_totals": { "total_tokens": 5000, "cost_usd": 0.02, "model": "..." }
 }
+```
+
+- `messages` — the windowed slice only, not the whole session.
+- `count` — total number of messages in the full session.
+- `start` — the index of the first message in the returned `messages` slice.
+- `roles` — the role of every message in the full session (length == `count`); lets a
+  virtualized client render placeholders and drive expand-all without holding the heavy
+  message bodies for rows outside the window.
+- `context_tokens` — latest Claude context-window fill, for the context gauge.
+
+---
+
+### `POST /api/session/message`
+
+Returns the single full (heavy-body) `DisplayMessage` at `index`, for the Detail view to
+fetch on demand — the windowed list from `session/load` carries lightened messages with no
+tool-output bodies, so the detail view fetches the full message separately when the user
+opens it.
+
+**Request**
+
+```json
+{ "path": "/path/to/session.jsonl", "index": 42 }
+```
+
+**Response**
+
+```json
+/* DisplayMessage, or null if index is out of range */
 ```
 
 ---
@@ -278,12 +319,14 @@ The commands share the same `AppState` and call the same parser functions.
 flowchart LR
     subgraph IPC["Tauri IPC (desktop)"]
         T_SESS["load_session command"]
+        T_MSG["load_message command"]
         T_WATCH["watch_session command"]
         T_PICK["discover_sessions command"]
     end
 
     subgraph HTTP["HTTP API (browser/TUI)"]
         H_SESS["POST /api/session/load"]
+        H_MSG["POST /api/session/message"]
         H_WATCH["POST /api/session/watch"]
         H_PICK["POST /api/sessions"]
     end
@@ -291,9 +334,11 @@ flowchart LR
     STATE["Arc&lt;AppState&gt;"]
 
     T_SESS --> STATE
+    T_MSG --> STATE
     T_WATCH --> STATE
     T_PICK --> STATE
     H_SESS --> STATE
+    H_MSG --> STATE
     H_WATCH --> STATE
     H_PICK --> STATE
 ```

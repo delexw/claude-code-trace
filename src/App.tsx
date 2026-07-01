@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { invoke } from "./lib/invoke";
-import type { ViewState, SessionInfo } from "./types";
+import type { ViewState, SessionInfo, DisplayMessage } from "./types";
 import { useSession } from "./hooks/useSession";
 import { usePicker } from "./hooks/usePicker";
 import { useToggleSet } from "./hooks/useToggleSet";
 import { useKeyboard } from "./hooks/useKeyboard";
 import { useViewActionsRef, useViewActionCallbacks } from "./hooks/useViewActions";
+import { useFontScale } from "./hooks/useFontScale";
 import { SessionPicker } from "./components/SessionPicker";
 import { MessageList } from "./components/MessageList";
 import { MessageDetail } from "./components/MessageDetail";
@@ -17,6 +18,12 @@ import { ViewToolbar } from "./components/ViewToolbar";
 import { ProjectTree, useProjectKeys, useProjectItems } from "./components/ProjectTree";
 import { ResizeHandle } from "./components/ResizeHandle";
 import { SettingsModal } from "./components/SettingsModal";
+import {
+  shouldRecycle,
+  saveRestoreState,
+  takeRestoreState,
+  reloadWebview,
+} from "./lib/webviewRecycle";
 
 export function App() {
   const [view, setView] = useState<ViewState>("picker");
@@ -29,6 +36,15 @@ export function App() {
   const [sidebarHighlight, setSidebarHighlight] = useState(0); // index in project list (0 = "All")
   const [showSettings, setShowSettings] = useState(false);
   const [collapsedKeys, setCollapsedKeys] = useState<Set<string>>(new Set());
+  const [fontScale, setFontScale] = useFontScale();
+  // Full (heavy-body) message for the detail view, fetched on demand since the
+  // list only holds lightened messages.
+  const [detailMessage, setDetailMessage] = useState<DisplayMessage | null>(null);
+  const [detailError, setDetailError] = useState(false);
+  const detailReqRef = useRef(0);
+  // Counts session opens this page lifetime, to periodically recycle the
+  // webview (see lib/webviewRecycle.ts for why).
+  const switchCountRef = useRef(0);
 
   const toggleCollapse = useCallback((key: string) => {
     setCollapsedKeys((prev) => {
@@ -109,50 +125,102 @@ export function App() {
     }
   }, [session.sessionPath, session.ongoing, updateSessionOngoing]);
 
-  // Handle session selection from picker
-  const handleSelectSession = useCallback(
-    (sessionInfo: SessionInfo) => {
-      void loadSession(sessionInfo.path);
+  const openSessionByPath = useCallback(
+    (path: string) => {
+      void loadSession(path);
       setView("list");
       setSelectedMessage(0);
       clearExpanded();
+      // Release the previous session's full (heavy-body) detail message, if
+      // any was fetched — otherwise it stays retained in state indefinitely.
+      setDetailMessage(null);
+      setDetailError(false);
     },
     [loadSession, clearExpanded],
   );
 
+  // Restore whichever session was open right before a memory-driven webview
+  // reload (see lib/webviewRecycle.ts), so the reload isn't disruptive.
+  const restoredRef = useRef(false);
+  useEffect(() => {
+    if (restoredRef.current) return;
+    restoredRef.current = true;
+    const pending = takeRestoreState();
+    if (pending) openSessionByPath(pending.sessionPath);
+  }, [openSessionByPath]);
+
+  // Handle session selection from picker
+  const handleSelectSession = useCallback(
+    (sessionInfo: SessionInfo) => {
+      switchCountRef.current += 1;
+      if (shouldRecycle(switchCountRef.current)) {
+        saveRestoreState({ sessionPath: sessionInfo.path });
+        // Reload is async (waits for in-flight invokes to settle first — see
+        // webviewRecycle.ts). If it ever throws, fall back to opening the
+        // session normally rather than silently doing nothing.
+        void reloadWebview().catch(() => openSessionByPath(sessionInfo.path));
+        return;
+      }
+      openSessionByPath(sessionInfo.path);
+    },
+    [openSessionByPath],
+  );
+
   // Auto-select newest message (last index) when messages load
   useEffect(() => {
-    if (session.messages.length > 0 && view === "list") {
-      setSelectedMessage((prev) =>
-        prev >= session.messages.length ? session.messages.length - 1 : prev,
-      );
+    if (session.count > 0 && view === "list") {
+      setSelectedMessage((prev) => (prev >= session.count ? session.count - 1 : prev));
     }
-  }, [session.messages.length, view]);
+  }, [session.count, view]);
 
-  // Open detail view
-  const openDetail = useCallback((index: number) => {
-    setSelectedMessage(index);
-    setView("detail");
-  }, []);
+  // Open detail view. The list holds only lightened messages, so fetch the full
+  // (heavy-body) message on demand. Guard against out-of-order resolves when the
+  // user opens several messages quickly, and surface failures instead of hanging
+  // on the loading spinner forever.
+  const openDetail = useCallback(
+    (index: number) => {
+      const req = ++detailReqRef.current;
+      setSelectedMessage(index);
+      setDetailMessage(null);
+      setDetailError(false);
+      setView("detail");
+      // Leaving the list view — drop its loaded pages so they don't sit in
+      // memory while Detail is showing. Coming back re-fetches the visible
+      // window fresh instead of holding onto stale data indefinitely.
+      session.clearWindow();
+      session
+        .loadFullMessage(index)
+        .then((msg) => {
+          if (req !== detailReqRef.current) return;
+          if (msg) setDetailMessage(msg);
+          else setDetailError(true);
+        })
+        .catch(() => {
+          if (req === detailReqRef.current) setDetailError(true);
+        });
+    },
+    [session],
+  );
 
   // -- View actions: each view registers its own expand/collapse handlers --
 
   const viewActionsRef = useViewActionsRef();
   const { expandAll, collapseAll } = useViewActionCallbacks(viewActionsRef);
 
-  // Register message list expand/collapse when in list view.
+  // Register message list expand/collapse when in list view. Uses the role
+  // index so it works over the whole session without loading every body.
   const listExpandAll = useCallback(() => {
     const claudeIndices: number[] = [];
-    session.messages.forEach((msg, i) => {
-      if (msg.role === "claude") claudeIndices.push(i);
+    session.roles.forEach((role, i) => {
+      if (role === "claude") claudeIndices.push(i);
     });
     expandMessages(claudeIndices);
-  }, [session.messages, expandMessages]);
+  }, [session.roles, expandMessages]);
 
   // Visual top = newest message = last index (display is reversed)
   const jumpToTop = useCallback(() => {
-    setSelectedMessage(Math.max(session.messages.length - 1, 0));
-  }, [session.messages.length]);
+    setSelectedMessage(Math.max(session.count - 1, 0));
+  }, [session.count]);
 
   // Visual bottom = oldest message = index 0
   const jumpToBottom = useCallback(() => {
@@ -175,7 +243,12 @@ export function App() {
   }, []);
 
   const backToList = useCallback(() => {
-    if (sessionPath) setView("list");
+    if (!sessionPath) return;
+    setView("list");
+    // Leaving Detail — release the full (heavy-body) message it held so it
+    // doesn't linger in memory until the next Detail open overwrites it.
+    setDetailMessage(null);
+    setDetailError(false);
   }, [sessionPath]);
 
   const toggleKeybinds = useCallback(() => {
@@ -222,8 +295,7 @@ export function App() {
   } else {
     switch (view) {
       case "list": {
-        const moveDown = () =>
-          setSelectedMessage((i) => Math.min(i + 1, session.messages.length - 1));
+        const moveDown = () => setSelectedMessage((i) => Math.min(i + 1, session.count - 1));
         const moveUp = () => setSelectedMessage((i) => Math.max(i - 1, 0));
         keyMap["j"] = moveDown;
         keyMap["ArrowDown"] = moveDown;
@@ -233,7 +305,7 @@ export function App() {
         keyMap["g"] = jumpToBottom;
         keyMap["Tab"] = () => toggleMessage(selectedMessage);
         keyMap["Enter"] = () => {
-          if (session.messages.length > 0) openDetail(selectedMessage);
+          if (session.count > 0) openDetail(selectedMessage);
         };
         keyMap["e"] = expandAll;
         keyMap["c"] = collapseAll;
@@ -330,10 +402,13 @@ export function App() {
         }
         return (
           <MessageList
-            messages={session.messages}
+            count={session.count}
+            getMessage={session.getMessage}
+            roles={session.roles}
             selectedIndex={selectedMessage}
             expandedSet={expandedMessages}
             ongoing={session.ongoing}
+            onRangeChange={session.ensureRange}
             onSelect={setSelectedMessage}
             onToggle={toggleMessage}
             onOpenDetail={openDetail}
@@ -343,18 +418,38 @@ export function App() {
           />
         );
 
-      case "detail":
-        if (session.messages.length > 0 && selectedMessage < session.messages.length) {
+      case "detail": {
+        if (detailMessage) {
           return (
             <MessageDetail
-              message={session.messages[selectedMessage]}
+              message={detailMessage}
               ongoing={session.ongoing}
-              onBack={() => setView("list")}
+              onBack={backToList}
               viewActionsRef={viewActionsRef}
             />
           );
         }
+        if (detailError) {
+          return (
+            <div className="session-loading">
+              Failed to load message.{" "}
+              <button className="link-button" onClick={backToList}>
+                Back
+              </button>
+            </div>
+          );
+        }
+        // Full body still loading (fetched on demand from the cached build).
+        if (selectedMessage < session.count) {
+          return (
+            <div className="session-loading">
+              <span className="braille-spinner" />
+              Loading message...
+            </div>
+          );
+        }
         return null;
+      }
 
       case "team":
         return <TeamBoard teams={session.teams} />;
@@ -371,7 +466,7 @@ export function App() {
         <InfoBar
           meta={session.meta}
           gitInfo={session.gitInfo}
-          messages={session.messages}
+          contextTokens={session.contextTokens}
           sessionTotals={session.sessionTotals}
           sessionPath={session.sessionPath}
           ongoing={session.ongoing}
@@ -422,7 +517,12 @@ export function App() {
       />
 
       {showSettings && (
-        <SettingsModal onClose={() => setShowSettings(false)} onSaved={loadProjectDirs} />
+        <SettingsModal
+          onClose={() => setShowSettings(false)}
+          onSaved={loadProjectDirs}
+          fontScale={fontScale}
+          onFontScaleChange={setFontScale}
+        />
       )}
     </div>
   );

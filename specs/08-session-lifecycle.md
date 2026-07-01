@@ -35,15 +35,26 @@ sequenceDiagram
 
 ## Phase 2: Session Selection and Loading
 
+Loading a session is windowed, not whole-file: the frontend (`useSession.ts`) fetches
+message bodies a `PAGE_SIZE=100` page at a time via `ensureRange`, and keeps only a
+sparse in-memory `Map<index, DisplayMessage>` of the pages near the viewport — far pages
+are evicted as the user scrolls. `load_session` (Tauri command / `POST
+/api/session/load`) accepts `start`/`limit` windowing params and always returns a
+`LoadResult`: the requested `messages` slice plus `count` (total message count), `start`,
+`roles` (role of every message, the lightweight full-session index), `context_tokens`,
+and the existing `teams`/`ongoing`/`meta`/`session_totals` fields (which describe the
+whole session regardless of the window).
+
 ```mermaid
 sequenceDiagram
     participant USER as User
-    participant FE as Frontend
+    participant FE as Frontend (useSession)
     participant RUST as Rust Backend
     participant FS as File System
 
     USER ->> FE: select session from picker
-    FE ->> RUST: POST /api/session/load\n{ path: "...session.jsonl" }
+    FE ->> RUST: load_session\n{ path, start: 0, limit: 0 }
+    Note over FE,RUST: metadata-only fetch to learn count/roles
 
     RUST ->> FS: read JSONL file\n(LineReader, buffered)
     FS -->> RUST: raw lines
@@ -60,14 +71,47 @@ sequenceDiagram
     RUST ->> RUST: reconstruct_teams()
     RUST ->> RUST: OngoingChecker.is_ongoing()
     RUST ->> RUST: chunks_to_messages()\nChunk[] → DisplayMessage[]
-    RUST ->> RUST: cache result\n(path, mtime, size) → CachedSession
+    RUST ->> RUST: lighten_messages()\nstrip tool_input/tool_result/tool_result_json
+    RUST ->> RUST: cache lightened build\n(path, size) → CachedLight
 
-    RUST -->> FE: { messages, teams, ongoing, meta, session_totals }
+    RUST -->> FE: LoadResult\n{ messages: [], count, roles, context_tokens,\nteams, ongoing, meta, session_totals }
 
-    FE ->> FE: render MessageList
+    FE ->> FE: render MessageList shell\n(placeholders for count rows)
+    FE ->> RUST: ensureRange(tail window)\nload_session { start, limit: PAGE_SIZE }
+    RUST ->> RUST: slice_light()\nreuse cached CachedLight, no re-parse
+    RUST -->> FE: LoadResult\n{ messages: [...page...], ... }
+    FE ->> FE: insert page into windowMessages Map
+
     FE ->> RUST: POST /api/session/watch\n{ path: "...session.jsonl" }
     RUST ->> RUST: start_session_watcher()\nnotify watcher on session dir
 ```
+
+As the user scrolls, the virtualized list calls `ensureRange(start, end)` again, which
+fetches only the missing pages in that range and evicts pages outside a small keep-margin
+band around the viewport — the session's full message list is never held in memory on
+the frontend.
+
+### Detail view message fetch
+
+Detail-view message bodies are fetched separately and on demand, never as part of the
+list load. Opening a message in Detail calls a distinct backend entry point:
+
+```mermaid
+sequenceDiagram
+    participant USER as User
+    participant FE as Frontend
+    participant RUST as Rust Backend
+
+    USER ->> FE: click a message row
+    FE ->> FE: view = "detail"\nsession.clearWindow()
+    FE ->> RUST: load_message\n(or POST /api/session/message)\n{ path, index }
+    RUST ->> RUST: full_message_at()\nre-parse whole session fresh\n(no cache, heavy build dropped after)
+    RUST -->> FE: DisplayMessage | null\n(full tool_input/tool_result bodies)
+    FE ->> FE: render Detail view
+```
+
+See "Opening the Detail view drops the list window" below for what happens to the list's
+loaded pages when this fetch begins.
 
 ---
 
@@ -166,21 +210,55 @@ flowchart TD
 
 ## Caching Strategy Throughout Lifecycle
 
+There are three independent caches in `AppState`, each serving a different consumer.
+They are not layers of the same cache — a request only ever touches one of them.
+
+**`session_cache` (`SessionCache`, keyed by `(path, mtime, size)`)** — the picker's
+per-file metadata cache. It backs `discover_all_project_sessions` (called from
+`discover_sessions_cached`): scanning every project directory's `SessionInfo` (title,
+timestamps, ongoing flag, token totals) on every picker refresh would mean re-reading
+every session file's tail on every refresh. A cache hit re-applies ongoing staleness
+(`apply_staleness`, ~60s) and a subagent-activity recheck to the cached `SessionInfo`
+rather than reparsing, so an ongoing session still reports fresh liveness without a full
+rescan. This is the cache the "First Load / Subsequent Loads / Ongoing Session" flow
+below describes; it never holds `DisplayMessage[]` — only lightweight `SessionInfo`.
+
+**`session_light_cache` (`CachedLight`, keyed by `(path, size)` — no mtime)** — the
+active session's windowed-list-fetch cache, used only by `load_session_windowed`.
+Scrolling the message list calls `ensureRange`, which issues one `load_session` per
+missing page; without this cache each page fetch would re-parse and re-link the whole
+session file. On a cache hit, `slice_light` windows the already-built `LightBuild`
+(messages with heavy tool bodies stripped by `lighten_messages`) instead of rebuilding.
+A different path, or the same path with a changed size (grown or truncated), invalidates
+and rebuilds. Time-filtered loads bypass this cache entirely (rare, used only by the
+by-id range endpoint). Only one session's build is held at a time — `AppState` has a
+single `Mutex<Option<CachedLight>>` slot, not a map — so opening a new session evicts
+the previous one automatically. `clear_session_build_cache()` also drops it explicitly
+(see "Opening the Detail view drops the list window" below).
+
+**No cache for `full_message_at`** — the Detail view's single-message fetch. This
+deliberately re-parses the whole session fresh (`build_session`) on every call and drops
+the heavy build as soon as one message is extracted. A tool-output-heavy session's full
+build can be hundreds of MB; caching it for as long as the session stays open would hold
+that in the Rust process the whole time. Re-parsing trades per-click latency (roughly the
+cost of the session's first list load) for never persisting heavy tool-output bodies in
+memory between Detail clicks.
+
 ```mermaid
 flowchart LR
-    subgraph First_Load["First Load"]
-        L1["Read JSONL\n(full parse)"]
-        L1 --> CACHE["SessionCache.insert\n(path, mtime, size → CachedSession)"]
+    subgraph First_Load["First Load (picker metadata)"]
+        L1["Read JSONL tail\n(scan_session_metadata)"]
+        L1 --> CACHE["SessionCache.insert\n(path, mtime, size → SessionInfo)"]
     end
 
     subgraph Subsequent_Loads["Subsequent Loads (same file, no change)"]
         L2["SessionCache.get\n(path, mtime, size)"]
-        L2 -->|"hit"| CACHED["Return cached\nDisplayMessage[]"]
+        L2 -->|"hit"| CACHED["Return cached SessionInfo\n(re-applies ongoing staleness)"]
         L2 -->|"miss"| L1
     end
 
-    subgraph Ongoing_Session["Ongoing Session (> 60 s since last parse)"]
-        L3["SessionCache.get"] -->|"stale (ongoing)"| L1
+    subgraph Ongoing_Session["Ongoing Session (mtime/size changed)"]
+        L3["SessionCache.get"] -->|"stale (file changed)"| L1
     end
 
     subgraph Picker["Picker Requests"]
@@ -188,7 +266,36 @@ flowchart LR
         P1 -->|"fresh (< 2 s)"| PCACHED["Return cached\nSessionInfo[]"]
         P1 -->|"stale"| PSCAN["Scan FS\n+ re-populate cache"]
     end
+
+    subgraph List_Window["List window fetch (active session)"]
+        W1["load_session_windowed"] --> W2{"session_light_cache\nsame (path, size)?"}
+        W2 -->|"hit"| W3["slice_light()\nwindow existing LightBuild"]
+        W2 -->|"miss"| W4["build_light_session()\nfull parse + lighten"]
+        W4 --> W5["cache as CachedLight\n(path, size)"]
+        W5 --> W3
+    end
+
+    subgraph Detail_Fetch["Detail message fetch (never cached)"]
+        D1["load_message / full_message_at"] --> D2["build_session()\nfull parse, heavy bodies"]
+        D2 --> D3["extract messages[index]\ndrop the rest immediately"]
+    end
 ```
+
+---
+
+## Opening the Detail view drops the list window
+
+Opening the Detail view calls `session.clearWindow()` before fetching the message body:
+this drops every page currently held in the frontend's `windowMessages` map (the sparse
+`Map<index, DisplayMessage>` `ensureRange` populates) since the list is no longer
+visible while Detail is showing. The backend's `session_light_cache` is untouched by
+this — it isn't cleared here, only the frontend's in-memory window is.
+
+Returning to the list view does not restore anything cached: `ensureRange` runs again
+for whatever range is now visible and re-fetches those pages fresh via `load_session`.
+If the backend's `session_light_cache` is still warm for that `(path, size)`, the refetch
+is a cheap `slice_light` rather than a full re-parse; if the file changed size in the
+meantime (e.g. the session grew while Detail was open), the next fetch rebuilds it.
 
 ---
 
@@ -242,14 +349,15 @@ flowchart LR
 
 ## Platform Paths Summary
 
-| Step              | Desktop (Tauri IPC)           | Browser / TUI (HTTP)      |
-| ----------------- | ----------------------------- | ------------------------- |
-| Discover sessions | `invoke("discover_sessions")` | `POST /api/sessions`      |
-| Load session      | `invoke("load_session")`      | `POST /api/session/load`  |
-| Watch session     | `invoke("watch_session")`     | `POST /api/session/watch` |
-| Receive updates   | `listen("session-update")`    | `EventSource /api/events` |
-| Watch picker      | `invoke("watch_picker")`      | `POST /api/picker/watch`  |
-| Picker refresh    | `listen("picker-refresh")`    | `EventSource /api/events` |
+| Step                         | Desktop (Tauri IPC)           | Browser / TUI (HTTP)        |
+| ---------------------------- | ----------------------------- | --------------------------- |
+| Discover sessions            | `invoke("discover_sessions")` | `POST /api/sessions`        |
+| Load session (windowed list) | `invoke("load_session")`      | `POST /api/session/load`    |
+| Load full message (detail)   | `invoke("load_message")`      | `POST /api/session/message` |
+| Watch session                | `invoke("watch_session")`     | `POST /api/session/watch`   |
+| Receive updates              | `listen("session-update")`    | `EventSource /api/events`   |
+| Watch picker                 | `invoke("watch_picker")`      | `POST /api/picker/watch`    |
+| Picker refresh               | `listen("picker-refresh")`    | `EventSource /api/events`   |
 
 ---
 

@@ -99,6 +99,34 @@ describe("invoke (web/HTTP mode)", () => {
     );
   });
 
+  it("load_session posts path + window (start/limit) to /api/session/load", async () => {
+    const fetchFn = mockFetch({ messages: [], count: 0, start: 0, roles: [] });
+    const { invoke } = await import("./invoke");
+
+    await invoke("load_session", { path: "/a.jsonl", start: 100, limit: 50 });
+    expect(fetchFn).toHaveBeenCalledWith(
+      `${API_BASE}/api/session/load`,
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ path: "/a.jsonl", start: 100, limit: 50 }),
+      }),
+    );
+  });
+
+  it("load_message posts path + index to /api/session/message", async () => {
+    const fetchFn = mockFetch({ role: "claude" });
+    const { invoke } = await import("./invoke");
+
+    await invoke("load_message", { path: "/a.jsonl", index: 42 });
+    expect(fetchFn).toHaveBeenCalledWith(
+      `${API_BASE}/api/session/message`,
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ path: "/a.jsonl", index: 42 }),
+      }),
+    );
+  });
+
   it("watch/unwatch commands resolve without error", async () => {
     mockFetch({ ok: true });
     const { invoke } = await import("./invoke");

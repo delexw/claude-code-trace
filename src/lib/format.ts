@@ -111,12 +111,18 @@ export function shortMode(mode: string): string {
  * Returns context window usage percentage (0-100).
  * Returns -1 if no usage data is available.
  */
-export function contextPercent(msgs: DisplayMessage[]): number {
+/** Context-window fill percent from a raw token count. Returns -1 (hidden) when
+ * there is no usage (tokens <= 0). Uses the 1M default context window. */
+export function contextPercentFromTokens(tokens: number): number {
+  if (tokens <= 0) return -1;
   const contextWindowSize = 1_000_000;
+  return Math.min(Math.floor((tokens * 100) / contextWindowSize), 100);
+}
+
+export function contextPercent(msgs: DisplayMessage[]): number {
   for (let i = msgs.length - 1; i >= 0; i--) {
     if (msgs[i].role === "claude" && msgs[i].context_tokens > 0) {
-      const pct = Math.floor((msgs[i].context_tokens * 100) / contextWindowSize);
-      return Math.min(pct, 100);
+      return contextPercentFromTokens(msgs[i].context_tokens);
     }
   }
   return -1;

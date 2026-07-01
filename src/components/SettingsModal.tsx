@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "../lib/invoke";
 import { PopoutModal } from "./PopoutModal";
+import { FONT_SCALE_PRESETS, formatFontScale } from "../lib/fontScale";
 
 interface SettingsResponse {
   projects_dir: string | null;
@@ -13,6 +14,10 @@ interface SettingsResponse {
 interface SettingsModalProps {
   onClose: () => void;
   onSaved: () => void;
+  /** Current global UI zoom level (1 = 100%). */
+  fontScale: number;
+  /** Apply a new zoom level immediately (also persisted by the caller). */
+  onFontScaleChange: (scale: number) => void;
 }
 
 /** Merge detected distros with already-configured ones so configured-but-offline
@@ -22,7 +27,12 @@ function mergeDistros(available: string[], configured: string[]): string[] {
   return [...available, ...configured.filter((d) => !seen.has(d))];
 }
 
-export function SettingsModal({ onClose, onSaved }: SettingsModalProps) {
+export function SettingsModal({
+  onClose,
+  onSaved,
+  fontScale,
+  onFontScaleChange,
+}: SettingsModalProps) {
   const [projectsDir, setProjectsDir] = useState("");
   const [defaultDir, setDefaultDir] = useState("");
   const [effectiveDir, setEffectiveDir] = useState("");
@@ -177,6 +187,26 @@ export function SettingsModal({ onClose, onSaved }: SettingsModalProps) {
             </div>
           </>
         )}
+
+        <label className="settings-modal__label settings-modal__label--section">Font Size</label>
+        <p className="settings-modal__hint">Zoom the whole interface in or out.</p>
+        <div className="settings-modal__font-scale" role="group" aria-label="Font size">
+          {FONT_SCALE_PRESETS.map((preset) => (
+            <button
+              key={preset}
+              type="button"
+              className={
+                preset === fontScale
+                  ? "settings-modal__font-scale-btn settings-modal__font-scale-btn--active"
+                  : "settings-modal__font-scale-btn"
+              }
+              aria-pressed={preset === fontScale}
+              onClick={() => onFontScaleChange(preset)}
+            >
+              {formatFontScale(preset)}
+            </button>
+          ))}
+        </div>
 
         {error && <p className="settings-modal__error">{error}</p>}
         <div className="settings-modal__actions">

@@ -142,11 +142,20 @@ export interface SessionTotals {
 }
 
 export interface LoadResult {
+  /** Messages for the requested window (may be a slice of the whole session). */
   messages: DisplayMessage[];
   teams: TeamSnapshot[];
   ongoing: boolean;
   meta: SessionMeta;
   session_totals: SessionTotals;
+  /** Total number of messages in the session (not just the returned window). */
+  count: number;
+  /** Index of the first returned message within the full session. */
+  start: number;
+  /** Role of every message in the full session (length === count). */
+  roles: string[];
+  /** Latest Claude context-window fill (tokens); 0 if none. */
+  context_tokens: number;
 }
 
 export interface GitInfo {

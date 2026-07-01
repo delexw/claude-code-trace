@@ -412,10 +412,17 @@ pub fn discover_all_project_sessions(project_dirs: &[String]) -> Result<Vec<Sess
 /// under the real `~/.claude/sessions`, regardless of any `CLAUDE_PROJECTS_DIR`
 /// override.
 pub fn live_session_names() -> HashMap<String, String> {
-    match dirs::home_dir() {
-        Some(home) => session_names_from_dir(&home.join(".claude").join("sessions")),
+    match live_session_names_dir() {
+        Some(dir) => session_names_from_dir(&dir),
         None => HashMap::new(),
     }
+}
+
+/// Resolve the live session-name registry directory (`~/.claude/sessions`).
+/// `None` when the home directory cannot be determined. The registry always
+/// lives under the real home, regardless of any `CLAUDE_PROJECTS_DIR` override.
+pub fn live_session_names_dir() -> Option<std::path::PathBuf> {
+    dirs::home_dir().map(|home| home.join(".claude").join("sessions"))
 }
 
 /// Build the `session_id -> name` map from a session registry directory. Split
@@ -459,6 +466,42 @@ pub fn apply_session_names(sessions: &mut [SessionInfo], names: &HashMap<String,
         if let Some(name) = names.get(&session.session_id) {
             session.name = Some(name.clone());
         }
+    }
+}
+
+/// Short-TTL cache for the live session-name registry.
+///
+/// The registry (`~/.claude/sessions/*.json`) is scanned at most once per TTL
+/// window, so a burst of `discover_sessions_cached` calls — and the
+/// picker-refresh broadcast fan-out across all connected clients — share a
+/// single disk scan instead of each re-reading and re-parsing every file.
+/// Renames still surface within roughly one TTL window.
+#[derive(Default)]
+pub struct SessionNamesCache {
+    /// `(captured_at, names)` of the last scan, or `None` before the first read.
+    entry: Option<(std::time::Instant, HashMap<String, String>)>,
+}
+
+impl SessionNamesCache {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Return the cached name map if the last scan is younger than `ttl`,
+    /// otherwise re-scan `dir` via [`session_names_from_dir`] and cache it.
+    pub fn get_or_load(
+        &mut self,
+        dir: &std::path::Path,
+        ttl: std::time::Duration,
+    ) -> HashMap<String, String> {
+        if let Some((captured_at, ref names)) = self.entry {
+            if captured_at.elapsed() < ttl {
+                return names.clone();
+            }
+        }
+        let names = session_names_from_dir(dir);
+        self.entry = Some((std::time::Instant::now(), names.clone()));
+        names
     }
 }
 
@@ -1471,6 +1514,74 @@ mod tests {
 
         assert_eq!(sessions[0].name.as_deref(), Some("my-cache"));
         assert_eq!(sessions[1].name, None);
+    }
+
+    #[test]
+    fn session_names_cache_serves_hits_without_rescanning() {
+        use std::time::Duration;
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("1.json"),
+            r#"{"sessionId":"sid-a","name":"first"}"#,
+        )
+        .unwrap();
+
+        let mut cache = SessionNamesCache::new();
+        // Long TTL: the first load populates the cache.
+        let first = cache.get_or_load(dir.path(), Duration::from_secs(60));
+        assert_eq!(first.get("sid-a").map(String::as_str), Some("first"));
+
+        // Change the registry on disk; a cache hit must not see it yet.
+        fs::write(
+            dir.path().join("1.json"),
+            r#"{"sessionId":"sid-a","name":"second"}"#,
+        )
+        .unwrap();
+        let cached = cache.get_or_load(dir.path(), Duration::from_secs(60));
+        assert_eq!(cached.get("sid-a").map(String::as_str), Some("first"));
+    }
+
+    #[test]
+    fn session_names_cache_reloads_after_expiry() {
+        use std::time::Duration;
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("1.json"),
+            r#"{"sessionId":"sid-a","name":"first"}"#,
+        )
+        .unwrap();
+
+        let mut cache = SessionNamesCache::new();
+        let first = cache.get_or_load(dir.path(), Duration::from_secs(60));
+        assert_eq!(first.get("sid-a").map(String::as_str), Some("first"));
+
+        // Rename on disk, then force expiry with a zero TTL: the entry is always
+        // older than zero, so the next call re-scans and picks up the new name.
+        fs::write(
+            dir.path().join("1.json"),
+            r#"{"sessionId":"sid-a","name":"second"}"#,
+        )
+        .unwrap();
+        let reloaded = cache.get_or_load(dir.path(), Duration::ZERO);
+        assert_eq!(reloaded.get("sid-a").map(String::as_str), Some("second"));
+    }
+
+    #[test]
+    fn session_names_cache_reload_clears_removed_names() {
+        use std::time::Duration;
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("1.json");
+        fs::write(&file, r#"{"sessionId":"sid-a","name":"first"}"#).unwrap();
+
+        let mut cache = SessionNamesCache::new();
+        let first = cache.get_or_load(dir.path(), Duration::from_secs(60));
+        assert_eq!(first.get("sid-a").map(String::as_str), Some("first"));
+
+        // Removing the registry file (e.g. session exit) must clear the name on
+        // the next expired read.
+        fs::remove_file(&file).unwrap();
+        let reloaded = cache.get_or_load(dir.path(), Duration::ZERO);
+        assert!(reloaded.is_empty());
     }
 
     #[test]
