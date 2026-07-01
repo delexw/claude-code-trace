@@ -3,6 +3,80 @@
 All notable changes to claude-code-trace are documented here. Versions follow
 [semantic versioning](https://semver.org/).
 
+## [0.10.0] — 2026-07-01
+
+This release keeps the JSONL parser current with another run of Claude Code releases
+(v2.1.186 through v2.1.195 — `/rewind`, background-subagent permission attribution, and
+background-agent format changes), fixes a live-chain cycle that could drop a session's
+entire history, and follows up 0.9.0's performance work with virtualized message lists,
+lower memory usage on large sessions, and a matching detail-view fix in the TUI.
+
+### Added
+
+- **Session picker titles from `/rename`**
+  ([`2c63774`](https://github.com/delexw/claude-code-trace/commit/2c63774), @michaelstingl).
+  Sessions renamed with Claude Code's `/rename` command now show that name as the title in
+  the picker, joined from the live `~/.claude/sessions` registry by session ID. Falls back
+  to the first message when a session hasn't been renamed.
+
+### Fixed
+
+- **`/rewind` support (Claude Code v2.1.191)**
+  ([`04b813d`](https://github.com/delexw/claude-code-trace/commit/04b813d)). Resuming a
+  conversation from before a `/clear` via `/rewind` produces `rewind-pointer` entries and
+  `rewindable`/`checkpointUuid` markers on compaction checkpoints; both are now parsed and
+  the structural markers are filtered from the display so a rewound session renders
+  cleanly instead of showing raw pointer entries.
+
+- **Background-agent JSONL format changes (Claude Code v2.1.195)**
+  ([`1d0a1f4`](https://github.com/delexw/claude-code-trace/commit/1d0a1f4)). SDK and
+  background-agent sessions gained new top-level fields (schema version, entrypoint,
+  agent ID, and a `last-prompt` checkpoint type). These are now parsed with safe
+  defaults for older sessions, and `last-prompt` checkpoints are discarded instead of
+  falling through the classifier without a role.
+
+- **Background subagent permission-prompt attribution (Claude Code v2.1.186)**
+  ([`acdbf75`](https://github.com/delexw/claude-code-trace/commit/acdbf75)). Background
+  subagents now surface permission prompts directly in the main session instead of
+  auto-denying, and each prompt carries which subagent requested it. The viewer parses
+  the new attribution fields and shows a "Requesting Agent" section in the detail view
+  when present.
+
+- **Auto-mode denials no longer vanish from the transcript (Claude Code v2.1.193)**
+  ([`552bb59`](https://github.com/delexw/claude-code-trace/commit/552bb59)). Tool calls
+  denied automatically in auto/plan mode were silently dropped by the noise filter
+  instead of being shown. Denial entries — both top-level and the kind embedded inside
+  progress entries — are now rescued and rendered as a system notice naming the tool and
+  the reason it was denied.
+
+- **Virtualized message list and lower memory use on large sessions**
+  ([`800fd01`](https://github.com/delexw/claude-code-trace/commit/800fd01)). Sessions
+  with heavy tool output (100MB+ transcripts) could grow the app's memory well beyond
+  the file size because the message list held every message and its full tool
+  input/output at once, and the desktop webview leaked render-tree memory across
+  repeated session switches. The message list is now virtualized and fetched in pages
+  that evict as you scroll, the detail view re-parses on demand instead of caching a
+  heavy build, and the desktop app periodically reloads its webview to reclaim memory
+  WebKit doesn't release on its own. Also fixes a stale row staying hover-highlighted
+  after scrolling stops, caches the session-name registry read, and adds a font-size
+  setting.
+
+- **TUI detail view, live SSE updates, and a live-chain history bug**
+  ([`1e92f8c`](https://github.com/delexw/claude-code-trace/commit/1e92f8c)). Following
+  the virtualization work above: the TUI's detail view now fetches the full message
+  on demand instead of showing empty tool bodies from the lightened list payload, and
+  it re-fetches on the live-update signal instead of trusting a `messages` field the
+  backend no longer sends (which was silently emptying the view). Fixes a Detail-view
+  CSS flash and switches JSON/tool output to syntax-highlighted, word-wrapped text
+  instead of horizontally-scrolling code blocks. Separately, a real session was found
+  where an auto-compaction boundary pointed back into its own post-compaction
+  descendants, closing a cycle that made the parser truncate the entire session history
+  at that point — the resolver now falls back to the nearest earlier entry when this
+  cycle is detected. Also fixes `cctrace --tui` orphaning its backend process group on
+  exit, which could break a later `cctrace --web`.
+
+[0.10.0]: https://github.com/delexw/claude-code-trace/releases/tag/v0.10.0
+
 ## [0.9.1] — 2026-06-27
 
 A maintenance release that repairs two regressions from the 0.9.0 WSL and packaging
