@@ -79,8 +79,21 @@ sequenceDiagram
 
     Note over CLI,TUI: graceful shutdown
     TUI ->> CLI: exit signal
-    CLI ->> BE: kill backend (if spawned)
+    CLI ->> BE: kill backend process group (if spawned)
 ```
+
+The backend spawn (`npx tauri dev -- -- --headless`) is only reached when no
+backend was already running on 11423 — if one was, `--tui` connects to it and
+never kills it on exit, since it may be shared with the desktop app or
+another client.
+
+When `--tui` does spawn its own backend, it uses `detached: true` and kills
+via `process.kill(-backend.pid, "SIGTERM")` on TUI exit — signalling the
+whole process group, not just the immediate `npx` child. `npx tauri dev`
+nests further processes (the Tauri CLI, Vite, the Rust backend); a plain
+`backend.kill()` only reaches `npx` and leaves Vite/the Rust backend as
+orphans still holding their ports, breaking a later `cctrace --web` with
+`EADDRINUSE` on 1420.
 
 ### Why a dedicated venv
 

@@ -87,6 +87,34 @@ async def test_step_heading_hidden_when_no_items():
         assert heading.display is False
 
 
+@pytest.mark.asyncio
+async def test_tool_call_input_label_has_no_border_but_json_box_does():
+    """ "Input"/"Result" are plain headings above the box, not boxes themselves.
+
+    Regression test: an earlier refactor moved the label into its own
+    Markdown widget, which `_ItemListView`'s CSS always borders — producing
+    a separate bordered box around just the word "Input" before the actual
+    JSON content box.
+    """
+    async with _DVApp().run_test() as pilot:
+        dv = pilot.app.query_one(DetailView)
+        item = DisplayItem(
+            id="t1",
+            item_type="ToolCall",
+            tool_name="Bash",
+            tool_input='{"command": "ls"}',
+        )
+        msg = DisplayMessage(role="claude", content="x", items=[item])
+        dv.populate(message=msg, expanded_items={0}, ongoing=False, depth=0)
+        await pilot.pause(0.2)
+
+        label = dv.query_one("#item-0 Static.item-label", Static)
+        assert label.styles.border.top[0] == "", "label must not be boxed"
+
+        box = dv.query_one("#item-0 Static.diff-block", Static)
+        assert box.styles.border.top[0] == "round", "JSON content must stay boxed"
+
+
 def test_output_summary_is_empty_so_prose_is_not_duplicated():
     item = DisplayItem(id="o", item_type="Output", text="a" * 100)
     assert get_item_summary(item) == ""

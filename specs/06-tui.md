@@ -62,9 +62,16 @@ sequenceDiagram
     end
 
     loop on session-update SSE event
-        TUI ->> APP: _on_session_update(payload)
+        TUI ->> APP: _on_session_update(_payload)
+        APP ->> BE: GET /api/session/load (re-fetch)
     end
 ```
+
+`session-update` is a lightweight refresh signal (message count + roles,
+never bodies — see [04-http-api.md](04-http-api.md)). `_on_session_update`
+ignores the payload's contents and re-fetches the whole session via
+`load_session` instead, so `self.messages` stays authoritative even though
+the TUI doesn't paginate the way the web frontend does.
 
 ---
 
@@ -225,7 +232,8 @@ Rich `Table` (accent rail · content · right-aligned stats).
 
 ```mermaid
 flowchart LR
-    SSE["SSE session-update"] --> WM[watch_messages]
+    SSE["SSE session-update\n(signal only)"] --> OSU["_on_session_update\n(re-fetches via load_session)"]
+    OSU --> WM[watch_messages]
     WM --> SML[_sync_message_list]
     SML --> WORKER["run_worker(populate(...),\nexclusive=True,\ngroup='populate_msglist')"]
     WORKER --> POP["MessageList.populate (async)"]
@@ -274,10 +282,16 @@ graph TB
   `_sync_expanded_only()` walks each `#item-N` Collapsible and updates
   `collapsed` in place. **The ListView is never cleared**, so `lv.index`
   keeps the user's cursor where it was.
-- Otherwise → eager synchronous clear of `#items-list` and `#msg-content`,
-  set `self.loading = True`, schedule `_rebuild` via `call_after_refresh`.
+- Otherwise → eager synchronous clear of **`#items-list` only**, set
+  `self.loading = True`, schedule `_rebuild` via `call_after_refresh`.
   `_rebuild` mounts the new message body + items list and clears
-  `self.loading` in a `finally` block.
+  `self.loading` in a `finally` block. `#msg-content` (the message-header
+  Collapsible) is deliberately left untouched here — the `LoadingIndicator`
+  already covers the whole pane, and emptying a `Collapsible`'s children
+  makes Textual treat it as a non-container, so `Widget.render()` falls
+  back to printing its raw CSS identifier
+  (`Collapsible#msg-content.-collapsed`) for one frame before `_rebuild`
+  remounts real content.
 
 Headings:
 
@@ -286,16 +300,53 @@ Headings:
 - `#items-heading` shows `── STEP (N) ──` with the live item count; hidden
   when the message has no items.
 
-Item body rendering by type (unchanged from previous spec):
+### On-demand full message fetch
 
-| `item_type`       | Body content                        |
-| ----------------- | ----------------------------------- |
-| `Thinking`        | scrollable Markdown                 |
-| `Output`          | pretty-printed JSON or Markdown     |
-| `ToolCall`        | input JSON + result/error           |
-| `Subagent`        | agent ID, desc, prompt, last result |
-| `TeammateMessage` | plain text                          |
-| `HookEvent`       | hook name, cmd, metadata key-values |
+`self.messages` (from `load_session`) has `tool_input` / `tool_result` /
+`tool_result_json` stripped on every item, to keep the list view light — the
+same light/full split the web frontend uses (see
+[08-session-lifecycle.md](08-session-lifecycle.md)). Opening Detail on
+message `idx` doesn't index into `self.messages`; instead
+`_sync_detail_view_for_message_index`:
+
+1. Clears `self._detail_full_message` and calls `_sync_detail_view()` so the
+   pane shows its loading state, not stale data from the previous message.
+2. Kicks off `_fetch_detail_message(path, idx)` in an exclusive worker
+   (`group="load_detail_message"`), which calls `POST /api/session/message`
+   via `api.load_message` and stores the full `DisplayMessage` on
+   `self._detail_full_message`.
+3. The fetch guards against staleness: if the session, message index, or
+   view changed while the request was in flight, the result is discarded.
+
+`_active_detail_message()` returns `self._detail_full_message` (or the
+subagent detail message when drilled into one) rather than indexing
+`self.messages`. Leaving Detail (`action_back_or_quit`'s top-level branch)
+clears `self._detail_full_message` so the heavy body isn't held after the
+view switches back to the list.
+
+### Item body rendering by type
+
+| `item_type`       | Body content                                                                                  |
+| ----------------- | --------------------------------------------------------------------------------------------- |
+| `Thinking`        | scrollable Markdown                                                                           |
+| `Output`          | pretty-printed JSON or Markdown                                                               |
+| `ToolCall`        | unboxed "Input"/"Result" label + boxed, wrapped JSON (`Edit` renders a coloured diff instead) |
+| `Subagent`        | agent ID, desc, prompt, last result                                                           |
+| `TeammateMessage` | plain text                                                                                    |
+| `HookEvent`       | hook name inline, then unboxed "cmd"/"metadata" labels + boxed JSON                           |
+
+`ToolCall`/`HookEvent` JSON used to render as Markdown fenced code blocks,
+whose `MarkdownFence` widget forces `overflow: scroll hidden` — long lines
+scrolled horizontally instead of wrapping. They now render via
+`textual.highlight.highlight()` (the same tokenizer Markdown uses
+internally) inside a plain `Static.diff-block`, which wraps at the pane
+width like the web UI's JSON viewer while keeping JSON syntax colours.
+
+The "Input"/"Result"/"cmd"/"metadata" labels are a separate unbordered
+`Static.item-label`, not a `Markdown` widget — `_ItemListView`'s CSS borders
+every `Markdown` widget, so a `Markdown("**Input**")` label used to get its
+own tiny bordered box above the content box. Only `Static.diff-block` (the
+JSON/diff content itself) is boxed now.
 
 ---
 
@@ -368,9 +419,13 @@ It maintains a per-event handler dict and dispatches each `event:` /
 Subscribed events:
 
 - `picker-refresh` — re-runs `api.discover_sessions(dirs)`.
-- `session-update` — calls `_on_session_update(payload)` on the App, which
-  updates `messages` / `teams` / `ongoing` / `meta` / `totals` and calls
-  `_sync_all_widgets()`.
+- `session-update` — a lightweight signal (count + roles, no bodies, see
+  [04-http-api.md](04-http-api.md)). Calls `_on_session_update(_payload)` on
+  the App, which ignores the payload and re-fetches the session via
+  `load_session`, then updates `messages` / `teams` / `ongoing` / `meta` /
+  `totals` from the fresh result and calls `_sync_all_widgets()`. If the
+  re-fetch raises (backend momentarily unreachable), the previous
+  `self.messages` is left untouched rather than cleared.
 
 ---
 
@@ -393,11 +448,14 @@ not duplicated in the global CSS.
 
 `pytest` + `pytest-asyncio` (configured in `pytest.ini`).
 
-| File                     | Covers                                                                                                                                                                           |
-| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `test_highlight_list.py` | `ensure_highlight` policy, disabled-row skipping, idempotence, shared highlight color resolves to `$block-cursor-blurred-background`.                                            |
-| `test_message_list.py`   | Async populate race-safety (no duplicated rows after empty→real), full-rebuild sets index=0, incremental diff preserves the user's cursor, tail append, empty-state placeholder. |
-| `test_detail_view.py`    | Bordered container, RESPONSE/STEP headings render with live counts and hide when there is no message / no items.                                                                 |
+| File                        | Covers                                                                                                                                                                           |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test_highlight_list.py`    | `ensure_highlight` policy, disabled-row skipping, idempotence, shared highlight color resolves to `$block-cursor-blurred-background`.                                            |
+| `test_message_list.py`      | Async populate race-safety (no duplicated rows after empty→real), full-rebuild sets index=0, incremental diff preserves the user's cursor, tail append, empty-state placeholder. |
+| `test_detail_view.py`       | Bordered container, RESPONSE/STEP headings render with live counts and hide when there is no message / no items; "Input"/"Result" label is unboxed while the JSON content is.    |
+| `test_message_from_dict.py` | `message_from_dict` (the `POST /api/session/message` response parser) parses top-level fields, full tool_input/tool_result bodies on items, and nested subagent messages.        |
+| `test_load_message.py`      | `api.load_message` posts `{path, index}` to `/api/session/message` and returns `None` for an out-of-range index.                                                                 |
+| `test_session_update.py`    | `_on_session_update` re-fetches via `load_session` on the lightweight signal, is a no-op with no session open, and keeps prior messages when the re-fetch fails.                 |
 
 Run with:
 
@@ -427,4 +485,6 @@ first launch.
 - [04-http-api.md](04-http-api.md) — API consumed by the TUI
 - [05-frontend-web.md](05-frontend-web.md) — web frontend sharing same types
 - [07-data-types.md](07-data-types.md) — shared type system
+- [08-session-lifecycle.md](08-session-lifecycle.md) — light/full message split, session-update signal
+- [12-cli-launcher.md](12-cli-launcher.md) — `--tui` backend spawn/kill lifecycle
 - [13-item-rendering.md](13-item-rendering.md) — per-type item rendering

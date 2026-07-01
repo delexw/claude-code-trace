@@ -140,7 +140,8 @@ sequenceDiagram
         REBUILD ->> BROADCAST: broadcast SessionUpdatePayload
         BROADCAST ->> FE: SSE event "session-update"\n(browser/TUI path)
         BROADCAST ->> FE: Tauri emit "session-update"\n(desktop path)
-        FE ->> FE: merge new messages\nre-render
+        Note over BROADCAST,FE: payload is count/roles only — no bodies
+        FE ->> FE: re-fetch window (browser)\nor whole session (TUI)\nre-render
     else unchanged
         REBUILD ->> REBUILD: skip broadcast
     end
@@ -162,8 +163,8 @@ sequenceDiagram
     REBUILD ->> REBUILD: detect truncation
     REBUILD ->> REBUILD: reset IncrementalTokenScanner\nclear cached chunks
     REBUILD ->> REBUILD: re-parse from byte 0\n(empty session)
-    REBUILD ->> FE: session-update\n(messages=[])
-    FE ->> FE: clear message list\nshow empty state
+    REBUILD ->> FE: session-update\n(count=0)
+    FE ->> FE: re-fetch\nshow empty state
 ```
 
 ---

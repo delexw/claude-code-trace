@@ -9,10 +9,12 @@ import httpx
 
 from data_types import (
     DebugEntry,
+    DisplayMessage,
     LoadResult,
     SessionInfo,
     debug_entry_from_dict,
     load_result_from_dict,
+    message_from_dict,
     session_info_from_dict,
 )
 
@@ -53,6 +55,17 @@ async def discover_sessions(dirs: list[str]) -> list[SessionInfo]:
 async def load_session(path: str) -> LoadResult:
     data = await _post("/api/session/load", {"path": path})
     return load_result_from_dict(data)  # type: ignore[arg-type]
+
+
+async def load_message(path: str, index: int) -> DisplayMessage | None:
+    """Fetch the full (heavy-body) message at `index` for the detail view.
+
+    `load_session`'s messages have tool_input/tool_result/tool_result_json
+    stripped to keep the list view light — this fetches one full message
+    on demand instead.
+    """
+    data = await _post("/api/session/message", {"path": path, "index": index})
+    return message_from_dict(data) if data else None  # type: ignore[arg-type]
 
 
 async def watch_session(path: str) -> None:
