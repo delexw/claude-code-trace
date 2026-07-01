@@ -41,7 +41,12 @@ const routes: Record<string, Route> = {
   load_session: {
     method: "POST",
     path: "/api/session/load",
-    body: (a) => ({ path: a.path }),
+    body: (a) => ({ path: a.path, start: a.start, limit: a.limit }),
+  },
+  load_message: {
+    method: "POST",
+    path: "/api/session/message",
+    body: (a) => ({ path: a.path, index: a.index }),
   },
   get_session_meta: {
     path: (a) => `/api/session/meta?path=${encodeURIComponent(String(a.path ?? ""))}`,
@@ -107,13 +112,27 @@ async function httpInvoke<T>(cmd: string, args?: Record<string, unknown>): Promi
 // Public API
 // ---------------------------------------------------------------------------
 
+let inFlightCount = 0;
+
+/** Number of `invoke` calls currently awaiting a response. Reloading the
+ * webview while a Tauri IPC call is in flight can crash it on macOS — callers
+ * that need to reload (see lib/webviewRecycle.ts) check this first. */
+export function inFlightInvokeCount(): number {
+  return inFlightCount;
+}
+
 /**
  * Drop-in replacement for `import { invoke } from "@tauri-apps/api/core"`.
  * Works in both Tauri and plain-browser environments.
  */
 export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
-  if (isTauri) {
-    return tauriInvoke<T>(cmd, args);
+  inFlightCount++;
+  try {
+    if (isTauri) {
+      return await tauriInvoke<T>(cmd, args);
+    }
+    return await httpInvoke<T>(cmd, args);
+  } finally {
+    inFlightCount--;
   }
-  return httpInvoke<T>(cmd, args);
 }

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { InfoBar } from "./InfoBar";
-import type { SessionMeta, SessionTotals, DisplayMessage, GitInfo } from "../types";
+import type { SessionMeta, SessionTotals, GitInfo } from "../types";
 
 function makeMeta(overrides: Partial<SessionMeta> = {}): SessionMeta {
   return {
@@ -25,39 +25,13 @@ function makeTotals(overrides: Partial<SessionTotals> = {}): SessionTotals {
   };
 }
 
-function makeMessage(overrides: Partial<DisplayMessage> = {}): DisplayMessage {
-  return {
-    role: "claude",
-    model: "claude-sonnet-4-20250514",
-    content: "Hello",
-    timestamp: "2025-01-01T00:00:00Z",
-    thinking_count: 0,
-    tool_call_count: 0,
-    output_count: 0,
-    tokens_raw: 0,
-    input_tokens: 0,
-    output_tokens: 0,
-    cache_read_tokens: 0,
-    cache_creation_tokens: 0,
-    context_tokens: 0,
-    duration_ms: 0,
-    items: [],
-    last_output: null,
-    is_error: false,
-    teammate_spawns: 0,
-    teammate_messages: 0,
-    subagent_label: "",
-    ...overrides,
-  };
-}
-
 describe("InfoBar", () => {
   it("shows project name from shortPath(meta.cwd)", () => {
     render(
       <InfoBar
         meta={makeMeta({ cwd: "/home/user/my-project" })}
         gitInfo={null}
-        messages={[]}
+        contextTokens={0}
         sessionTotals={makeTotals()}
         sessionPath=""
         ongoing={false}
@@ -71,7 +45,7 @@ describe("InfoBar", () => {
       <InfoBar
         meta={makeMeta()}
         gitInfo={null}
-        messages={[]}
+        contextTokens={0}
         sessionTotals={makeTotals()}
         sessionPath="/some/path/abc123.jsonl"
         ongoing={false}
@@ -86,7 +60,7 @@ describe("InfoBar", () => {
       <InfoBar
         meta={makeMeta()}
         gitInfo={gitInfo}
-        messages={[]}
+        contextTokens={0}
         sessionTotals={makeTotals()}
         sessionPath=""
         ongoing={false}
@@ -101,7 +75,7 @@ describe("InfoBar", () => {
       <InfoBar
         meta={makeMeta()}
         gitInfo={gitInfo}
-        messages={[]}
+        contextTokens={0}
         sessionTotals={makeTotals()}
         sessionPath=""
         ongoing={false}
@@ -117,7 +91,7 @@ describe("InfoBar", () => {
       <InfoBar
         meta={makeMeta()}
         gitInfo={gitInfo}
-        messages={[]}
+        contextTokens={0}
         sessionTotals={makeTotals()}
         sessionPath=""
         ongoing={false}
@@ -132,7 +106,7 @@ describe("InfoBar", () => {
       <InfoBar
         meta={makeMeta({ permission_mode: "bypassPermissions" })}
         gitInfo={null}
-        messages={[]}
+        contextTokens={0}
         sessionTotals={makeTotals()}
         sessionPath=""
         ongoing={false}
@@ -146,7 +120,7 @@ describe("InfoBar", () => {
       <InfoBar
         meta={makeMeta({ permission_mode: "acceptEdits" })}
         gitInfo={null}
-        messages={[]}
+        contextTokens={0}
         sessionTotals={makeTotals()}
         sessionPath=""
         ongoing={false}
@@ -160,7 +134,7 @@ describe("InfoBar", () => {
       <InfoBar
         meta={makeMeta({ permission_mode: "plan" })}
         gitInfo={null}
-        messages={[]}
+        contextTokens={0}
         sessionTotals={makeTotals()}
         sessionPath=""
         ongoing={false}
@@ -174,7 +148,7 @@ describe("InfoBar", () => {
       <InfoBar
         meta={makeMeta({ permission_mode: "default" })}
         gitInfo={null}
-        messages={[]}
+        contextTokens={0}
         sessionTotals={makeTotals()}
         sessionPath=""
         ongoing={false}
@@ -183,13 +157,12 @@ describe("InfoBar", () => {
     expect(screen.queryByText("default")).not.toBeInTheDocument();
   });
 
-  it("shows context bar when contextPercent >= 0", () => {
-    const msg = makeMessage({ context_tokens: 500_000 });
+  it("shows context bar when contextTokens > 0", () => {
     render(
       <InfoBar
         meta={makeMeta()}
         gitInfo={null}
-        messages={[msg]}
+        contextTokens={500_000}
         sessionTotals={makeTotals()}
         sessionPath=""
         ongoing={false}
@@ -203,7 +176,7 @@ describe("InfoBar", () => {
       <InfoBar
         meta={makeMeta()}
         gitInfo={null}
-        messages={[]}
+        contextTokens={0}
         sessionTotals={makeTotals()}
         sessionPath=""
         ongoing={false}
@@ -217,7 +190,7 @@ describe("InfoBar", () => {
       <InfoBar
         meta={makeMeta()}
         gitInfo={null}
-        messages={[]}
+        contextTokens={0}
         sessionTotals={makeTotals({ total_tokens: 5000 })}
         sessionPath=""
         ongoing={false}
@@ -231,7 +204,7 @@ describe("InfoBar", () => {
       <InfoBar
         meta={makeMeta()}
         gitInfo={null}
-        messages={[]}
+        contextTokens={0}
         sessionTotals={makeTotals({ cost_usd: 1.5 })}
         sessionPath=""
         ongoing={false}
@@ -245,7 +218,7 @@ describe("InfoBar", () => {
       <InfoBar
         meta={makeMeta()}
         gitInfo={null}
-        messages={[]}
+        contextTokens={0}
         sessionTotals={makeTotals()}
         sessionPath=""
         ongoing={true}
@@ -259,7 +232,7 @@ describe("InfoBar", () => {
       <InfoBar
         meta={makeMeta()}
         gitInfo={null}
-        messages={[]}
+        contextTokens={0}
         sessionTotals={makeTotals()}
         sessionPath=""
         ongoing={false}

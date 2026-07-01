@@ -106,6 +106,12 @@ pub struct SessionTotals {
 }
 
 /// LoadResult holds everything needed to bootstrap the frontend.
+///
+/// `messages` may be a windowed slice of the full session (for virtualized
+/// clients that fetch ranges on demand); `count` is always the total number of
+/// messages in the session and `start` is the index of the first returned
+/// message. When the whole session is returned, `start == 0` and
+/// `count == messages.len()`.
 #[derive(Debug, Clone, Serialize)]
 pub struct LoadResult {
     pub messages: Vec<DisplayMessage>,
@@ -114,6 +120,17 @@ pub struct LoadResult {
     pub ongoing: bool,
     pub meta: crate::parser::session::SessionMeta,
     pub session_totals: SessionTotals,
+    /// Total number of messages in the session (not just the returned window).
+    pub count: usize,
+    /// Index of the first message in `messages` within the full session.
+    pub start: usize,
+    /// Role of every message in the full session (length == `count`). Lets a
+    /// virtualized client render placeholders and drive expand-all without
+    /// holding the heavy message bodies for rows outside the window.
+    pub roles: Vec<String>,
+    /// Latest Claude context-window fill (tokens); 0 if none. The client uses
+    /// this for the context gauge since it can't scan the full message list.
+    pub context_tokens: i64,
 }
 
 /// Format a timestamp as "yyyy-mm-dd hh:mm:ss".

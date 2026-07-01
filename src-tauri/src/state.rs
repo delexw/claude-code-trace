@@ -2,8 +2,14 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tokio::sync::broadcast;
 
+use std::collections::HashMap;
+
+use crate::convert::{DisplayMessage, LoadResult};
 use crate::parser::cache::SessionCache;
-use crate::parser::session::SessionInfo;
+use crate::parser::session::{SessionInfo, SessionNamesCache};
+use crate::session_load::{
+    build_light_session, build_session, slice_light, LightBuild, LoadOptions, TimeFilter,
+};
 use crate::settings::Settings;
 use crate::watcher::WatcherHandle;
 
@@ -26,6 +32,24 @@ struct SessionsCache {
 
 const SESSIONS_CACHE_TTL: Duration = Duration::from_secs(2);
 
+/// TTL for the live session-name registry scan. Short enough that `/rename`
+/// names (and their removal) appear within roughly one picker-refresh cycle,
+/// long enough that a burst of refreshes shares a single scan.
+const SESSION_NAMES_CACHE_TTL: Duration = Duration::from_secs(1);
+
+/// A lightened session build cached for the active session, keyed by
+/// `(path, size)`. Lets range fetches during list scrolling slice an
+/// already-built session instead of re-parsing the file on every scroll step.
+/// Holds only the heavy-body-stripped messages — the full tool output is never
+/// persisted here (see [`AppState::full_message_at`], which re-parses fresh and
+/// discards the heavy build immediately after each detail lookup, trading
+/// per-click latency for not holding tool output in memory between clicks).
+struct CachedLight {
+    path: String,
+    size: u64,
+    light: LightBuild,
+}
+
 /// AppState holds shared state managed by Tauri.
 pub struct AppState {
     pub session_watcher: Mutex<Option<WatcherHandle>>,
@@ -39,6 +63,13 @@ pub struct AppState {
     pub event_tx: broadcast::Sender<SseEvent>,
     /// 2-second TTL cache for the picker session list.
     sessions_cache: Mutex<Option<SessionsCache>>,
+    /// Short-TTL cache for the live `/rename` session-name registry, shared by
+    /// all concurrent `discover_sessions_cached` callers.
+    session_names_cache: Mutex<SessionNamesCache>,
+    /// Lightened-build cache for the active session so windowed list fetches
+    /// slice an existing build instead of re-parsing the file on every scroll.
+    /// Never holds heavy tool bodies — see [`CachedLight`].
+    session_light_cache: Mutex<Option<CachedLight>>,
 }
 
 impl AppState {
@@ -52,6 +83,89 @@ impl AppState {
             watched_session_ongoing: Mutex::new(None),
             event_tx,
             sessions_cache: Mutex::new(None),
+            session_names_cache: Mutex::new(SessionNamesCache::new()),
+            session_light_cache: Mutex::new(None),
+        }
+    }
+
+    /// Load a windowed slice of a session, caching the lightened build for the
+    /// active session so repeated list range fetches (scrolling) don't re-parse
+    /// the file. Never holds heavy tool bodies — see [`full_message_at`] for
+    /// those.
+    ///
+    /// The cache holds one session, keyed by `(path, size)`: a different path or
+    /// a grown/truncated file rebuilds it, so memory stays bounded to the active
+    /// session. Time-filtered loads bypass the cache (they're rare and would
+    /// pollute the single slot).
+    ///
+    /// [`full_message_at`]: Self::full_message_at
+    pub fn load_session_windowed(
+        &self,
+        path: &str,
+        opts: LoadOptions,
+    ) -> Result<LoadResult, String> {
+        // Time-filtered loads bypass the cache and return full messages (rare,
+        // used by the by-id range endpoint).
+        if opts.time.since.is_some() || opts.time.before.is_some() {
+            return crate::session_load::load_session(path, opts);
+        }
+
+        let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+        let mut cache = self.session_light_cache.lock().map_err(|e| e.to_string())?;
+        let fresh = cache
+            .as_ref()
+            .is_some_and(|c| c.path == path && c.size == size);
+        if !fresh {
+            let light = build_light_session(path, TimeFilter::default())?;
+            *cache = Some(CachedLight {
+                path: path.to_string(),
+                size,
+                light,
+            });
+        }
+        Ok(slice_light(
+            &cache.as_ref().unwrap().light,
+            path,
+            opts.range,
+        ))
+    }
+
+    /// Return the full (heavy-body) message at `index` for the detail view.
+    ///
+    /// Deliberately re-parses the whole session fresh on every call rather than
+    /// caching the heavy build: a tool-output-heavy session can be hundreds of
+    /// MB, and caching it for as long as the session is open would hold that in
+    /// the Rust process the whole time. Re-parsing trades per-click latency
+    /// (roughly the same cost as the session's first list load) for never
+    /// persisting the heavy bodies between clicks — the full build is dropped
+    /// as soon as this function returns.
+    pub fn full_message_at(
+        &self,
+        path: &str,
+        index: usize,
+    ) -> Result<Option<DisplayMessage>, String> {
+        let built = build_session(path, TimeFilter::default())?;
+        Ok(built.messages.get(index).cloned())
+    }
+
+    /// Drop the lightened-build cache (e.g. when leaving a session for the picker).
+    pub fn clear_session_build_cache(&self) {
+        if let Ok(mut cache) = self.session_light_cache.lock() {
+            *cache = None;
+        }
+    }
+
+    /// Read the live `/rename` session-name registry through a short-TTL cache so
+    /// concurrent/rapid callers share a single disk scan. Falls back to an
+    /// uncached scan if the cache lock is poisoned or the home dir is unknown.
+    fn live_session_names_cached(&self) -> HashMap<String, String> {
+        let dir = match crate::parser::session::live_session_names_dir() {
+            Some(d) => d,
+            None => return HashMap::new(),
+        };
+        match self.session_names_cache.lock() {
+            Ok(mut cache) => cache.get_or_load(&dir, SESSION_NAMES_CACHE_TTL),
+            Err(_) => crate::parser::session::live_session_names(),
         }
     }
 
@@ -146,10 +260,12 @@ impl AppState {
         // Join the live `/rename` names on every call. Names live in the pid-keyed
         // `~/.claude/sessions/*.json` registry, which the transcript-file cache does
         // not track (a rename never touches the JSONL), so the join runs after the
-        // cache rather than being baked into the cached `SessionInfo`.
+        // cache rather than being baked into the cached `SessionInfo`. The registry
+        // read itself is behind its own short-TTL cache so a burst of refreshes and
+        // the broadcast fan-out share one disk scan.
         crate::parser::session::apply_session_names(
             &mut sessions,
-            &crate::parser::session::live_session_names(),
+            &self.live_session_names_cached(),
         );
         Ok(sessions)
     }
@@ -160,5 +276,125 @@ impl AppState {
             event: event.to_string(),
             data: data.to_string(),
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::session_load::MessageRange;
+    use std::io::Write;
+
+    fn write_session(dir: &std::path::Path) -> String {
+        let path = dir.join("s.jsonl");
+        let mut f = std::fs::File::create(&path).unwrap();
+        writeln!(
+            f,
+            r#"{{"type":"user","uuid":"u1","timestamp":"2025-01-01T12:00:00Z","message":{{"role":"user","content":"hello"}}}}"#
+        )
+        .unwrap();
+        writeln!(
+            f,
+            r#"{{"type":"assistant","uuid":"a1","parentUuid":"u1","timestamp":"2025-01-01T12:00:01Z","message":{{"role":"assistant","model":"claude-sonnet-4-20250514","content":[{{"type":"text","text":"hi there"}}]}}}}"#
+        )
+        .unwrap();
+        writeln!(
+            f,
+            r#"{{"type":"user","uuid":"u2","parentUuid":"a1","timestamp":"2025-01-01T12:00:02Z","message":{{"role":"user","content":"bye"}}}}"#
+        )
+        .unwrap();
+        path.to_str().unwrap().to_string()
+    }
+
+    #[test]
+    fn load_session_windowed_returns_window_with_total_count() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_session(dir.path());
+        let state = AppState::new();
+
+        let full = state
+            .load_session_windowed(&path, LoadOptions::full())
+            .unwrap();
+        assert_eq!(full.count, full.messages.len());
+        assert!(full.count >= 3);
+
+        let win = state
+            .load_session_windowed(
+                &path,
+                LoadOptions::window(MessageRange {
+                    start: 1,
+                    limit: Some(1),
+                }),
+            )
+            .unwrap();
+        assert_eq!(win.count, full.count, "count is the total, not the window");
+        assert_eq!(win.start, 1);
+        assert_eq!(win.messages.len(), 1);
+        assert_eq!(win.messages[0].content, full.messages[1].content);
+    }
+
+    #[test]
+    fn light_cache_serves_repeated_windows_and_clears() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_session(dir.path());
+        let state = AppState::new();
+
+        // First call builds and caches; second (same path+size) hits the cache
+        // and must return identical content.
+        let a = state
+            .load_session_windowed(&path, LoadOptions::full())
+            .unwrap();
+        assert!(state.session_light_cache.lock().unwrap().is_some());
+        let b = state
+            .load_session_windowed(&path, LoadOptions::full())
+            .unwrap();
+        assert_eq!(a.count, b.count);
+        let contents_a: Vec<_> = a.messages.iter().map(|m| &m.content).collect();
+        let contents_b: Vec<_> = b.messages.iter().map(|m| &m.content).collect();
+        assert_eq!(contents_a, contents_b);
+
+        state.clear_session_build_cache();
+        assert!(state.session_light_cache.lock().unwrap().is_none());
+        // Still works after clearing (rebuilds).
+        let c = state
+            .load_session_windowed(&path, LoadOptions::full())
+            .unwrap();
+        assert_eq!(c.count, a.count);
+    }
+
+    #[test]
+    fn full_message_at_works_without_a_warm_light_cache() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_session(dir.path());
+        let state = AppState::new();
+
+        // No list load has happened yet — full_message_at must not depend on
+        // the light cache being populated first.
+        assert!(state.session_light_cache.lock().unwrap().is_none());
+        let msg = state.full_message_at(&path, 1).unwrap();
+        assert!(msg.is_some());
+        assert_eq!(msg.unwrap().content, "hi there");
+    }
+
+    #[test]
+    fn full_message_at_never_populates_the_light_cache() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_session(dir.path());
+        let state = AppState::new();
+
+        state.full_message_at(&path, 0).unwrap();
+        state.full_message_at(&path, 1).unwrap();
+        // Detail lookups re-parse fresh each time and never persist the heavy
+        // build — the light cache (used only by list windows) stays empty.
+        assert!(state.session_light_cache.lock().unwrap().is_none());
+    }
+
+    #[test]
+    fn full_message_at_out_of_range_returns_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_session(dir.path());
+        let state = AppState::new();
+
+        assert!(state.full_message_at(&path, 9999).unwrap().is_none());
     }
 }

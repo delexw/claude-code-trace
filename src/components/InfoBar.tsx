@@ -1,13 +1,19 @@
-import { useMemo } from "react";
-import type { DisplayMessage, SessionMeta, SessionTotals, GitInfo } from "../types";
-import { shortPath, shortMode, contextPercent, formatTokens, formatCost } from "../lib/format";
+import type { SessionMeta, SessionTotals, GitInfo } from "../types";
+import {
+  shortPath,
+  shortMode,
+  contextPercentFromTokens,
+  formatTokens,
+  formatCost,
+} from "../lib/format";
 import { getContextColor } from "../lib/theme";
 import { TokensIcon, CostIcon } from "./Icons";
 
 interface InfoBarProps {
   meta: SessionMeta;
   gitInfo: GitInfo | null;
-  messages: DisplayMessage[];
+  /** Latest Claude context-window fill (tokens); 0 hides the gauge. */
+  contextTokens: number;
   sessionTotals: SessionTotals;
   sessionPath: string;
   ongoing: boolean;
@@ -16,7 +22,7 @@ interface InfoBarProps {
 export function InfoBar({
   meta,
   gitInfo,
-  messages,
+  contextTokens,
   sessionTotals,
   sessionPath,
   ongoing,
@@ -26,7 +32,7 @@ export function InfoBar({
   const branch = gitInfo?.branch || meta.git_branch;
   const dirty = gitInfo?.dirty ?? false;
   const mode = meta.permission_mode;
-  const ctxPct = useMemo(() => contextPercent(messages), [messages]);
+  const ctxPct = contextPercentFromTokens(contextTokens);
 
   const totalCost = sessionTotals.cost_usd;
 

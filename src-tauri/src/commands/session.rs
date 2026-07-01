@@ -3,62 +3,52 @@ use std::sync::Arc;
 use tauri::{AppHandle, State};
 
 use crate::convert::*;
-use crate::parser::chunk::build_chunks;
-use crate::parser::ongoing::OngoingChecker;
-use crate::parser::session::{extract_session_meta, read_session_with_debug_hooks, SessionMeta};
-use crate::parser::subagent::{discover_and_link_all, inject_orphan_subagents};
-use crate::parser::team::reconstruct_teams;
+use crate::parser::session::{extract_session_meta, SessionMeta};
+use crate::session_load::{LoadOptions, MessageRange};
 use crate::state::AppState;
 use crate::watcher::start_session_watcher;
 
 /// Load a session file and return display messages.
+///
+/// `start`/`limit` request a windowed slice for virtualized clients; omit both
+/// (the default) to load the whole session. The returned `count` is always the
+/// total message count so the client can size the list.
 #[tauri::command]
 pub async fn load_session(
     path: String,
+    start: Option<usize>,
+    limit: Option<usize>,
     state: State<'_, Arc<AppState>>,
 ) -> Result<LoadResult, String> {
     if path.is_empty() {
         return Err("no session path provided".to_string());
     }
 
-    let (classified, _new_offset, _) = read_session_with_debug_hooks(&path)?;
-    let mut chunks = build_chunks(&classified);
+    let opts = LoadOptions::window(MessageRange {
+        start: start.unwrap_or(0),
+        limit,
+    });
+    let result = state.load_session_windowed(&path, opts)?;
 
-    // Discover and link subagent execution traces.
-    let (mut all_procs, color_map) = discover_and_link_all(&path, &chunks);
+    // Set initial ongoing status so the picker has it immediately.
+    state.set_watched_ongoing(path.clone(), result.ongoing);
 
-    // Inject orphan subagents (no parent tool_use in main session yet).
-    inject_orphan_subagents(&mut chunks, &mut all_procs);
+    Ok(result)
+}
 
-    let ongoing = OngoingChecker::new(&chunks, &all_procs, &path).is_ongoing();
-
-    // Set initial ongoing status so picker has it immediately.
-    state.set_watched_ongoing(path.clone(), ongoing);
-
-    let teams = reconstruct_teams(&chunks, &all_procs);
-    let messages = chunks_to_messages(&chunks, &all_procs, &color_map);
-    let meta = extract_session_meta(&path);
-
-    // Scan main session + subagent files with global requestId dedup.
-    let scanned = crate::parser::session::scan_session_metadata(&path);
-    let session_totals = SessionTotals {
-        total_tokens: scanned.total_tokens,
-        input_tokens: scanned.input_tokens,
-        output_tokens: scanned.output_tokens,
-        cache_read_tokens: scanned.cache_read_tokens,
-        cache_creation_tokens: scanned.cache_creation_tokens,
-        cost_usd: scanned.cost_usd,
-        model: scanned.model,
-    };
-
-    Ok(LoadResult {
-        messages,
-        teams,
-        path: path.clone(),
-        ongoing,
-        meta,
-        session_totals,
-    })
+/// Return the full (heavy-body) message at `index` for the detail view. List
+/// windows carry lightened messages (no tool bodies), so the detail view fetches
+/// the full message on demand.
+#[tauri::command]
+pub async fn load_message(
+    path: String,
+    index: usize,
+    state: State<'_, Arc<AppState>>,
+) -> Result<Option<DisplayMessage>, String> {
+    if path.is_empty() {
+        return Err("no session path provided".to_string());
+    }
+    state.full_message_at(&path, index)
 }
 
 /// Get session metadata without loading the full session.
@@ -106,5 +96,6 @@ pub async fn get_project_dirs(state: State<'_, Arc<AppState>>) -> Result<Vec<Str
 #[tauri::command]
 pub async fn unwatch_session(state: State<'_, Arc<AppState>>) -> Result<(), String> {
     state.clear_watched_ongoing();
+    state.clear_session_build_cache();
     state.stop_session_watcher()
 }

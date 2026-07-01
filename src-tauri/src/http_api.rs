@@ -15,13 +15,8 @@ use tokio_stream::StreamExt;
 use tower_http::cors::CorsLayer;
 use tower_http::services::ServeDir;
 
-use crate::convert::*;
-use crate::parser::chunk::build_chunks;
 use crate::parser::debuglog::*;
-use crate::parser::ongoing::OngoingChecker;
-use crate::parser::session::{extract_session_meta, read_session_with_debug_hooks};
-use crate::parser::subagent::{discover_and_link_all, inject_orphan_subagents};
-use crate::parser::team::reconstruct_teams;
+use crate::parser::session::extract_session_meta;
 use crate::state::AppState;
 use crate::watcher::{start_picker_watcher, start_session_watcher};
 
@@ -99,6 +94,7 @@ async fn run_server(state: Arc<HttpState>) {
         .route("/api/sessions", post(api_discover_sessions))
         .route("/api/session", get(api_get_session_by_id))
         .route("/api/session/load", post(api_load_session))
+        .route("/api/session/message", post(api_load_message))
         .route("/api/session/meta", get(api_get_session_meta))
         .route("/api/session/watch", post(api_watch_session))
         .route("/api/session/unwatch", post(api_unwatch_session))
@@ -275,53 +271,41 @@ async fn api_discover_sessions(
 #[derive(Deserialize)]
 struct PathBody {
     path: String,
+    /// Optional window for virtualized clients — first message index.
+    #[serde(default)]
+    start: Option<usize>,
+    /// Optional window size; omit to load to the end.
+    #[serde(default)]
+    limit: Option<usize>,
 }
 
+/// Load a session by timestamp window (used by the by-id range endpoint).
 fn load_session_by_path(
     app_state: &AppState,
     path: String,
     since: Option<DateTime<Utc>>,
     before: Option<DateTime<Utc>>,
 ) -> Response {
-    let (classified, _new_offset, _) = match read_session_with_debug_hooks(&path) {
-        Ok(v) => v,
+    let opts = crate::session_load::LoadOptions::filtered(crate::session_load::TimeFilter {
+        since,
+        before,
+    });
+    load_session_with(app_state, path, opts)
+}
+
+/// Shared tail for every HTTP session-load path: build via the single pipeline,
+/// record ongoing status, and serialize. Keeps the endpoints thin pass-throughs.
+fn load_session_with(
+    app_state: &AppState,
+    path: String,
+    opts: crate::session_load::LoadOptions,
+) -> Response {
+    let result = match app_state.load_session_windowed(&path, opts) {
+        Ok(r) => r,
         Err(e) => return err_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e),
     };
-    let mut chunks = build_chunks(&classified);
-    let (mut all_procs, color_map) = discover_and_link_all(&path, &chunks);
-    inject_orphan_subagents(&mut chunks, &mut all_procs);
-    if since.is_some() || before.is_some() {
-        chunks.retain(|c| {
-            since.map_or(true, |s| c.timestamp >= s) && before.map_or(true, |b| c.timestamp < b)
-        });
-    }
-
-    let ongoing = OngoingChecker::new(&chunks, &all_procs, &path).is_ongoing();
-    app_state.set_watched_ongoing(path.clone(), ongoing);
-
-    let teams = reconstruct_teams(&chunks, &all_procs);
-    let messages = chunks_to_messages(&chunks, &all_procs, &color_map);
-    let meta = extract_session_meta(&path);
-
-    let scanned = crate::parser::session::scan_session_metadata(&path);
-    let session_totals = SessionTotals {
-        total_tokens: scanned.total_tokens,
-        input_tokens: scanned.input_tokens,
-        output_tokens: scanned.output_tokens,
-        cache_read_tokens: scanned.cache_read_tokens,
-        cache_creation_tokens: scanned.cache_creation_tokens,
-        cost_usd: scanned.cost_usd,
-        model: scanned.model,
-    };
-
-    ok_json(&LoadResult {
-        messages,
-        teams,
-        path,
-        ongoing,
-        meta,
-        session_totals,
-    })
+    app_state.set_watched_ongoing(path, result.ongoing);
+    ok_json(&result)
 }
 
 async fn api_load_session(
@@ -334,7 +318,38 @@ async fn api_load_session(
             "no session path provided".to_string(),
         );
     }
-    load_session_by_path(app_state(&state), body.path, None, None)
+    let opts = crate::session_load::LoadOptions::window(crate::session_load::MessageRange {
+        start: body.start.unwrap_or(0),
+        limit: body.limit,
+    });
+    load_session_with(app_state(&state), body.path, opts)
+}
+
+#[derive(Deserialize)]
+struct MessageBody {
+    path: String,
+    index: usize,
+}
+
+/// Return the full (heavy-body) message at `index` for the detail view.
+async fn api_load_message(
+    State(state): State<Arc<HttpState>>,
+    Json(body): Json<MessageBody>,
+) -> Response {
+    if body.path.is_empty() {
+        return err_response(
+            axum::http::StatusCode::BAD_REQUEST,
+            "no session path provided".to_string(),
+        );
+    }
+    match app_state(&state).full_message_at(&body.path, body.index) {
+        Ok(Some(msg)) => ok_json(&msg),
+        Ok(None) => err_response(
+            axum::http::StatusCode::NOT_FOUND,
+            "message not found".to_string(),
+        ),
+        Err(e) => err_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e),
+    }
 }
 
 #[derive(Deserialize)]
@@ -447,6 +462,7 @@ async fn api_watch_session(
 async fn api_unwatch_session(State(state): State<Arc<HttpState>>) -> Response {
     let app_state = app_state(&state);
     app_state.clear_watched_ongoing();
+    app_state.clear_session_build_cache();
     match app_state.stop_session_watcher() {
         Ok(()) => ok_json(&serde_json::json!({ "ok": true })),
         Err(e) => err_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e),
@@ -558,91 +574,10 @@ async fn api_events(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parser::chunk::{Chunk, ChunkType};
-    use chrono::TimeZone;
 
-    fn chunk_at(year: i32, month: u32, day: u32) -> Chunk {
-        Chunk {
-            chunk_type: ChunkType::User,
-            timestamp: Utc.with_ymd_and_hms(year, month, day, 0, 0, 0).unwrap(),
-            ..Chunk::default()
-        }
-    }
-
-    fn apply_filter(
-        chunks: &mut Vec<Chunk>,
-        since: Option<DateTime<Utc>>,
-        before: Option<DateTime<Utc>>,
-    ) {
-        if since.is_some() || before.is_some() {
-            chunks.retain(|c| {
-                since.map_or(true, |s| c.timestamp >= s) && before.map_or(true, |b| c.timestamp < b)
-            });
-        }
-    }
-
-    #[test]
-    fn since_future_excludes_all() {
-        let mut chunks = vec![chunk_at(2025, 1, 1), chunk_at(2025, 6, 1)];
-        let since = Utc.with_ymd_and_hms(2099, 1, 1, 0, 0, 0).unwrap();
-        apply_filter(&mut chunks, Some(since), None);
-        assert!(chunks.is_empty());
-    }
-
-    #[test]
-    fn before_ancient_excludes_all() {
-        let mut chunks = vec![chunk_at(2025, 1, 1), chunk_at(2025, 6, 1)];
-        let before = Utc.with_ymd_and_hms(2000, 1, 1, 0, 0, 0).unwrap();
-        apply_filter(&mut chunks, None, Some(before));
-        assert!(chunks.is_empty());
-    }
-
-    #[test]
-    fn since_filters_older_keeps_newer() {
-        let mut chunks = vec![
-            chunk_at(2025, 1, 1),
-            chunk_at(2025, 6, 1),
-            chunk_at(2026, 1, 1),
-        ];
-        let since = Utc.with_ymd_and_hms(2025, 6, 1, 0, 0, 0).unwrap();
-        apply_filter(&mut chunks, Some(since), None);
-        assert_eq!(chunks.len(), 2);
-        assert!(chunks.iter().all(|c| c.timestamp >= since));
-    }
-
-    #[test]
-    fn before_filters_newer_keeps_older() {
-        let mut chunks = vec![
-            chunk_at(2025, 1, 1),
-            chunk_at(2025, 6, 1),
-            chunk_at(2026, 1, 1),
-        ];
-        let before = Utc.with_ymd_and_hms(2025, 6, 1, 0, 0, 0).unwrap();
-        apply_filter(&mut chunks, None, Some(before));
-        assert_eq!(chunks.len(), 1);
-        assert!(chunks.iter().all(|c| c.timestamp < before));
-    }
-
-    #[test]
-    fn since_and_before_window() {
-        let mut chunks = vec![
-            chunk_at(2025, 1, 1),
-            chunk_at(2025, 6, 1),
-            chunk_at(2025, 9, 1),
-            chunk_at(2026, 1, 1),
-        ];
-        let since = Utc.with_ymd_and_hms(2025, 6, 1, 0, 0, 0).unwrap();
-        let before = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
-        apply_filter(&mut chunks, Some(since), Some(before));
-        assert_eq!(chunks.len(), 2);
-    }
-
-    #[test]
-    fn no_filter_keeps_all() {
-        let mut chunks = vec![chunk_at(2025, 1, 1), chunk_at(2025, 6, 1)];
-        apply_filter(&mut chunks, None, None);
-        assert_eq!(chunks.len(), 2);
-    }
+    // Timestamp-window filtering is owned and tested by `crate::session_load`
+    // (`TimeFilter`). Here we only cover the HTTP-layer concern of parsing the
+    // `since`/`before` query strings.
 
     #[test]
     fn invalid_since_parse_fails() {

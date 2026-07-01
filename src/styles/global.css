@@ -1087,13 +1087,22 @@ body {
   height: 100%;
 }
 
+.link-button {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  text-decoration: underline;
+}
+
 /* ---- Message List ---- */
 
 .message-list {
   flex: 1;
   overflow-y: auto;
   padding: 8px 0;
-  scroll-behavior: smooth;
 }
 
 .message-list__empty {
@@ -1117,6 +1126,60 @@ body {
 
 .message:hover {
   background: var(--bg-hover);
+}
+
+/* While actively scrolling a virtualized list, the browser does not recompute
+ * `:hover` for rows that shift under a stationary cursor — only a real pointer
+ * move triggers that. Suppressing the hover/selection transition during scroll
+ * avoids a stale highlight visually lingering on the wrong row; the correct
+ * hover reappears on the next real pointer move once scrolling settles. */
+.message-list--scrolling .message {
+  transition: none;
+}
+
+.message-list--scrolling .message:hover {
+  background: transparent;
+}
+
+/* Placeholder shown for a virtualized row whose body hasn't loaded yet. Sized
+ * to approximate a typical loaded row (header + content lines + stats bar) so
+ * the swap to real content is a small reflow rather than a large one — a big
+ * height jump mid-scroll is what causes rows to visibly overlap/misalign. */
+.message--placeholder {
+  cursor: default;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
+  padding-bottom: 12px;
+}
+
+.message__placeholder-line {
+  height: 12px;
+  width: 70%;
+  border-radius: 3px;
+  background: var(--bg-elevated);
+  opacity: 0.5;
+  animation: message-placeholder-pulse 1.2s ease-in-out infinite;
+}
+
+.message__placeholder-line--header {
+  height: 16px;
+  width: 30%;
+}
+
+.message__placeholder-line--short {
+  width: 45%;
+}
+
+@keyframes message-placeholder-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 0.7;
+  }
 }
 
 .message--selected {
@@ -2578,6 +2641,34 @@ body {
 .settings-modal__wsl-item input {
   cursor: pointer;
   accent-color: var(--accent);
+}
+
+.settings-modal__font-scale {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.settings-modal__font-scale-btn {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+
+.settings-modal__font-scale-btn:hover {
+  background: var(--bg-hover);
+}
+
+.settings-modal__font-scale-btn--active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
 }
 
 .settings-modal__input {

@@ -1,7 +1,8 @@
 # Spec: Item Rendering by Type
 
 **Locations**:
-`src/components/DetailItem.tsx`, `src/components/MessageItem.tsx`, `src/components/Icons.tsx`,
+`src/components/DetailItem.tsx`, `src/components/MessageItem.tsx`, `src/components/MessageList.tsx`,
+`src/components/Icons.tsx`,
 `shared/diff.ts`, `tui-py/diff_utils.py`,
 `tui-py/widgets/detail_view.py`, `tui-py/widgets/message_list.py`,
 `tui-py/items.py`, `tui-py/theme.py`,
@@ -280,10 +281,53 @@ TUI: implemented by `App.tsx` state variables `subagentItem` and `subagentDetail
 
 ---
 
-## Auto-Scroll (`useAutoScroll`)
+## Virtualization (`MessageList`)
 
-Auto-scrolls the message list to the bottom when new content arrives, but only if the user was
-already near the bottom.
+`MessageList.tsx` renders the main message list through react-virtuoso rather than mapping the
+full message array. Only messages inside (and slightly beyond) the viewport are mounted; the rest
+render as lightweight placeholders until their bodies load.
+
+```mermaid
+flowchart TD
+    VIRT["Virtuoso\ntotalCount={count}\nitemContent={renderMessageRow}"]
+    VIRT --> ROW["renderMessageRow(index)"]
+    ROW --> GET["ctx.getMessage(index)"]
+    GET --> LOADED{"body loaded?"}
+    LOADED -->|"yes"| ITEM["MessageItem\n(full render)"]
+    LOADED -->|"no"| PH["placeholder\n.message--placeholder\n(header + content + short line,\nrole class from roles[] index)"]
+
+    VIRT --> RANGE["rangeChanged(range)"]
+    RANGE --> STORE["rangeRef.current = range"]
+    RANGE --> LOAD["onRangeChange(start, end)\n→ triggers body fetch for window"]
+```
+
+- `roles: string[]` is a lightweight full-session role index (length === `count`) kept separate
+  from loaded message bodies, so a placeholder can still pick the correct role class
+  (`message--user` / `message--claude` / `message--compact` / `message--system`) before its body
+  arrives.
+- `increaseViewportBy={{ top: 600, bottom: 600 }}` pre-renders rows 600px outside the visible
+  viewport in both directions, so bodies load and the placeholder→content swap happens off-screen
+  instead of visibly reflowing at the viewport edge.
+- `rangeChanged` reports the currently rendered window; `onRangeChange` is the caller's hook to
+  ensure those message bodies are loaded (paged `useSession`, see
+  [reference_messagelist_virtualized_virtuoso]).
+
+---
+
+## Auto-Scroll
+
+### Main message list — Virtuoso `followOutput`
+
+`MessageList.tsx` does **not** use `useAutoScroll`. It passes `followOutput="smooth"` directly to
+`Virtuoso`, which sticks to the bottom on new/streamed content but only while the user is already
+scrolled to the bottom — the same "don't disturb the reader" behaviour, implemented natively by
+the virtualization library instead of a scroll-event/MutationObserver hook.
+
+### Everywhere else — `useAutoScroll`
+
+`useAutoScroll` still exists and is used by `MessageDetail.tsx` (item list, message list, and
+detail body panels) to auto-scroll to the bottom when new content arrives, but only if the user
+was already near the bottom.
 
 ```mermaid
 flowchart TD
@@ -310,10 +354,38 @@ on an existing item) do not cause unwanted scroll.
 
 ---
 
-## Scroll-to-Selected (`useScrollToSelected`)
+## Scroll-to-Selected
 
-When the keyboard selection changes, the selected item must come into view. The hook walks up
-the DOM to find the scrollable ancestor and aligns based on position.
+### Main message list — `selectionScrollTarget` + Virtuoso
+
+`MessageList.tsx` does **not** use `useScrollToSelected`. It computes the scroll target with a
+pure helper, `selectionScrollTarget(selectedIndex, range)`, and applies it through Virtuoso's
+imperative handle instead of DOM ancestor-walking.
+
+```mermaid
+flowchart TD
+    SEL["selectedIndex changes"]
+    SEL --> FN["selectionScrollTarget(selectedIndex, rangeRef.current)"]
+    FN --> POS{"position?"}
+    POS -->|"selectedIndex < range.startIndex"| TOP["{index, align: 'start'}"]
+    POS -->|"selectedIndex > range.endIndex"| END["{index, align: 'end'}"]
+    POS -->|"within range"| NULLR["null (no-op)"]
+    TOP --> CALL["virtuosoRef.current.scrollToIndex({index, align})"]
+    END --> CALL
+```
+
+`rangeRef` is kept in sync with Virtuoso's `rangeChanged` callback (see
+[Virtualization](#virtualization-messagelist)), so the "currently rendered window" always
+reflects what's actually mounted. Above the window aligns to `"start"` (keeps the header
+visible); below aligns to `"end"`; already visible is a no-op — same behavioural contract as
+`useScrollToSelected`, expressed as index/window arithmetic instead of `getBoundingClientRect()`.
+
+### Everywhere else — `useScrollToSelected`
+
+`useScrollToSelected` still exists and is used by `MessageDetail.tsx`, `DebugViewer.tsx`,
+`SessionPicker.tsx`, and `ProjectTree.tsx`. When the keyboard selection changes, the selected item
+must come into view. The hook walks up the DOM to find the scrollable ancestor and aligns based
+on position.
 
 ```mermaid
 flowchart TD
@@ -328,6 +400,36 @@ flowchart TD
 
 The "no-op when already visible" branch matters: without it, every keyboard move would
 re-centre the selected item, causing visible jitter.
+
+---
+
+## Hover Recompute Under Virtualized Scroll
+
+WebKit (and browsers generally) only recompute `:hover` styling in response to a real pointer
+move — not when the content underneath a stationary cursor shifts, as it does while scrolling a
+virtualized list. This is particularly visible in Tauri's macOS webview, which is WebKit-based:
+after scrolling stops, whatever row happens to land under the cursor can appear "stuck" with a
+stale hover state until the mouse actually moves.
+
+`MessageList.tsx` works around this via Virtuoso's `isScrolling` callback:
+
+```mermaid
+flowchart TD
+    MM["window 'mousemove' listener"]
+    MM --> LAST["lastMouseRef.current = {x, y}"]
+
+    ISS["Virtuoso isScrolling(scrolling)"]
+    ISS --> CLASS["message-list--scrolling class\n(suppresses hover/transition flicker\nwhile actively scrolling)"]
+    ISS --> STOP{"scrolling → false?"}
+    STOP -->|"yes"| RAF["requestAnimationFrame\n(wait for settled scroll to paint)"]
+    RAF --> SYN["dispatch synthetic 'mousemove'\nat lastMouseRef position"]
+    SYN --> REHOVER["browser redoes :hover hit-testing\nwithout a real pointer move"]
+```
+
+The `message-list--scrolling` CSS class is applied to the Virtuoso container while `isScrolling`
+is true, suppressing hover and transition effects so rows don't visibly flicker mid-scroll. Once
+scrolling settles, the synthetic `mousemove` (dispatched at the last real cursor position tracked
+by a `window` listener) forces the browser to redo hit-testing and clear the stale hover.
 
 ---
 

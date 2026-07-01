@@ -4,6 +4,7 @@ mod commands;
 mod convert;
 mod http_api;
 mod parser;
+mod session_load;
 mod settings;
 mod state;
 mod watcher;
@@ -58,6 +59,7 @@ pub fn run() {
         .manage(app_state)
         .invoke_handler(tauri::generate_handler![
             commands::session::load_session,
+            commands::session::load_message,
             commands::session::get_session_meta,
             commands::session::watch_session,
             commands::session::unwatch_session,
