@@ -21,6 +21,7 @@ function makeSession(overrides: Partial<SessionInfo> = {}): SessionInfo {
     session_id: "session1",
     mod_time: "2025-01-01T00:00:00Z",
     first_message: "Hello",
+    recap: null,
     turn_count: 3,
     is_ongoing: false,
     total_tokens: 1000,
