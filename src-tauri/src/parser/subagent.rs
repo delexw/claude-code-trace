@@ -48,8 +48,17 @@ fn pricing_for_model(model: &str) -> ModelPricing {
             cache_read: 0.1,
             cache_write: 1.25,
         }
+    } else if m.contains("sonnet-5") {
+        // Sonnet 5 promotional pricing through Aug 31, 2026.
+        // Review after promotional period ends.
+        ModelPricing {
+            input: 2.0,
+            output: 10.0,
+            cache_read: 0.2,
+            cache_write: 2.5,
+        }
     } else {
-        // Default to sonnet
+        // Default: standard Sonnet pricing (Sonnet 4.x and earlier).
         ModelPricing {
             input: 3.0,
             output: 15.0,
@@ -1862,5 +1871,56 @@ mod tests {
         assert_eq!(specs.len(), 1, "implicit team agent must produce a spec");
         assert_eq!(specs[0].0, "", "team_name must be empty for implicit agent");
         assert_eq!(specs[0].1, "worker-implicit");
+    }
+
+    // ---- pricing_for_model tests ----
+
+    #[test]
+    fn pricing_sonnet5_promotional() {
+        let p = pricing_for_model("claude-sonnet-5-20260701");
+        assert_eq!(p.input, 2.0);
+        assert_eq!(p.output, 10.0);
+        assert_eq!(p.cache_read, 0.2);
+        assert_eq!(p.cache_write, 2.5);
+    }
+
+    #[test]
+    fn pricing_sonnet5_bare() {
+        let p = pricing_for_model("claude-sonnet-5");
+        assert_eq!(p.input, 2.0);
+        assert_eq!(p.output, 10.0);
+    }
+
+    #[test]
+    fn pricing_sonnet4_uses_standard_rates() {
+        let p = pricing_for_model("claude-sonnet-4-20250514");
+        assert_eq!(p.input, 3.0);
+        assert_eq!(p.output, 15.0);
+        assert_eq!(p.cache_read, 0.3);
+        assert_eq!(p.cache_write, 3.75);
+    }
+
+    #[test]
+    fn pricing_opus_family() {
+        let p = pricing_for_model("claude-opus-4-7");
+        assert_eq!(p.input, 5.0);
+        assert_eq!(p.output, 25.0);
+        assert_eq!(p.cache_read, 0.5);
+        assert_eq!(p.cache_write, 6.25);
+    }
+
+    #[test]
+    fn pricing_haiku_family() {
+        let p = pricing_for_model("claude-haiku-4-5-20251001");
+        assert_eq!(p.input, 1.0);
+        assert_eq!(p.output, 5.0);
+        assert_eq!(p.cache_read, 0.1);
+        assert_eq!(p.cache_write, 1.25);
+    }
+
+    #[test]
+    fn pricing_model_name_case_insensitive() {
+        let p = pricing_for_model("Claude-Sonnet-5-20260701");
+        assert_eq!(p.input, 2.0, "model name matching must be case-insensitive");
     }
 }
