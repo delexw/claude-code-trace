@@ -1009,6 +1009,10 @@ body {
   font-weight: 600;
 }
 
+.picker__recap-label {
+  color: var(--text-dim);
+}
+
 .picker__session-subtitle {
   margin-top: 2px;
   color: var(--text-dim);
@@ -1016,6 +1020,15 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Recap shown as the subtitle under a named session: wrap in full (~2-3 lines)
+   rather than truncating to one line, since a recap is a compact summary. */
+.picker__session-subtitle--recap {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  line-height: 1.4;
 }
 
 .picker__session-ongoing {
@@ -2685,7 +2698,10 @@ body {
   font-size: 12px;
   font-family: inherit;
   cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
 }
 
 .settings-modal__toggle:hover {

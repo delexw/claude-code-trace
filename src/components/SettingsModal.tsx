@@ -214,7 +214,9 @@ export function SettingsModal({
           ))}
         </div>
 
-        <label className="settings-modal__label settings-modal__label--section">Session Preview</label>
+        <label className="settings-modal__label settings-modal__label--section">
+          Session Preview
+        </label>
         <p className="settings-modal__hint">
           Show a session's end-of-session recap as its list preview, when the recap is the latest
           entry.

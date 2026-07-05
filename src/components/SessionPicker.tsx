@@ -31,6 +31,11 @@ interface SessionPickerProps {
    * uses this as a cue to refresh fresh session info.
    */
   onVisiblePathsChange?: (paths: string[]) => void;
+  /**
+   * When true, sessions with an end-of-session recap and no user-assigned name
+   * show the full recap (instead of the truncated name/first_message) as their preview.
+   */
+  recapPreview?: boolean;
 }
 
 export function SessionPicker({
@@ -42,6 +47,7 @@ export function SessionPicker({
   onSearchChange,
   onSelectIndex,
   onVisiblePathsChange,
+  recapPreview = false,
 }: SessionPickerProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const selectedRef = useScrollToSelected(selectedIndex);
@@ -112,6 +118,7 @@ export function SessionPicker({
               const model = shortModel(session.model);
               const modelClr = getModelColor(session.model);
               const sessionCost = session.cost_usd;
+              const showRecap = recapPreview && !!session.recap;
 
               return (
                 <div
@@ -146,11 +153,15 @@ export function SessionPicker({
                       Detail <ForwardIcon />
                     </button>
                   </div>
-                  {session.name && session.first_message && (
+                  {showRecap ? (
+                    <div className="picker__session-subtitle picker__session-subtitle--recap">
+                      <span className="picker__recap-label">Recap:</span> {session.recap}
+                    </div>
+                  ) : session.name && session.first_message ? (
                     <div className="picker__session-subtitle">
                       {truncate(session.first_message, 80)}
                     </div>
-                  )}
+                  ) : null}
                   <div className="picker__session-meta">
                     <span className="picker__session-model" style={{ color: modelClr }}>
                       {model}

@@ -1,7 +1,7 @@
 /** Whether the picker uses a session's end-of-session recap as its preview.
  *  Persisted in localStorage so it survives reloads. Default ON. */
 export const RECAP_PREVIEW_KEY = "cct.recapPreview";
-export const DEFAULT_RECAP_PREVIEW = true;
+const DEFAULT_RECAP_PREVIEW = true;
 
 export function loadRecapPreview(): boolean {
   if (typeof localStorage === "undefined") return DEFAULT_RECAP_PREVIEW;

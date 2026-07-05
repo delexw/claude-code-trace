@@ -390,6 +390,7 @@ export function App() {
             onSearchChange={picker.setSearchQuery}
             onSelectIndex={setPickerSelectedIndex}
             onVisiblePathsChange={picker.refresh}
+            recapPreview={recapPreview}
           />
         );
 

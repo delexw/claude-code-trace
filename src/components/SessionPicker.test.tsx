@@ -158,6 +158,95 @@ describe("SessionPicker", () => {
     expect(screen.getByText(/Hello world/)).toBeInTheDocument();
   });
 
+  it("unnamed session: keeps first_message as the main line and adds the recap as the subtitle", () => {
+    const sessions = [
+      makeSession({ name: null, first_message: "just do it", recap: "Migrated X, decided Y" }),
+    ];
+    render(
+      <SessionPicker
+        sessions={sessions}
+        loading={false}
+        searchQuery=""
+        selectedIndex={0}
+        onSelect={vi.fn()}
+        onSearchChange={vi.fn()}
+        recapPreview={true}
+      />,
+    );
+    // Main line is left untouched (the first message); the recap is a second line below it.
+    expect(screen.getByText(/just do it/)).toBeInTheDocument();
+    expect(screen.getByText(/Migrated X, decided Y/)).toBeInTheDocument();
+  });
+
+  it("unnamed session: no recap subtitle when recapPreview is off", () => {
+    const sessions = [
+      makeSession({ name: null, first_message: "just do it", recap: "Migrated X" }),
+    ];
+    render(
+      <SessionPicker
+        sessions={sessions}
+        loading={false}
+        searchQuery=""
+        selectedIndex={0}
+        onSelect={vi.fn()}
+        onSearchChange={vi.fn()}
+        recapPreview={false}
+      />,
+    );
+    expect(screen.getByText(/just do it/)).toBeInTheDocument();
+    expect(screen.queryByText(/Migrated X/)).not.toBeInTheDocument();
+  });
+
+  it("named session: keeps the name as title and shows the recap as the subtitle", () => {
+    const sessions = [
+      makeSession({
+        name: "home-lab-4e",
+        first_message: "bitte lies issue 13",
+        recap: "VictoriaLogs migration planned",
+      }),
+    ];
+    render(
+      <SessionPicker
+        sessions={sessions}
+        loading={false}
+        searchQuery=""
+        selectedIndex={0}
+        onSelect={vi.fn()}
+        onSearchChange={vi.fn()}
+        recapPreview={true}
+      />,
+    );
+    // Name stays the title (a `/rename` or derived name is never replaced)...
+    expect(screen.getByText("home-lab-4e")).toHaveClass("picker__session-preview--named");
+    // ...and the recap takes the subtitle line, replacing the first message.
+    expect(screen.getByText(/VictoriaLogs migration planned/)).toBeInTheDocument();
+    expect(screen.queryByText(/bitte lies issue 13/)).not.toBeInTheDocument();
+  });
+
+  it("named session: keeps the first_message subtitle when recapPreview is off", () => {
+    const sessions = [
+      makeSession({
+        name: "home-lab-4e",
+        first_message: "bitte lies issue 13",
+        recap: "VictoriaLogs migration planned",
+      }),
+    ];
+    render(
+      <SessionPicker
+        sessions={sessions}
+        loading={false}
+        searchQuery=""
+        selectedIndex={0}
+        onSelect={vi.fn()}
+        onSearchChange={vi.fn()}
+        recapPreview={false}
+      />,
+    );
+    expect(screen.getByText("home-lab-4e")).toBeInTheDocument();
+    expect(screen.getByText(/bitte lies issue 13/)).toBeInTheDocument();
+    expect(screen.queryByText(/VictoriaLogs/)).not.toBeInTheDocument();
+  });
+
   it("shows active badge for ongoing sessions", () => {
     const sessions = [makeSession({ is_ongoing: true })];
     render(
