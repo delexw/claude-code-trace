@@ -90,12 +90,22 @@ export function formatDuration(ms: number): string {
 export { shortPath, projectKey, projectDisplayName } from "../../shared/format";
 
 /**
+ * Returns true for permission modes that represent the default (no-special-permissions) state.
+ * Both "default" (pre-v2.1.200) and "manual" (v2.1.200+) are the default mode — no badge shown.
+ */
+export function isDefaultMode(mode: string): boolean {
+  return mode === "default" || mode === "manual";
+}
+
+/**
  * Returns a human-readable label for a permission mode.
  */
 export function shortMode(mode: string): string {
   switch (mode) {
     case "default":
       return "default";
+    case "manual":
+      return "manual";
     case "acceptEdits":
       return "auto-edit";
     case "bypassPermissions":

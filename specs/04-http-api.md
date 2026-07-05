@@ -151,7 +151,7 @@ session.
     /* TeamSnapshot[] */
   ],
   "ongoing": true,
-  "meta": { "cwd": "...", "git_branch": "main", "permission_mode": "default" },
+  "meta": { "cwd": "...", "git_branch": "main", "permission_mode": "manual" },
   "session_totals": { "total_tokens": 5000, "cost_usd": 0.02, "model": "..." }
 }
 ```
@@ -293,7 +293,7 @@ they're viewing (`SessionUpdatePayload` in `src-tauri/src/watcher.rs`).
   "context_tokens": 12345,
   "teams": [ /* TeamSnapshot[] */ ],
   "ongoing": true,
-  "permission_mode": "default",
+  "permission_mode": "manual",
   "session_totals": { "total_tokens": ..., "cost_usd": ..., "model": "..." }
 }
 ```

@@ -157,6 +157,20 @@ describe("InfoBar", () => {
     expect(screen.queryByText("default")).not.toBeInTheDocument();
   });
 
+  it("does not show permission mode pill for manual (v2.1.200+ default mode)", () => {
+    render(
+      <InfoBar
+        meta={makeMeta({ permission_mode: "manual" })}
+        gitInfo={null}
+        contextTokens={0}
+        sessionTotals={makeTotals()}
+        sessionPath=""
+        ongoing={false}
+      />,
+    );
+    expect(screen.queryByText("manual")).not.toBeInTheDocument();
+  });
+
   it("shows context bar when contextTokens > 0", () => {
     render(
       <InfoBar
