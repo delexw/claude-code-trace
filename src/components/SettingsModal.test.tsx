@@ -25,6 +25,7 @@ describe("SettingsModal", () => {
   const onClose = vi.fn();
   const onSaved = vi.fn();
   const onFontScaleChange = vi.fn();
+  const onRecapPreviewChange = vi.fn();
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -44,6 +45,8 @@ describe("SettingsModal", () => {
         onSaved={onSaved}
         fontScale={1}
         onFontScaleChange={onFontScaleChange}
+        recapPreview={true}
+        onRecapPreviewChange={onRecapPreviewChange}
       />,
     );
     await waitFor(() => {
@@ -61,6 +64,8 @@ describe("SettingsModal", () => {
         onSaved={onSaved}
         fontScale={1}
         onFontScaleChange={onFontScaleChange}
+        recapPreview={true}
+        onRecapPreviewChange={onRecapPreviewChange}
       />,
     );
     await waitFor(() => {
@@ -79,6 +84,8 @@ describe("SettingsModal", () => {
         onSaved={onSaved}
         fontScale={1}
         onFontScaleChange={onFontScaleChange}
+        recapPreview={true}
+        onRecapPreviewChange={onRecapPreviewChange}
       />,
     );
     await waitFor(() => {
@@ -97,6 +104,8 @@ describe("SettingsModal", () => {
         onSaved={onSaved}
         fontScale={1}
         onFontScaleChange={onFontScaleChange}
+        recapPreview={true}
+        onRecapPreviewChange={onRecapPreviewChange}
       />,
     );
     await waitFor(() => {
@@ -111,6 +120,8 @@ describe("SettingsModal", () => {
         onSaved={onSaved}
         fontScale={1}
         onFontScaleChange={onFontScaleChange}
+        recapPreview={true}
+        onRecapPreviewChange={onRecapPreviewChange}
       />,
     );
     await waitFor(() => expect(screen.getByText(`Default: ${DEFAULT_DIR}`)).toBeInTheDocument());
@@ -138,6 +149,8 @@ describe("SettingsModal", () => {
         onSaved={onSaved}
         fontScale={1}
         onFontScaleChange={onFontScaleChange}
+        recapPreview={true}
+        onRecapPreviewChange={onRecapPreviewChange}
       />,
     );
     await waitFor(() => expect(screen.getByDisplayValue("/custom/path")).toBeInTheDocument());
@@ -158,6 +171,8 @@ describe("SettingsModal", () => {
         onSaved={onSaved}
         fontScale={1}
         onFontScaleChange={onFontScaleChange}
+        recapPreview={true}
+        onRecapPreviewChange={onRecapPreviewChange}
       />,
     );
     await waitFor(() => {
@@ -177,6 +192,8 @@ describe("SettingsModal", () => {
         onSaved={onSaved}
         fontScale={1}
         onFontScaleChange={onFontScaleChange}
+        recapPreview={true}
+        onRecapPreviewChange={onRecapPreviewChange}
       />,
     );
 
@@ -200,6 +217,8 @@ describe("SettingsModal", () => {
         onSaved={onSaved}
         fontScale={1}
         onFontScaleChange={onFontScaleChange}
+        recapPreview={true}
+        onRecapPreviewChange={onRecapPreviewChange}
       />,
     );
 
@@ -223,6 +242,8 @@ describe("SettingsModal", () => {
         onSaved={onSaved}
         fontScale={1}
         onFontScaleChange={onFontScaleChange}
+        recapPreview={true}
+        onRecapPreviewChange={onRecapPreviewChange}
       />,
     );
     await waitFor(() => expect(screen.getByText(`Default: ${DEFAULT_DIR}`)).toBeInTheDocument());
@@ -245,6 +266,8 @@ describe("SettingsModal", () => {
         onSaved={onSaved}
         fontScale={1}
         onFontScaleChange={onFontScaleChange}
+        recapPreview={true}
+        onRecapPreviewChange={onRecapPreviewChange}
       />,
     );
     await waitFor(() => expect(screen.getByText(`Default: ${DEFAULT_DIR}`)).toBeInTheDocument());
@@ -257,5 +280,21 @@ describe("SettingsModal", () => {
       expect(screen.getByText("path does not exist: /bad")).toBeInTheDocument();
     });
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("toggles recap preview via the SESSION PREVIEW control", async () => {
+    const onChange = vi.fn();
+    render(
+      <SettingsModal
+        onClose={() => {}}
+        onSaved={() => {}}
+        fontScale={1}
+        onFontScaleChange={() => {}}
+        recapPreview={true}
+        onRecapPreviewChange={onChange}
+      />,
+    );
+    fireEvent.click(screen.getByRole("switch", { name: /recap preview/i }));
+    expect(onChange).toHaveBeenCalledWith(false);
   });
 });

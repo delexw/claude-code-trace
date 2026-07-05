@@ -18,6 +18,10 @@ interface SettingsModalProps {
   fontScale: number;
   /** Apply a new zoom level immediately (also persisted by the caller). */
   onFontScaleChange: (scale: number) => void;
+  /** Whether a session's recap replaces its list preview when it's the latest entry. */
+  recapPreview: boolean;
+  /** Toggle recap preview (persisted by the caller). */
+  onRecapPreviewChange: (on: boolean) => void;
 }
 
 /** Merge detected distros with already-configured ones so configured-but-offline
@@ -32,6 +36,8 @@ export function SettingsModal({
   onSaved,
   fontScale,
   onFontScaleChange,
+  recapPreview,
+  onRecapPreviewChange,
 }: SettingsModalProps) {
   const [projectsDir, setProjectsDir] = useState("");
   const [defaultDir, setDefaultDir] = useState("");
@@ -207,6 +213,23 @@ export function SettingsModal({
             </button>
           ))}
         </div>
+
+        <label className="settings-modal__label settings-modal__label--section">Session Preview</label>
+        <p className="settings-modal__hint">
+          Show a session's end-of-session recap as its list preview, when the recap is the latest
+          entry.
+        </p>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={recapPreview}
+          aria-label="Recap preview"
+          className={`settings-modal__toggle${recapPreview ? " settings-modal__toggle--on" : ""}`}
+          onClick={() => onRecapPreviewChange(!recapPreview)}
+        >
+          <span className="settings-modal__toggle-knob" />
+          <span className="settings-modal__toggle-label">{recapPreview ? "On" : "Off"}</span>
+        </button>
 
         {error && <p className="settings-modal__error">{error}</p>}
         <div className="settings-modal__actions">

@@ -7,6 +7,7 @@ import { useToggleSet } from "./hooks/useToggleSet";
 import { useKeyboard } from "./hooks/useKeyboard";
 import { useViewActionsRef, useViewActionCallbacks } from "./hooks/useViewActions";
 import { useFontScale } from "./hooks/useFontScale";
+import { useRecapPreview } from "./hooks/useRecapPreview";
 import { SessionPicker } from "./components/SessionPicker";
 import { MessageList } from "./components/MessageList";
 import { MessageDetail } from "./components/MessageDetail";
@@ -37,6 +38,7 @@ export function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [collapsedKeys, setCollapsedKeys] = useState<Set<string>>(new Set());
   const [fontScale, setFontScale] = useFontScale();
+  const [recapPreview, setRecapPreview] = useRecapPreview();
   // Full (heavy-body) message for the detail view, fetched on demand since the
   // list only holds lightened messages.
   const [detailMessage, setDetailMessage] = useState<DisplayMessage | null>(null);
@@ -522,6 +524,8 @@ export function App() {
           onSaved={loadProjectDirs}
           fontScale={fontScale}
           onFontScaleChange={setFontScale}
+          recapPreview={recapPreview}
+          onRecapPreviewChange={setRecapPreview}
         />
       )}
     </div>
