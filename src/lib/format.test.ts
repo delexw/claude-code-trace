@@ -8,6 +8,7 @@ import {
   formatDuration,
   shortPath,
   shortMode,
+  isDefaultMode,
   contextPercent,
   formatExactTime,
   groupByDate,
@@ -232,6 +233,7 @@ describe("shortPath", () => {
 describe("shortMode", () => {
   it("maps known modes to short labels", () => {
     expect(shortMode("default")).toBe("default");
+    expect(shortMode("manual")).toBe("manual");
     expect(shortMode("acceptEdits")).toBe("auto-edit");
     expect(shortMode("bypassPermissions")).toBe("yolo");
     expect(shortMode("plan")).toBe("plan");
@@ -240,6 +242,24 @@ describe("shortMode", () => {
   it("returns unknown mode as-is", () => {
     expect(shortMode("customMode")).toBe("customMode");
     expect(shortMode("")).toBe("");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isDefaultMode
+// ---------------------------------------------------------------------------
+describe("isDefaultMode", () => {
+  it("returns true for default and manual (both are the no-badge default mode)", () => {
+    expect(isDefaultMode("default")).toBe(true);
+    expect(isDefaultMode("manual")).toBe(true);
+  });
+
+  it("returns false for special modes", () => {
+    expect(isDefaultMode("acceptEdits")).toBe(false);
+    expect(isDefaultMode("bypassPermissions")).toBe(false);
+    expect(isDefaultMode("plan")).toBe(false);
+    expect(isDefaultMode("")).toBe(false);
+    expect(isDefaultMode("customMode")).toBe(false);
   });
 });
 

@@ -2,6 +2,7 @@ import type { SessionMeta, SessionTotals, GitInfo } from "../types";
 import {
   shortPath,
   shortMode,
+  isDefaultMode,
   contextPercentFromTokens,
   formatTokens,
   formatCost,
@@ -57,7 +58,7 @@ export function InfoBar({
         </span>
       )}
 
-      {mode && mode !== "default" && (
+      {mode && !isDefaultMode(mode) && (
         <span className={`info-bar__pill ${pillClass}`}>{shortMode(mode)}</span>
       )}
 

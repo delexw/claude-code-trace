@@ -919,7 +919,7 @@ pub(crate) fn scan_session_metadata(path: &str) -> SessionMetadata {
         meta.first_msg = meta.first_msg.replace('\n', " ");
     }
     if meta.permission_mode.is_empty() {
-        meta.permission_mode = "default".to_string();
+        meta.permission_mode = "manual".to_string();
     }
 
     // Scan subagent JSONL files into the same request_tokens map (global requestId dedup).
