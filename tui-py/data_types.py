@@ -116,6 +116,7 @@ class SessionInfo:
     mod_time: str = ""
     first_message: str = ""
     name: str = ""
+    recap: str | None = None
     turn_count: int = 0
     is_ongoing: bool = False
     total_tokens: int = 0
@@ -319,6 +320,7 @@ def session_info_from_dict(d: dict) -> SessionInfo:
         mod_time=d.get("mod_time", ""),
         first_message=d.get("first_message", ""),
         name=d.get("name") or "",
+        recap=d.get("recap"),
         turn_count=int(d.get("turn_count", 0)),
         is_ongoing=bool(d.get("is_ongoing", False)),
         total_tokens=int(d.get("total_tokens", 0)),

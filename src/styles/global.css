@@ -1009,6 +1009,10 @@ body {
   font-weight: 600;
 }
 
+.picker__recap-label {
+  color: var(--text-dim);
+}
+
 .picker__session-subtitle {
   margin-top: 2px;
   color: var(--text-dim);
@@ -1016,6 +1020,15 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Recap shown as the subtitle under a named session: wrap in full (~2-3 lines)
+   rather than truncating to one line, since a recap is a compact summary. */
+.picker__session-subtitle--recap {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  line-height: 1.4;
 }
 
 .picker__session-ongoing {
@@ -2669,6 +2682,52 @@ body {
   background: var(--accent);
   border-color: var(--accent);
   color: #fff;
+}
+
+.settings-modal__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  margin-top: 4px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.settings-modal__toggle:hover {
+  background: var(--bg-hover);
+}
+
+.settings-modal__toggle--on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.settings-modal__toggle--on:hover {
+  background: #4a9aee;
+}
+
+.settings-modal__toggle-knob {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  transition: background 0.15s ease;
+}
+
+.settings-modal__toggle--on .settings-modal__toggle-knob {
+  background: #fff;
 }
 
 .settings-modal__input {

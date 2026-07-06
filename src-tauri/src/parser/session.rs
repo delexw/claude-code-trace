@@ -18,6 +18,10 @@ pub struct SessionInfo {
     pub session_id: String,
     pub mod_time: DateTime<Utc>,
     pub first_message: String,
+    /// Claude Code's end-of-session recap, when it is the session's latest entry
+    /// (`away_summary`); `None` otherwise. Surfaced as an optional, richer picker
+    /// preview. Derived in `scan_session_metadata`; see `recap_from_entry`.
+    pub recap: Option<String>,
     /// User-assigned session name (Claude Code `/rename`), joined from the
     /// `~/.claude/sessions/*.json` registry. `None` when the session was never
     /// named or has no entry in the registry. The registry is pid-keyed and
@@ -358,6 +362,66 @@ fn is_session_file(name: &str, entry: &fs::DirEntry) -> bool {
         && !entry.file_type().map(|t| t.is_dir()).unwrap_or(true)
 }
 
+/// Recap text iff this parsed JSONL entry is an `away_summary` session recap
+/// (Claude Code's own end-of-session summary), else `None`. Pure and I/O-free so
+/// the metadata scan classifies each line in its existing single pass, and so the
+/// predicate is unit-testable on its own. The recap text is the top-level
+/// `content` field (a string; older shapes wrap it in `{text}` blocks).
+fn recap_from_entry(raw: &serde_json::Value) -> Option<String> {
+    if raw.get("type")?.as_str()? != "system" {
+        return None;
+    }
+    if raw.get("subtype")?.as_str()? != "away_summary" {
+        return None;
+    }
+    let text = match raw.get("content")? {
+        serde_json::Value::String(s) => s.trim().to_string(),
+        serde_json::Value::Array(blocks) => blocks
+            .iter()
+            .filter_map(|b| b.get("text").and_then(|t| t.as_str()))
+            .collect::<Vec<_>>()
+            .join(" ")
+            .trim()
+            .to_string(),
+        _ => return None,
+    };
+    (!text.is_empty()).then_some(text)
+}
+
+/// True for a genuine user turn that resumes the session, and only that. This is
+/// the single event that makes an earlier recap stale (see the recap-preview hook
+/// in `scan_session_metadata`): a recap summarises an idle return, so it should be
+/// shown only when the user has not picked the work back up after it.
+///
+/// Deliberately excluded — none of these count as the user resuming, so a recap
+/// before them survives:
+/// - **Channel events.** A channel (Claude Code's channels feature) is an MCP
+///   server that pushes events into the session so Claude can react to things
+///   happening outside the terminal — alerts, webhooks, or chat-bridge messages.
+///   Each arrives as a `user` entry wrapped in a `<channel source="…">` tag.
+///   They are pushed automatically, not typed by the user, so a burst of them
+///   after a recap does not mean the session resumed; the recap is still its real
+///   state. https://code.claude.com/docs/en/channels-reference
+/// - **Assistant turns.** An assistant reply always follows a user turn, so it
+///   never needs to clear a recap on its own, including a short acknowledgement of
+///   a channel event.
+/// - **Bookkeeping entries** (turn_duration, bridge-session, last-prompt,
+///   file-history-snapshot, queue-operation): metadata appended after a recap.
+fn is_resuming_user_turn(raw: &serde_json::Value) -> bool {
+    if raw.get("type").and_then(|v| v.as_str()) != Some("user") {
+        return false;
+    }
+    let text = match raw.get("message").and_then(|m| m.get("content")) {
+        Some(serde_json::Value::String(s)) => s.as_str(),
+        Some(serde_json::Value::Array(blocks)) => blocks
+            .iter()
+            .find_map(|b| b.get("text").and_then(|t| t.as_str()))
+            .unwrap_or(""),
+        _ => "",
+    };
+    !text.trim_start().starts_with("<channel")
+}
+
 /// Discover all session .jsonl files in a project directory.
 pub fn discover_project_sessions(project_dir: &str) -> Result<Vec<SessionInfo>, String> {
     let entries = fs::read_dir(project_dir).map_err(|e| format!("reading {project_dir}: {e}"))?;
@@ -404,6 +468,7 @@ pub fn discover_project_sessions(project_dir: &str) -> Result<Vec<SessionInfo>, 
             session_id,
             mod_time,
             first_message: meta.first_msg,
+            recap: meta.recap,
             name: None,
             turn_count: meta.turn_count,
             is_ongoing,
@@ -563,6 +628,7 @@ pub fn session_info_from_metadata(
         session_id,
         mod_time: mod_time_chrono,
         first_message: meta.first_msg,
+        recap: meta.recap,
         name: None,
         turn_count: meta.turn_count,
         is_ongoing,
@@ -635,6 +701,7 @@ pub(crate) struct SessionMetadata {
     pub(crate) cwd: String,
     pub(crate) git_branch: String,
     pub(crate) permission_mode: String,
+    pub(crate) recap: Option<String>,
 }
 
 impl Default for SessionMetadata {
@@ -654,6 +721,7 @@ impl Default for SessionMetadata {
             cwd: String::new(),
             git_branch: String::new(),
             permission_mode: String::new(),
+            recap: None,
         }
     }
 }
@@ -744,6 +812,17 @@ pub(crate) fn scan_session_metadata(path: &str) -> SessionMetadata {
             if !mode.is_empty() {
                 meta.permission_mode = mode.to_string();
             }
+        }
+
+        // Recap preview: show the recap the session was parked on. Set it on every
+        // away_summary, and clear it only when a genuine user turn resumes the
+        // session. Everything else — assistant replies, channel events, and the
+        // bookkeeping Claude Code appends after a recap — is skipped, so the recap
+        // survives it. See `is_resuming_user_turn` for the excluded cases.
+        if let Some(text) = recap_from_entry(&raw) {
+            meta.recap = Some(text);
+        } else if is_resuming_user_turn(&raw) {
+            meta.recap = None;
         }
 
         let uuid = raw.get("uuid").and_then(|v| v.as_str()).unwrap_or("");
@@ -1483,6 +1562,7 @@ mod tests {
             session_id: session_id.to_string(),
             mod_time: Utc::now(),
             first_message: "first".to_string(),
+            recap: None,
             name: None,
             turn_count: 0,
             is_ongoing: false,
@@ -1498,6 +1578,131 @@ mod tests {
             git_branch: String::new(),
             permission_mode: String::new(),
         }
+    }
+
+    #[test]
+    fn recap_from_entry_matches_away_summary_string() {
+        let v = serde_json::json!({"type":"system","subtype":"away_summary","content":"Migrated X, decided Y."});
+        assert_eq!(
+            recap_from_entry(&v).as_deref(),
+            Some("Migrated X, decided Y.")
+        );
+    }
+
+    #[test]
+    fn recap_from_entry_joins_array_content() {
+        let v = serde_json::json!({"type":"system","subtype":"away_summary","content":[{"text":"a"},{"text":"b"}]});
+        assert_eq!(recap_from_entry(&v).as_deref(), Some("a b"));
+    }
+
+    #[test]
+    fn recap_from_entry_none_for_non_recap() {
+        let v = serde_json::json!({"type":"user","message":{"role":"user","content":"hi"}});
+        assert_eq!(recap_from_entry(&v), None);
+    }
+
+    #[test]
+    fn recap_from_entry_none_for_empty_content() {
+        let v = serde_json::json!({"type":"system","subtype":"away_summary","content":"  "});
+        assert_eq!(recap_from_entry(&v), None);
+    }
+
+    #[test]
+    fn scan_surfaces_recap_only_when_it_is_the_last_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        let at_end = dir.path().join("end.jsonl");
+        std::fs::write(
+            &at_end,
+            concat!(
+                "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"hi\"}}\n",
+                "{\"type\":\"system\",\"subtype\":\"away_summary\",\"content\":\"Did X.\"}\n",
+            ),
+        )
+        .unwrap();
+        assert_eq!(
+            scan_session_metadata(at_end.to_str().unwrap())
+                .recap
+                .as_deref(),
+            Some("Did X.")
+        );
+
+        let mid = dir.path().join("mid.jsonl");
+        std::fs::write(
+            &mid,
+            concat!(
+                "{\"type\":\"system\",\"subtype\":\"away_summary\",\"content\":\"stale\"}\n",
+                "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"more work\"}}\n",
+            ),
+        )
+        .unwrap();
+        assert_eq!(scan_session_metadata(mid.to_str().unwrap()).recap, None);
+    }
+
+    #[test]
+    fn scan_recap_survives_trailing_bookkeeping_entries() {
+        // Claude Code appends non-conversational bookkeeping entries after a recap
+        // (observed on real sessions: turn_duration, bridge-session, last-prompt,
+        // file-history-snapshot, queue-operation). The recap is still the last
+        // *conversational* entry, so it must survive them.
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("s.jsonl");
+        std::fs::write(
+            &p,
+            concat!(
+                "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"hi\"}}\n",
+                "{\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[]}}\n",
+                "{\"type\":\"system\",\"subtype\":\"turn_duration\"}\n",
+                "{\"type\":\"system\",\"subtype\":\"away_summary\",\"content\":\"Hiring decision.\"}\n",
+                "{\"type\":\"bridge-session\"}\n",
+                "{\"type\":\"last-prompt\"}\n",
+                "{\"type\":\"file-history-snapshot\"}\n",
+            ),
+        )
+        .unwrap();
+        assert_eq!(
+            scan_session_metadata(p.to_str().unwrap()).recap.as_deref(),
+            Some("Hiring decision.")
+        );
+
+        // But a real user/assistant turn after the recap still clears it, even
+        // with trailing bookkeeping of its own.
+        let resumed = dir.path().join("resumed.jsonl");
+        std::fs::write(
+            &resumed,
+            concat!(
+                "{\"type\":\"system\",\"subtype\":\"away_summary\",\"content\":\"stale\"}\n",
+                "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"keep going\"}}\n",
+                "{\"type\":\"bridge-session\"}\n",
+            ),
+        )
+        .unwrap();
+        assert_eq!(scan_session_metadata(resumed.to_str().unwrap()).recap, None);
+    }
+
+    #[test]
+    fn scan_recap_survives_channel_injections() {
+        // Claude Code's channels feature can post many events after a session parks
+        // on a recap — each a `<channel …>` user entry with a short assistant reply.
+        // None of that is the user resuming, so the recap must still show.
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("s.jsonl");
+        let mut body = String::from(
+            "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"build it\"}}\n\
+             {\"type\":\"system\",\"subtype\":\"away_summary\",\"content\":\"Parked cleanly.\"}\n",
+        );
+        for _ in 0..3 {
+            body.push_str(
+                "{\"type\":\"queue-operation\"}\n\
+                 {\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"<channel source=\\\"webhook\\\" type=\\\"probe\\\">ping</channel>\"}}\n\
+                 {\"type\":\"assistant\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Acknowledged.\"}]}}\n\
+                 {\"type\":\"system\",\"subtype\":\"turn_duration\"}\n",
+            );
+        }
+        std::fs::write(&p, &body).unwrap();
+        assert_eq!(
+            scan_session_metadata(p.to_str().unwrap()).recap.as_deref(),
+            Some("Parked cleanly.")
+        );
     }
 
     #[test]
