@@ -1,4 +1,4 @@
-textual>=8.2.7
+textual>=8.2.8
 httpx>=0.28.1
 ruff>=0.15.20
 pytest>=9.1.1
