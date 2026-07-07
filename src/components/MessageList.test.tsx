@@ -9,35 +9,51 @@ import type { ViewActions } from "../hooks/useViewActions";
 // so it would render nothing in tests. Mock it to render every row via
 // itemContent(index, undefined, context) — these tests exercise MessageList's
 // row rendering/callbacks, not the windowing.
-vi.mock("react-virtuoso", () => ({
-  Virtuoso: ({
-    totalCount = 0,
-    itemContent,
-    context,
-    className,
-    isScrolling,
-  }: {
-    totalCount?: number;
-    itemContent: (index: number, data: unknown, context: unknown) => ReactNode;
-    context?: unknown;
-    className?: string;
-    isScrolling?: (scrolling: boolean) => void;
-  }) => (
-    <div className={className}>
-      {/* Test-only hooks to simulate Virtuoso reporting scroll start/stop. */}
-      <button type="button" data-testid="simulate-scrolling" onClick={() => isScrolling?.(true)} />
-      <button
-        type="button"
-        data-testid="simulate-scroll-stop"
-        onClick={() => isScrolling?.(false)}
-      />
-      {Array.from({ length: totalCount }, (_, index) => (
-        // oxlint-disable-next-line react/no-array-index-key
-        <div key={index}>{itemContent(index, undefined, context)}</div>
-      ))}
-    </div>
-  ),
-}));
+// A hoisted spy for the Virtuoso imperative handle so tests can assert scrolls.
+const virtuoso = vi.hoisted(() => ({ scrollToIndex: vi.fn() }));
+
+vi.mock("react-virtuoso", async () => {
+  const React = (await vi.importActual("react")) as typeof import("react");
+  return {
+    Virtuoso: React.forwardRef(function VirtuosoMock(
+      {
+        totalCount = 0,
+        itemContent,
+        context,
+        className,
+        isScrolling,
+      }: {
+        totalCount?: number;
+        itemContent: (index: number, data: unknown, context: unknown) => ReactNode;
+        context?: unknown;
+        className?: string;
+        isScrolling?: (scrolling: boolean) => void;
+      },
+      ref: React.Ref<{ scrollToIndex: (i: number) => void }>,
+    ) {
+      React.useImperativeHandle(ref, () => ({ scrollToIndex: virtuoso.scrollToIndex }));
+      return (
+        <div className={className}>
+          {/* Test-only hooks to simulate Virtuoso reporting scroll start/stop. */}
+          <button
+            type="button"
+            data-testid="simulate-scrolling"
+            onClick={() => isScrolling?.(true)}
+          />
+          <button
+            type="button"
+            data-testid="simulate-scroll-stop"
+            onClick={() => isScrolling?.(false)}
+          />
+          {Array.from({ length: totalCount }, (_, index) => (
+            // oxlint-disable-next-line react/no-array-index-key
+            <div key={index}>{itemContent(index, undefined, context)}</div>
+          ))}
+        </div>
+      );
+    }),
+  };
+});
 
 function makeMessage(overrides: Partial<DisplayMessage> = {}): DisplayMessage {
   return {
@@ -337,5 +353,21 @@ describe("selectionScrollTarget", () => {
 
   it("aligns to the end when the selection is below the window", () => {
     expect(selectionScrollTarget(15, range)).toEqual({ index: 15, align: "end" });
+  });
+});
+
+describe("MessageList toolbar scroll registration", () => {
+  it("registers scrollToTop/scrollToBottom that scroll virtuoso (reversed: top = newest = last index)", () => {
+    virtuoso.scrollToIndex.mockClear();
+    const messages = [makeMessage(), makeMessage(), makeMessage()]; // count === 3
+    const viewActionsRef = createRef() as React.MutableRefObject<ViewActions>;
+    render(<MessageList {...defaultProps({ messages, viewActionsRef })} />);
+
+    expect(viewActionsRef.current.scrollToTop).toBeTypeOf("function");
+    viewActionsRef.current.scrollToTop!();
+    expect(virtuoso.scrollToIndex).toHaveBeenCalledWith(2); // newest at the visual top
+
+    viewActionsRef.current.scrollToBottom!();
+    expect(virtuoso.scrollToIndex).toHaveBeenCalledWith(0); // oldest at the visual bottom
   });
 });

@@ -4,6 +4,8 @@ import { useRef, useEffect, useCallback, type MutableRefObject } from "react";
 export interface ViewActions {
   expandAll?: () => void;
   collapseAll?: () => void;
+  scrollToTop?: () => void;
+  scrollToBottom?: () => void;
 }
 
 export type ViewActionsRef = MutableRefObject<ViewActions>;
@@ -30,5 +32,7 @@ export function useRegisterViewActions(ref: ViewActionsRef, actions: ViewActions
 export function useViewActionCallbacks(ref: ViewActionsRef) {
   const expandAll = useCallback(() => ref.current.expandAll?.(), [ref]);
   const collapseAll = useCallback(() => ref.current.collapseAll?.(), [ref]);
-  return { expandAll, collapseAll };
+  const scrollToTop = useCallback(() => ref.current.scrollToTop?.(), [ref]);
+  const scrollToBottom = useCallback(() => ref.current.scrollToBottom?.(), [ref]);
+  return { expandAll, collapseAll, scrollToTop, scrollToBottom };
 }

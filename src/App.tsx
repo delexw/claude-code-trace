@@ -207,7 +207,8 @@ export function App() {
   // -- View actions: each view registers its own expand/collapse handlers --
 
   const viewActionsRef = useViewActionsRef();
-  const { expandAll, collapseAll } = useViewActionCallbacks(viewActionsRef);
+  const { expandAll, collapseAll, scrollToTop, scrollToBottom } =
+    useViewActionCallbacks(viewActionsRef);
 
   // Register message list expand/collapse when in list view. Uses the role
   // index so it works over the whole session without loading every body.
@@ -391,6 +392,7 @@ export function App() {
             onSelectIndex={setPickerSelectedIndex}
             onVisiblePathsChange={picker.refresh}
             recapPreview={recapPreview}
+            viewActionsRef={viewActionsRef}
           />
         );
 
@@ -484,6 +486,8 @@ export function App() {
         onGoToSessions={goToSessions}
         onExpandAll={expandAll}
         onCollapseAll={collapseAll}
+        onScrollToTop={scrollToTop}
+        onScrollToBottom={scrollToBottom}
         onOpenTeams={openTeams}
         onOpenDebug={openDebug}
         onBackToList={backToList}

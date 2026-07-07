@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import { SessionPicker } from "./SessionPicker";
 import type { SessionInfo } from "../types";
+import type { ViewActions } from "../hooks/useViewActions";
 
 type IOCallback = (entries: IntersectionObserverEntry[], observer: IntersectionObserver) => void;
 
@@ -406,6 +407,40 @@ describe("SessionPicker", () => {
           />,
         ),
       ).not.toThrow();
+    });
+  });
+
+  describe("toolbar scroll actions", () => {
+    it("registers scrollToTop/scrollToBottom that scroll the session list", () => {
+      const viewActionsRef = { current: {} as ViewActions };
+      const sessions = [
+        makeSession(),
+        makeSession({ session_id: "s2", path: "/home/user/.claude/projects/proj/s2.jsonl" }),
+      ];
+
+      render(
+        <SessionPicker
+          sessions={sessions}
+          loading={false}
+          searchQuery=""
+          selectedIndex={0}
+          onSelect={vi.fn()}
+          onSearchChange={vi.fn()}
+          viewActionsRef={viewActionsRef}
+        />,
+      );
+
+      const list = document.querySelector(".picker__list") as HTMLElement;
+      // jsdom has no layout: fake a scrollable height so top != bottom.
+      Object.defineProperty(list, "scrollHeight", { value: 5000, configurable: true });
+      const scrollTo = vi.fn();
+      list.scrollTo = scrollTo as unknown as typeof list.scrollTo;
+
+      act(() => viewActionsRef.current.scrollToBottom?.());
+      expect(scrollTo).toHaveBeenCalledWith({ top: 5000, behavior: "smooth" });
+
+      act(() => viewActionsRef.current.scrollToTop?.());
+      expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: "smooth" });
     });
   });
 });
