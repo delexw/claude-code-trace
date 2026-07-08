@@ -10,7 +10,7 @@ from rich.text import Text
 from textual.widgets import ListItem, Static
 
 import theme
-from data_types import SessionInfo
+from data_types import Liveness, SessionInfo
 from format_utils import format_cost, format_tokens, short_model, time_ago
 from theme import get_model_color
 from widgets.highlight_list import HighlightListView
@@ -21,6 +21,20 @@ ICON_BRANCH = "*"
 ICON_CHAT = "#"
 ICON_CLOCK = "~"
 ICON_SESSION = "@"
+
+
+def _liveness_badge(liveness: Liveness | None) -> str:
+    """Render a liveness badge. Forward-compatible: an unknown `status` value
+    (a future Claude-Code release) falls back to a neutral "○ <status>" rather
+    than disappearing or raising."""
+    if liveness is None:
+        return ""
+    if liveness.status == "busy":
+        return "● busy"
+    if liveness.status == "idle":
+        minutes = liveness.idle_seconds // 60
+        return f"○ idle {minutes}m"
+    return f"○ {liveness.status}"
 
 
 def _group_by_date(sessions: list[SessionInfo]) -> list[tuple[str, list[SessionInfo]]]:
@@ -85,6 +99,12 @@ def _render_session(s: SessionInfo, anim_frame: int = 0) -> object:
         line2.append(f" {format_cost(s.cost_usd)}", style=theme.TOKEN_HIGH)
     line2.append(f" {ICON_SESSION} {s.session_id[:8]}", style=theme.TEXT_DIM)
     line2.append(f" {ICON_CLOCK} {time_ago(s.mod_time)}", style=theme.TEXT_DIM)
+    badge = _liveness_badge(s.liveness)
+    if badge:
+        badge_style = (
+            theme.ONGOING if s.liveness and s.liveness.status == "busy" else theme.TEXT_DIM
+        )
+        line2.append(f"  {badge}", style=badge_style)
 
     if s.name and s.first_message:
         subtitle = Text(s.first_message, style=theme.TEXT_DIM)

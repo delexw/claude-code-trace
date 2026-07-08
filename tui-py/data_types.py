@@ -105,6 +105,22 @@ class DisplayMessage:
 
 
 # ---------------------------------------------------------------------------
+# Liveness
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class Liveness:
+    """Live-session liveness from the pid-keyed registry (see shared/types.ts
+    and src-tauri/src/parser/session.rs `Liveness`). `status` is kept as an
+    open string (not an enum) — a new Claude-Code status must not break us."""
+
+    status: str = ""
+    idle_seconds: int = 0
+    pid: int = 0
+
+
+# ---------------------------------------------------------------------------
 # SessionInfo
 # ---------------------------------------------------------------------------
 
@@ -130,6 +146,7 @@ class SessionInfo:
     cwd: str = ""
     git_branch: str = ""
     permission_mode: str = ""
+    liveness: Liveness | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -313,6 +330,24 @@ def _msg_from_dict(d: dict) -> DisplayMessage:
     )
 
 
+def _liveness_from_dict(d: dict | None) -> Liveness | None:
+    """Parse the nested `liveness` key: `{status, idle_seconds, pid} | null`.
+
+    Silent-degrade to None on any missing/retyped field — never raise, matching
+    the format-drift idiom the rest of this module follows.
+    """
+    if not d:
+        return None
+    try:
+        return Liveness(
+            status=str(d.get("status", "")),
+            idle_seconds=int(d.get("idle_seconds", 0)),
+            pid=int(d.get("pid", 0)),
+        )
+    except (TypeError, ValueError):
+        return None
+
+
 def session_info_from_dict(d: dict) -> SessionInfo:
     return SessionInfo(
         path=d.get("path", ""),
@@ -334,6 +369,7 @@ def session_info_from_dict(d: dict) -> SessionInfo:
         cwd=d.get("cwd", ""),
         git_branch=d.get("git_branch", ""),
         permission_mode=d.get("permission_mode", ""),
+        liveness=_liveness_from_dict(d.get("liveness")),
     )
 
 
