@@ -18,6 +18,11 @@ pub struct SettingsResponse {
     pub effective_dir_exists: bool,
     /// WSL distributions whose projects are also discovered.
     pub wsl_distros: Vec<String>,
+    /// Whether this backend can focus a session's terminal window (see
+    /// `commands::terminal::can_focus`). Drives the frontend's Focus button —
+    /// true for any local + macOS backend, whether the frontend is the Tauri
+    /// app or a browser talking to the HTTP API.
+    pub can_focus: bool,
 }
 
 pub fn platform_default_dir() -> String {
@@ -41,6 +46,7 @@ pub fn build_response_pub(settings: &crate::settings::Settings) -> SettingsRespo
         effective_dir: effective.to_string_lossy().to_string(),
         effective_dir_exists,
         wsl_distros: settings.wsl_distros.clone(),
+        can_focus: crate::commands::terminal::can_focus(),
     }
 }
 
@@ -69,4 +75,19 @@ pub async fn set_projects_dir(
     guard.projects_dir = path;
     crate::settings::save_settings(&guard)?;
     Ok(build_response_pub(&guard))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn settings_response_serializes_can_focus() {
+        let response = build_response_pub(&crate::settings::Settings::default());
+        let json = serde_json::to_value(&response).expect("serializes");
+        assert_eq!(
+            json.get("can_focus").and_then(|v| v.as_bool()),
+            Some(crate::commands::terminal::can_focus())
+        );
+    }
 }

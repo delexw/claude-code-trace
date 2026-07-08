@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -30,6 +30,10 @@ pub struct SessionInfo {
     /// it is removed, which is harmless because the match uses the unique
     /// `sessionId`.
     pub name: Option<String>,
+    /// Liveness (status/idle time) joined from the `~/.claude/sessions/*.json`
+    /// registry, staleness-guarded against the recorded `pid`. `None` when the
+    /// session isn't running, has no registry entry, or its pid is dead.
+    pub liveness: Option<Liveness>,
     pub turn_count: i32,
     pub is_ongoing: bool,
     pub total_tokens: i64,
@@ -43,6 +47,20 @@ pub struct SessionInfo {
     pub cwd: String,
     pub git_branch: String,
     pub permission_mode: String,
+}
+
+/// Liveness of a running session, derived from the `~/.claude/sessions/*.json`
+/// registry and staleness-guarded against a live `pid` (see [`apply_liveness`]).
+/// `status` is kept as an OPEN string on purpose — it mirrors whatever Claude
+/// Code currently writes (`"busy"` / `"idle"` today), so a future Claude Code
+/// release adding a new status value degrades to "render the raw token"
+/// instead of failing to parse (same idiom as `hook_event`-as-String).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Liveness {
+    pub status: String,
+    /// `now - statusUpdatedAt`, in seconds, clamped to >= 0.
+    pub idle_seconds: i64,
+    pub pid: i64,
 }
 
 /// SessionMeta holds session-level metadata extracted from a JSONL file.
@@ -470,6 +488,7 @@ pub fn discover_project_sessions(project_dir: &str) -> Result<Vec<SessionInfo>, 
             first_message: meta.first_msg,
             recap: meta.recap,
             name: None,
+            liveness: None,
             turn_count: meta.turn_count,
             is_ongoing,
             total_tokens: meta.total_tokens,
@@ -525,9 +544,27 @@ pub fn live_session_names_dir() -> Option<std::path::PathBuf> {
     dirs::home_dir().map(|home| home.join(".claude").join("sessions"))
 }
 
-/// Build the `session_id -> name` map from a session registry directory. Split
-/// out from [`live_session_names`] so it can be unit-tested against a fixture dir.
-pub(crate) fn session_names_from_dir(dir: &std::path::Path) -> HashMap<String, String> {
+/// A single `~/.claude/sessions/*.json` registry entry, parsed defensively:
+/// every field is optional so a missing/renamed/retyped field silently
+/// degrades instead of dropping (or panicking on) the whole entry. Fields
+/// read: `sessionId` (the map key), `name`, `status`, `statusUpdatedAt`,
+/// `pid`, `bridgeSessionId`. Track this shape like cctrace tracks transcript
+/// drift: [`registry_reads_status_and_guards_stale_pid`] pins it, so a
+/// Claude-Code rename fails a test rather than silently killing the feature.
+pub(crate) struct RegEntry {
+    pub name: Option<String>,
+    pub status: Option<String>,
+    pub status_updated_at: Option<i64>,
+    pub pid: Option<i64>,
+    pub bridge_session_id: Option<String>,
+}
+
+/// Build the `session_id -> RegEntry` map from a session registry directory.
+/// Split out from [`live_session_names`] so it can be unit-tested against a
+/// fixture dir. Lenient `serde_json::Value` parse, skip-on-error per file —
+/// matches the format-drift idiom already used here (never panic on a
+/// malformed or partially-written registry file).
+pub(crate) fn read_session_registry(dir: &std::path::Path) -> HashMap<String, RegEntry> {
     let mut map = HashMap::new();
     let entries = match fs::read_dir(dir) {
         Ok(e) => e,
@@ -546,17 +583,64 @@ pub(crate) fn session_names_from_dir(dir: &std::path::Path) -> HashMap<String, S
             Ok(v) => v,
             Err(_) => continue,
         };
-        let session_id = value.get("sessionId").and_then(|v| v.as_str());
+        let Some(session_id) = value.get("sessionId").and_then(|v| v.as_str()) else {
+            continue;
+        };
         let name = value
             .get("name")
             .and_then(|v| v.as_str())
             .map(str::trim)
-            .filter(|s| !s.is_empty());
-        if let (Some(session_id), Some(name)) = (session_id, name) {
-            map.insert(session_id.to_string(), name.to_string());
-        }
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+        let status = value
+            .get("status")
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
+        let status_updated_at = value.get("statusUpdatedAt").and_then(|v| v.as_i64());
+        let pid = value.get("pid").and_then(|v| v.as_i64());
+        let bridge_session_id = value
+            .get("bridgeSessionId")
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
+        map.insert(
+            session_id.to_string(),
+            RegEntry {
+                name,
+                status,
+                status_updated_at,
+                pid,
+                bridge_session_id,
+            },
+        );
     }
     map
+}
+
+/// Resolve the live pid for `session_id` from the `~/.claude/sessions`
+/// registry, staleness-guarded the same way as [`apply_liveness`]: the pid is
+/// only returned if [`crate::process::is_pid_alive`] confirms the process is
+/// still running. Used by the Focus-window command (desktop only) to find
+/// the process whose terminal window/tab should be brought to the front.
+pub fn live_pid_for(session_id: &str) -> Option<i64> {
+    let dir = live_session_names_dir()?;
+    let reg = read_session_registry(&dir);
+    let pid = reg.get(session_id)?.pid?;
+    if crate::process::is_pid_alive(pid) {
+        Some(pid)
+    } else {
+        None
+    }
+}
+
+/// Build the `session_id -> name` map from a session registry directory. Thin
+/// derive over [`read_session_registry`], filtered to non-empty names — kept
+/// so the existing name-join behaviour (and its tests) are unaffected by the
+/// registry read growing to also carry liveness fields.
+pub(crate) fn session_names_from_dir(dir: &std::path::Path) -> HashMap<String, String> {
+    read_session_registry(dir)
+        .into_iter()
+        .filter_map(|(session_id, entry)| entry.name.map(|name| (session_id, name)))
+        .collect()
 }
 
 /// Fill in `SessionInfo::name` from a `session_id -> name` map. Sessions absent
@@ -566,6 +650,100 @@ pub fn apply_session_names(sessions: &mut [SessionInfo], names: &HashMap<String,
         if let Some(name) = names.get(&session.session_id) {
             session.name = Some(name.clone());
         }
+    }
+}
+
+/// Fill in `SessionInfo::liveness` from the registry, staleness-guarded: an
+/// entry only counts as live if its recorded `pid` is a currently-running
+/// process (checked via [`crate::process::is_pid_alive`]). The name-join above
+/// deliberately tolerates a stale (process-exited) registry file; liveness
+/// does not, since showing "busy" for a session that's actually gone would be
+/// actively misleading rather than merely stale cosmetics.
+pub fn apply_liveness(sessions: &mut [SessionInfo], reg: &HashMap<String, RegEntry>, now_ms: i64) {
+    let map = liveness_map_from_registry(reg, now_ms);
+    apply_liveness_map(sessions, &map);
+}
+
+/// Compute the `session_id -> Liveness` map from a registry snapshot, applying
+/// the same staleness guard as [`apply_liveness`] (dead pid → dropped). Split
+/// out so [`LivenessCache`] can compute-and-cache the result — including the
+/// `is_pid_alive` ("kill -0") checks — once per TTL window instead of once per
+/// [`apply_liveness`] call.
+pub(crate) fn liveness_map_from_registry(
+    reg: &HashMap<String, RegEntry>,
+    now_ms: i64,
+) -> HashMap<String, Liveness> {
+    let mut map = HashMap::new();
+    for (session_id, e) in reg.iter() {
+        let (Some(pid), Some(status)) = (e.pid, e.status.as_deref()) else {
+            continue;
+        };
+        if !crate::process::is_pid_alive(pid) {
+            continue; // staleness guard
+        }
+        let idle_ms = (now_ms - e.status_updated_at.unwrap_or(now_ms)).max(0);
+        map.insert(
+            session_id.clone(),
+            Liveness {
+                status: status.to_string(),
+                idle_seconds: idle_ms / 1000,
+                pid,
+            },
+        );
+    }
+    map
+}
+
+/// Fill in `SessionInfo::liveness` from a precomputed `session_id -> Liveness`
+/// map (e.g. from [`LivenessCache`]). Unlike [`apply_liveness`], this never
+/// re-checks `is_pid_alive`: the staleness guard was already applied when the
+/// map was built.
+pub fn apply_liveness_map(sessions: &mut [SessionInfo], map: &HashMap<String, Liveness>) {
+    for s in sessions.iter_mut() {
+        if let Some(liveness) = map.get(&s.session_id) {
+            s.liveness = Some(liveness.clone());
+        }
+    }
+}
+
+/// Short-TTL cache for computed liveness, mirroring [`SessionNamesCache`]: the
+/// registry scan AND the per-entry `is_pid_alive` ("kill -0") checks are done
+/// at most once per TTL window, so a burst of `discover_sessions_cached` calls
+/// — and the picker-refresh broadcast fan-out across all connected clients —
+/// share one round of liveness checks instead of spawning a `kill` subprocess
+/// per live session on every call. Idle seconds may be up to one TTL window
+/// stale, which is fine since the badge only ever shows whole minutes.
+#[derive(Default)]
+pub struct LivenessCache {
+    /// `(captured_at, map)` of the last computed liveness, or `None` before
+    /// the first read.
+    entry: Option<(std::time::Instant, HashMap<String, Liveness>)>,
+}
+
+impl LivenessCache {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Return the cached `session_id -> Liveness` map if the last scan is
+    /// younger than `ttl`, otherwise re-scan `dir`, recompute liveness (via
+    /// [`liveness_map_from_registry`], including the `is_pid_alive` checks),
+    /// and cache it.
+    pub fn get_or_load(
+        &mut self,
+        dir: &std::path::Path,
+        ttl: std::time::Duration,
+        now_ms: i64,
+    ) -> HashMap<String, Liveness> {
+        if let Some((captured_at, ref map)) = self.entry {
+            if captured_at.elapsed() < ttl {
+                return map.clone();
+            }
+        }
+        let reg = read_session_registry(dir);
+        let map = liveness_map_from_registry(&reg, now_ms);
+        self.entry = Some((std::time::Instant::now(), map.clone()));
+        map
     }
 }
 
@@ -630,6 +808,7 @@ pub fn session_info_from_metadata(
         first_message: meta.first_msg,
         recap: meta.recap,
         name: None,
+        liveness: None,
         turn_count: meta.turn_count,
         is_ongoing,
         total_tokens: meta.total_tokens,
@@ -1564,6 +1743,7 @@ mod tests {
             first_message: "first".to_string(),
             recap: None,
             name: None,
+            liveness: None,
             turn_count: 0,
             is_ongoing: false,
             total_tokens: 0,
@@ -1754,6 +1934,164 @@ mod tests {
 
         assert_eq!(sessions[0].name.as_deref(), Some("my-cache"));
         assert_eq!(sessions[1].name, None);
+    }
+
+    #[test]
+    fn registry_reads_status_and_guards_stale_pid() {
+        let dir = tempfile::tempdir().unwrap();
+        // live: our own pid, busy
+        let me = std::process::id();
+        std::fs::write(
+            dir.path().join("a.json"),
+            format!(
+                r#"{{"pid":{me},"sessionId":"sid-live","status":"busy","statusUpdatedAt":1000,"bridgeSessionId":"session_01TESTBRIDGE"}}"#
+            ),
+        )
+        .unwrap();
+        // stale: dead pid — must be dropped from liveness
+        std::fs::write(
+            dir.path().join("b.json"),
+            r#"{"pid":2000000000,"sessionId":"sid-stale","status":"idle","statusUpdatedAt":1000}"#,
+        )
+        .unwrap();
+
+        let reg = read_session_registry(dir.path());
+        let mut sessions = vec![make_info("sid-live"), make_info("sid-stale")];
+        apply_liveness(&mut sessions, &reg, 4000);
+
+        assert_eq!(sessions[0].liveness.as_ref().unwrap().status, "busy");
+        assert_eq!(sessions[0].liveness.as_ref().unwrap().idle_seconds, 3); // (4000-1000)/1000
+        assert!(
+            sessions[1].liveness.is_none(),
+            "stale pid must not read as live"
+        );
+        assert_eq!(
+            reg.get("sid-live").unwrap().bridge_session_id.as_deref(),
+            Some("session_01TESTBRIDGE")
+        );
+    }
+
+    #[test]
+    fn apply_liveness_skips_entry_missing_pid_or_status() {
+        // Guards the `let (Some(pid), Some(status)) = ... else { continue }`
+        // destructure in `apply_liveness`: a registry entry with only one of
+        // the two fields present must leave `liveness: None`, not panic or
+        // partially populate it.
+        let mut reg = HashMap::new();
+        reg.insert(
+            "sid-no-status".to_string(),
+            RegEntry {
+                name: None,
+                status: None,
+                status_updated_at: None,
+                pid: Some(std::process::id() as i64),
+                bridge_session_id: None,
+            },
+        );
+        reg.insert(
+            "sid-no-pid".to_string(),
+            RegEntry {
+                name: None,
+                status: Some("busy".to_string()),
+                status_updated_at: None,
+                pid: None,
+                bridge_session_id: None,
+            },
+        );
+
+        let mut sessions = vec![make_info("sid-no-status"), make_info("sid-no-pid")];
+        apply_liveness(&mut sessions, &reg, 1000);
+
+        assert!(
+            sessions[0].liveness.is_none(),
+            "pid present but status missing must not read as live"
+        );
+        assert!(
+            sessions[1].liveness.is_none(),
+            "status present but pid missing must not read as live"
+        );
+    }
+
+    #[test]
+    fn liveness_cache_serves_hits_without_rescanning() {
+        use std::time::Duration;
+        let dir = tempfile::tempdir().unwrap();
+        let me = std::process::id();
+        std::fs::write(
+            dir.path().join("a.json"),
+            format!(
+                r#"{{"pid":{me},"sessionId":"sid-live","status":"busy","statusUpdatedAt":1000}}"#
+            ),
+        )
+        .unwrap();
+
+        let mut cache = LivenessCache::new();
+        // Long TTL: the first load populates the cache.
+        let first = cache.get_or_load(dir.path(), Duration::from_secs(60), 4000);
+        assert_eq!(first.get("sid-live").unwrap().status, "busy");
+        assert_eq!(first.get("sid-live").unwrap().idle_seconds, 3);
+
+        // Change the registry on disk; a cache hit must not see it yet (status
+        // stays "busy" and idle_seconds stays computed from the first read).
+        std::fs::write(
+            dir.path().join("a.json"),
+            format!(
+                r#"{{"pid":{me},"sessionId":"sid-live","status":"idle","statusUpdatedAt":3000}}"#
+            ),
+        )
+        .unwrap();
+        let cached = cache.get_or_load(dir.path(), Duration::from_secs(60), 4500);
+        assert_eq!(cached.get("sid-live").unwrap().status, "busy");
+        assert_eq!(cached.get("sid-live").unwrap().idle_seconds, 3);
+    }
+
+    #[test]
+    fn liveness_cache_reloads_after_expiry() {
+        use std::time::Duration;
+        let dir = tempfile::tempdir().unwrap();
+        let me = std::process::id();
+        std::fs::write(
+            dir.path().join("a.json"),
+            format!(
+                r#"{{"pid":{me},"sessionId":"sid-live","status":"busy","statusUpdatedAt":1000}}"#
+            ),
+        )
+        .unwrap();
+
+        let mut cache = LivenessCache::new();
+        let first = cache.get_or_load(dir.path(), Duration::from_secs(60), 4000);
+        assert_eq!(first.get("sid-live").unwrap().status, "busy");
+
+        std::fs::write(
+            dir.path().join("a.json"),
+            format!(
+                r#"{{"pid":{me},"sessionId":"sid-live","status":"idle","statusUpdatedAt":3000}}"#
+            ),
+        )
+        .unwrap();
+        // Force expiry with a zero TTL: the entry is always older than zero,
+        // so the next call re-scans and picks up the new status/idle time.
+        let reloaded = cache.get_or_load(dir.path(), Duration::ZERO, 4500);
+        assert_eq!(reloaded.get("sid-live").unwrap().status, "idle");
+        assert_eq!(reloaded.get("sid-live").unwrap().idle_seconds, 1); // (4500-3000)/1000
+    }
+
+    #[test]
+    fn liveness_cache_drops_dead_pid_even_when_cached() {
+        use std::time::Duration;
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("a.json"),
+            r#"{"pid":2000000000,"sessionId":"sid-stale","status":"busy","statusUpdatedAt":1000}"#,
+        )
+        .unwrap();
+
+        let mut cache = LivenessCache::new();
+        let map = cache.get_or_load(dir.path(), Duration::from_secs(60), 4000);
+        assert!(
+            !map.contains_key("sid-stale"),
+            "dead pid must not be cached as live"
+        );
     }
 
     #[test]

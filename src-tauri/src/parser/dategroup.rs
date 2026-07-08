@@ -83,6 +83,7 @@ mod tests {
             first_message: "test".to_string(),
             recap: None,
             name: None,
+            liveness: None,
             mod_time,
             turn_count: 1,
             model: "claude-sonnet-4-20250514".to_string(),

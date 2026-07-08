@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 use crate::convert::{DisplayMessage, LoadResult};
 use crate::parser::cache::SessionCache;
-use crate::parser::session::{SessionInfo, SessionNamesCache};
+use crate::parser::session::{Liveness, LivenessCache, SessionInfo, SessionNamesCache};
 use crate::session_load::{
     build_light_session, build_session, slice_light, LightBuild, LoadOptions, TimeFilter,
 };
@@ -37,6 +37,11 @@ const SESSIONS_CACHE_TTL: Duration = Duration::from_secs(2);
 /// long enough that a burst of refreshes shares a single scan.
 const SESSION_NAMES_CACHE_TTL: Duration = Duration::from_secs(1);
 
+/// TTL for the computed-liveness cache (registry scan + `is_pid_alive` checks).
+/// Mirrors [`SESSION_NAMES_CACHE_TTL`] so both registry joins share the same
+/// freshness window and the same picker-refresh cache-sharing story.
+const LIVENESS_CACHE_TTL: Duration = Duration::from_secs(1);
+
 /// A lightened session build cached for the active session, keyed by
 /// `(path, size)`. Lets range fetches during list scrolling slice an
 /// already-built session instead of re-parsing the file on every scroll step.
@@ -66,6 +71,12 @@ pub struct AppState {
     /// Short-TTL cache for the live `/rename` session-name registry, shared by
     /// all concurrent `discover_sessions_cached` callers.
     session_names_cache: Mutex<SessionNamesCache>,
+    /// Short-TTL cache for computed session liveness (registry scan + the
+    /// per-entry `is_pid_alive`/`kill -0` checks), shared by all concurrent
+    /// `discover_sessions_cached` callers so the picker-refresh broadcast
+    /// fan-out shares one round of liveness checks instead of spawning a
+    /// `kill` subprocess per live session per client.
+    liveness_cache: Mutex<LivenessCache>,
     /// Lightened-build cache for the active session so windowed list fetches
     /// slice an existing build instead of re-parsing the file on every scroll.
     /// Never holds heavy tool bodies — see [`CachedLight`].
@@ -84,6 +95,7 @@ impl AppState {
             event_tx,
             sessions_cache: Mutex::new(None),
             session_names_cache: Mutex::new(SessionNamesCache::new()),
+            liveness_cache: Mutex::new(LivenessCache::new()),
             session_light_cache: Mutex::new(None),
         }
     }
@@ -166,6 +178,26 @@ impl AppState {
         match self.session_names_cache.lock() {
             Ok(mut cache) => cache.get_or_load(&dir, SESSION_NAMES_CACHE_TTL),
             Err(_) => crate::parser::session::live_session_names(),
+        }
+    }
+
+    /// Read computed liveness (registry scan + `is_pid_alive`/`kill -0` checks)
+    /// through a short-TTL cache so concurrent/rapid callers — and the
+    /// picker-refresh broadcast fan-out — share one scan and one round of
+    /// liveness checks instead of spawning a `kill` subprocess per live
+    /// session on every call. Falls back to an uncached scan+compute if the
+    /// cache lock is poisoned.
+    fn live_liveness_cached(&self, dir: &std::path::Path) -> HashMap<String, Liveness> {
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        match self.liveness_cache.lock() {
+            Ok(mut cache) => cache.get_or_load(dir, LIVENESS_CACHE_TTL, now_ms),
+            Err(_) => {
+                let reg = crate::parser::session::read_session_registry(dir);
+                crate::parser::session::liveness_map_from_registry(&reg, now_ms)
+            }
         }
     }
 
@@ -267,6 +299,16 @@ impl AppState {
             &mut sessions,
             &self.live_session_names_cached(),
         );
+        // Liveness reads the same registry directory but needs the richer
+        // per-entry data (status/pid), not just names, so it joins through its
+        // own short-TTL cache (`liveness_cache`) rather than reusing the name
+        // cache above. That cache covers both the registry scan and the
+        // per-entry `is_pid_alive` ("kill -0") checks, so a burst of refreshes
+        // and the broadcast fan-out share one round of liveness checks.
+        if let Some(dir) = crate::parser::session::live_session_names_dir() {
+            let liveness = self.live_liveness_cached(&dir);
+            crate::parser::session::apply_liveness_map(&mut sessions, &liveness);
+        }
         Ok(sessions)
     }
 

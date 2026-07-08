@@ -90,6 +90,10 @@ export interface SessionInfo {
   /** User-assigned session name (Claude Code `/rename`), joined from the live
    *  session registry. `null` when never named or no longer running. */
   name?: string | null;
+  /** Live-session liveness from the pid-keyed registry; null when not running.
+   *  `status` is an open string (Claude-Code-internal, may gain values) — the
+   *  badge special-cases "busy"/"idle" and renders anything else neutrally. */
+  liveness?: { status: string; idle_seconds: number; pid: number } | null;
   turn_count: number;
   is_ongoing: boolean;
   total_tokens: number;
