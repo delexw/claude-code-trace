@@ -69,6 +69,10 @@ export function App() {
 
   const session = useSession();
   const picker = usePicker(selectedProject);
+  // The open session's full SessionInfo (liveness, session_id), looked up from
+  // the picker's list by path — useSession's meta only carries cwd/branch/mode.
+  const selectedSessionInfo =
+    picker.allSessions.find((s) => s.path === session.sessionPath) ?? null;
   const projectKeys = useProjectKeys(picker.allSessions, collapsedKeys);
   const projectItems = useProjectItems(picker.allSessions, collapsedKeys);
 
@@ -94,6 +98,11 @@ export function App() {
     }
   }, [discoverSessions]);
 
+  // Whether this backend can focus a session's terminal window (macOS +
+  // local, whether we're the Tauri app or a browser talking to the HTTP
+  // API) — gates the Focus action instead of `isTauri`.
+  const [canFocus, setCanFocus] = useState(false);
+
   // Auto-discover sessions on mount; show settings if no path configured
   const discoveredRef = useRef(false);
   useEffect(() => {
@@ -105,8 +114,10 @@ export function App() {
         const settings = await invoke<{
           projects_dir: string | null;
           effective_dir_exists: boolean;
+          can_focus: boolean;
         }>("get_settings");
         dirExists = settings.effective_dir_exists;
+        setCanFocus(settings.can_focus);
       } catch {
         // no settings file yet
       }
@@ -473,6 +484,8 @@ export function App() {
           sessionTotals={session.sessionTotals}
           sessionPath={session.sessionPath}
           ongoing={session.ongoing}
+          sessionInfo={selectedSessionInfo}
+          canFocus={canFocus}
         />
       )}
 

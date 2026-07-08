@@ -1,4 +1,4 @@
-import type { SessionMeta, SessionTotals, GitInfo } from "../types";
+import type { SessionMeta, SessionTotals, GitInfo, SessionInfo } from "../types";
 import {
   shortPath,
   shortMode,
@@ -9,6 +9,18 @@ import {
 } from "../lib/format";
 import { getContextColor } from "../lib/theme";
 import { TokensIcon, CostIcon } from "./Icons";
+import { SessionActions } from "./SessionActions";
+
+/** Format a session's liveness into the status-row badge text, or `null` when
+ *  there's no liveness info. Moved here (verbatim) from `SessionActions` —
+ *  liveness is the authoritative real-time status signal, so it now lives
+ *  alongside the (mutually exclusive) `active`/`info-bar__ongoing` indicator. */
+function badge(l: SessionInfo["liveness"]): string | null {
+  if (!l) return null;
+  if (l.status === "busy") return "● busy";
+  if (l.status === "idle") return `○ idle ${Math.floor(l.idle_seconds / 60)}m`;
+  return `○ ${l.status}`; // forward-compat: render an unknown status, don't assume the set is closed
+}
 
 interface InfoBarProps {
   meta: SessionMeta;
@@ -18,6 +30,11 @@ interface InfoBarProps {
   sessionTotals: SessionTotals;
   sessionPath: string;
   ongoing: boolean;
+  /** Full SessionInfo for the open session (liveness, session_id), when known
+   *  from the picker's session list; null while it hasn't loaded/matched yet. */
+  sessionInfo?: SessionInfo | null;
+  /** Whether this backend can focus a session's terminal window. */
+  canFocus: boolean;
 }
 
 export function InfoBar({
@@ -27,6 +44,8 @@ export function InfoBar({
   sessionTotals,
   sessionPath,
   ongoing,
+  sessionInfo,
+  canFocus,
 }: InfoBarProps) {
   const projectName = shortPath(meta.cwd);
   const sessionId = sessionPath.split("/").pop()?.replace(".jsonl", "") || "";
@@ -36,6 +55,11 @@ export function InfoBar({
   const ctxPct = contextPercentFromTokens(contextTokens);
 
   const totalCost = sessionTotals.cost_usd;
+  // Liveness (from the session registry) is the more authoritative real-time
+  // signal — when present it supersedes the transcript-derived `ongoing`
+  // indicator so only one status signal is ever shown at once.
+  const liveness = sessionInfo?.liveness;
+  const livenessBadge = badge(liveness);
 
   const pillClass =
     mode === "bypassPermissions"
@@ -88,11 +112,17 @@ export function InfoBar({
         </span>
       )}
 
-      {ongoing && (
-        <span className="info-bar__ongoing">
-          <span className="braille-spinner" /> active
-        </span>
+      {livenessBadge ? (
+        <span className="info-bar__status-badge">{livenessBadge}</span>
+      ) : (
+        ongoing && (
+          <span className="info-bar__ongoing">
+            <span className="braille-spinner" /> active
+          </span>
+        )
       )}
+
+      {sessionInfo && <SessionActions session={sessionInfo} canFocus={canFocus} />}
     </div>
   );
 }
