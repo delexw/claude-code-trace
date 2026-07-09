@@ -75,6 +75,11 @@ const routes: Record<string, Route> = {
       return `/api/debug-log?${params}`;
     },
   },
+  focus_session_window: {
+    method: "POST",
+    path: "/api/focus",
+    body: (a) => ({ sessionId: a.sessionId }),
+  },
 };
 
 // ---------------------------------------------------------------------------

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { InfoBar } from "./InfoBar";
-import type { SessionMeta, SessionTotals, GitInfo } from "../types";
+import type { SessionMeta, SessionTotals, GitInfo, SessionInfo } from "../types";
 
 function makeMeta(overrides: Partial<SessionMeta> = {}): SessionMeta {
   return {
@@ -25,6 +25,12 @@ function makeTotals(overrides: Partial<SessionTotals> = {}): SessionTotals {
   };
 }
 
+const baseSessionInfo = {
+  session_id: "u1",
+  cwd: "/home/user/my-project",
+  path: "",
+} as any as SessionInfo;
+
 describe("InfoBar", () => {
   it("shows project name from shortPath(meta.cwd)", () => {
     render(
@@ -35,6 +41,7 @@ describe("InfoBar", () => {
         sessionTotals={makeTotals()}
         sessionPath=""
         ongoing={false}
+        canFocus={false}
       />,
     );
     expect(screen.getByText("my-project")).toBeInTheDocument();
@@ -49,6 +56,7 @@ describe("InfoBar", () => {
         sessionTotals={makeTotals()}
         sessionPath="/some/path/abc123.jsonl"
         ongoing={false}
+        canFocus={false}
       />,
     );
     expect(screen.getByText("abc123")).toBeInTheDocument();
@@ -64,6 +72,7 @@ describe("InfoBar", () => {
         sessionTotals={makeTotals()}
         sessionPath=""
         ongoing={false}
+        canFocus={false}
       />,
     );
     expect(screen.getByText("feature-x")).toBeInTheDocument();
@@ -79,6 +88,7 @@ describe("InfoBar", () => {
         sessionTotals={makeTotals()}
         sessionPath=""
         ongoing={false}
+        canFocus={false}
       />,
     );
     const branchEl = screen.getByText("main");
@@ -95,6 +105,7 @@ describe("InfoBar", () => {
         sessionTotals={makeTotals()}
         sessionPath=""
         ongoing={false}
+        canFocus={false}
       />,
     );
     const branchEl = screen.getByText("main");
@@ -110,6 +121,7 @@ describe("InfoBar", () => {
         sessionTotals={makeTotals()}
         sessionPath=""
         ongoing={false}
+        canFocus={false}
       />,
     );
     expect(screen.getByText("yolo")).toBeInTheDocument();
@@ -124,6 +136,7 @@ describe("InfoBar", () => {
         sessionTotals={makeTotals()}
         sessionPath=""
         ongoing={false}
+        canFocus={false}
       />,
     );
     expect(screen.getByText("auto-edit")).toBeInTheDocument();
@@ -138,6 +151,7 @@ describe("InfoBar", () => {
         sessionTotals={makeTotals()}
         sessionPath=""
         ongoing={false}
+        canFocus={false}
       />,
     );
     expect(screen.getByText("plan")).toBeInTheDocument();
@@ -152,6 +166,7 @@ describe("InfoBar", () => {
         sessionTotals={makeTotals()}
         sessionPath=""
         ongoing={false}
+        canFocus={false}
       />,
     );
     expect(screen.queryByText("default")).not.toBeInTheDocument();
@@ -166,6 +181,7 @@ describe("InfoBar", () => {
         sessionTotals={makeTotals()}
         sessionPath=""
         ongoing={false}
+        canFocus={false}
       />,
     );
     expect(screen.queryByText("manual")).not.toBeInTheDocument();
@@ -180,6 +196,7 @@ describe("InfoBar", () => {
         sessionTotals={makeTotals()}
         sessionPath=""
         ongoing={false}
+        canFocus={false}
       />,
     );
     expect(screen.getByText("ctx 50%")).toBeInTheDocument();
@@ -194,6 +211,7 @@ describe("InfoBar", () => {
         sessionTotals={makeTotals()}
         sessionPath=""
         ongoing={false}
+        canFocus={false}
       />,
     );
     expect(screen.queryByText(/ctx/)).not.toBeInTheDocument();
@@ -208,6 +226,7 @@ describe("InfoBar", () => {
         sessionTotals={makeTotals({ total_tokens: 5000 })}
         sessionPath=""
         ongoing={false}
+        canFocus={false}
       />,
     );
     expect(screen.getByText(/5\.0k tok/)).toBeInTheDocument();
@@ -222,12 +241,13 @@ describe("InfoBar", () => {
         sessionTotals={makeTotals({ cost_usd: 1.5 })}
         sessionPath=""
         ongoing={false}
+        canFocus={false}
       />,
     );
     expect(screen.getByText("1.50")).toBeInTheDocument();
   });
 
-  it("shows active spinner when ongoing=true", () => {
+  it("shows active spinner when ongoing=true and there is no liveness info", () => {
     render(
       <InfoBar
         meta={makeMeta()}
@@ -236,6 +256,7 @@ describe("InfoBar", () => {
         sessionTotals={makeTotals()}
         sessionPath=""
         ongoing={true}
+        canFocus={false}
       />,
     );
     expect(screen.getByText(/active/)).toBeInTheDocument();
@@ -250,8 +271,86 @@ describe("InfoBar", () => {
         sessionTotals={makeTotals()}
         sessionPath=""
         ongoing={false}
+        canFocus={false}
       />,
     );
     expect(screen.queryByText(/active/)).not.toBeInTheDocument();
+  });
+
+  describe("liveness badge supersedes the transcript 'active' indicator", () => {
+    it("shows the liveness badge when sessionInfo.liveness is present", () => {
+      render(
+        <InfoBar
+          meta={makeMeta()}
+          gitInfo={null}
+          contextTokens={0}
+          sessionTotals={makeTotals()}
+          sessionPath=""
+          ongoing={true}
+          canFocus={false}
+          sessionInfo={{
+            ...baseSessionInfo,
+            liveness: { status: "idle", idle_seconds: 180, pid: 1 },
+          }}
+        />,
+      );
+      expect(screen.getByText(/idle 3m/i)).toBeInTheDocument();
+    });
+
+    it("floors idle minutes (90s reads as 1m, not 2m) to match the TUI badge", () => {
+      render(
+        <InfoBar
+          meta={makeMeta()}
+          gitInfo={null}
+          contextTokens={0}
+          sessionTotals={makeTotals()}
+          sessionPath=""
+          ongoing={true}
+          canFocus={false}
+          sessionInfo={{
+            ...baseSessionInfo,
+            liveness: { status: "idle", idle_seconds: 90, pid: 1 },
+          }}
+        />,
+      );
+      expect(screen.getByText(/idle 1m/i)).toBeInTheDocument();
+    });
+
+    it("suppresses the 'active' indicator when liveness is present, even if ongoing=true", () => {
+      render(
+        <InfoBar
+          meta={makeMeta()}
+          gitInfo={null}
+          contextTokens={0}
+          sessionTotals={makeTotals()}
+          sessionPath=""
+          ongoing={true}
+          canFocus={false}
+          sessionInfo={{
+            ...baseSessionInfo,
+            liveness: { status: "busy", idle_seconds: 0, pid: 1 },
+          }}
+        />,
+      );
+      expect(screen.getByText(/busy/i)).toBeInTheDocument();
+      expect(screen.queryByText(/active/)).not.toBeInTheDocument();
+    });
+
+    it("still shows the 'active' indicator normally when there is no liveness info", () => {
+      render(
+        <InfoBar
+          meta={makeMeta()}
+          gitInfo={null}
+          contextTokens={0}
+          sessionTotals={makeTotals()}
+          sessionPath=""
+          ongoing={true}
+          canFocus={false}
+          sessionInfo={{ ...baseSessionInfo, liveness: null }}
+        />,
+      );
+      expect(screen.getByText(/active/)).toBeInTheDocument();
+      expect(screen.queryByText(/busy|idle/i)).not.toBeInTheDocument();
+    });
   });
 });

@@ -4,6 +4,7 @@ mod commands;
 mod convert;
 mod http_api;
 mod parser;
+mod process;
 mod session_load;
 mod settings;
 mod state;
@@ -73,6 +74,7 @@ pub fn run() {
             commands::settings::set_projects_dir,
             commands::wsl::list_wsl_distros,
             commands::wsl::set_wsl_distros,
+            commands::terminal::focus_session_window,
             switch_to_browser,
         ])
         .setup(move |app| {

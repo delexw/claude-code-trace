@@ -201,6 +201,27 @@ fresh), `discover_sessions_cached` joins the live `/rename` session-name registr
 via the short-TTL `session_names_cache` (1 s) — a rename never touches the JSONL file, so the
 transcript-file cache above cannot see it, and the name registry is joined after the fact.
 
+### Registry Format Dependency (Compat)
+
+`read_session_registry` (`src-tauri/src/parser/session.rs`) reads the same
+`~/.claude/sessions/*.json` files as the name join above, plus the fields
+`apply_liveness` needs to derive `SessionInfo.liveness`:
+
+| Field             | Used for                                                 | Observed Claude Code version |
+| ----------------- | -------------------------------------------------------- | ---------------------------- |
+| `status`          | `Liveness.status` (open string, e.g. `busy`/`idle`)      | v2.1.202                     |
+| `statusUpdatedAt` | `Liveness.idle_seconds = (now - statusUpdatedAt) / 1000` | v2.1.202                     |
+| `pid`             | staleness guard (`is_pid_alive`) + `Liveness.pid`        | v2.1.202                     |
+| `bridgeSessionId` | parsed and retained on `RegEntry`, not yet surfaced      | v2.1.202                     |
+
+Parsed the same lenient way as the name join (`serde_json::Value` + `.get().and_then(as_str/as_i64)`,
+skip-on-error per file, never panic). `registry_reads_status_and_guards_stale_pid`
+(`session.rs`) pins the exact fixture shape, so a future Claude Code rename/retype of
+any of these fields surfaces as a failing test — not a silently dead liveness feature.
+`status` is kept as an open `String` rather than an enum for the same reason
+`hook_event` is (see [01-parser-pipeline.md](./01-parser-pipeline.md)): a new
+status value must render neutrally, not fail to parse.
+
 ---
 
 ## Watched Session Ongoing Override

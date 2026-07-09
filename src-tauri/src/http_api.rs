@@ -102,6 +102,7 @@ async fn run_server(state: Arc<HttpState>) {
         .route("/api/picker/unwatch", post(api_unwatch_picker))
         .route("/api/git-info", get(api_get_git_info))
         .route("/api/debug-log", get(api_get_debug_log))
+        .route("/api/focus", post(api_focus_session_window))
         .route("/api/events", get(api_events));
 
     if let Some(dir) = resolve_static_dir() {
@@ -549,6 +550,23 @@ async fn api_get_debug_log(Query(q): Query<DebugQuery>) -> Response {
 }
 
 // ---------------------------------------------------------------------------
+// Focus
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+struct FocusBody {
+    #[serde(rename = "sessionId")]
+    session_id: String,
+}
+
+async fn api_focus_session_window(Json(body): Json<FocusBody>) -> Response {
+    match crate::commands::terminal::focus_session_window_impl(&body.session_id) {
+        Ok(()) => ok_json(&serde_json::json!({ "ok": true })),
+        Err(e) => err_response(axum::http::StatusCode::BAD_REQUEST, e.user_message()),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // SSE events
 // ---------------------------------------------------------------------------
 
@@ -619,5 +637,22 @@ mod tests {
     #[test]
     fn pick_port_uses_parsed_value() {
         assert_eq!(pick_port(Some("8080".to_string())), 8080);
+    }
+
+    // -----------------------------------------------------------------------
+    // Focus
+    // -----------------------------------------------------------------------
+
+    // Full route registration (via `run_server`) needs a live `AppState`/bound
+    // port; instead this calls the handler directly to verify it's wired to
+    // `focus_session_window_impl` and shapes errors like the other POST
+    // handlers in this file (BAD_REQUEST + `{ "error": ... }` envelope).
+    #[tokio::test]
+    async fn focus_route_reports_bad_request_for_a_session_that_is_not_live() {
+        let body = FocusBody {
+            session_id: "does-not-exist".to_string(),
+        };
+        let resp = api_focus_session_window(Json(body)).await;
+        assert_eq!(resp.status(), axum::http::StatusCode::BAD_REQUEST);
     }
 }

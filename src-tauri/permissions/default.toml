@@ -17,6 +17,7 @@ permissions = [
   "allow-list-wsl-distros",
   "allow-set-wsl-distros",
   "allow-switch-to-browser",
+  "allow-focus-session-window",
 ]
 
 [[permission]]
@@ -98,3 +99,8 @@ commands.allow = ["set_wsl_distros"]
 identifier = "allow-switch-to-browser"
 description = "Allow switching to browser mode"
 commands.allow = ["switch_to_browser"]
+
+[[permission]]
+identifier = "allow-focus-session-window"
+description = "Allow focusing a live session's terminal window"
+commands.allow = ["focus_session_window"]

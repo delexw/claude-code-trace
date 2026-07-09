@@ -30,6 +30,7 @@ from data_types import (
     SessionTotals,
 )
 from format_utils import project_key as _project_key
+from resume_command import resume_command
 from sse import SSEClient
 from widgets.debug_viewer import DebugViewer
 from widgets.detail_view import DetailView
@@ -107,6 +108,10 @@ class CCTraceApp(App):
         Binding("r", "refresh", "Refresh", show=True, priority=True),
         Binding("h", "focus_sidebar", "◀ Sidebar", show=True, priority=True),
         Binding("l", "focus_content", "Content ▶", show=False, priority=True),
+        # Per-view: only relevant (and shown) once a session is in context —
+        # see check_action. Deliberately NOT priority=True and NOT shown in
+        # the picker footer, which already overflows on narrow terminals.
+        Binding("y", "copy_resume", "Copy resume", show=True),
     ]
 
     # ---- State ----
@@ -147,6 +152,10 @@ class CCTraceApp(App):
         self._sse: SSEClient | None = None
         self._subagent_expanded_msgs: set[int] = set()
         self._subagent_detail_item_idx: int = 0
+        # The SessionInfo backing the currently open session (list/detail
+        # views) — needed for copy_resume (cwd + session_id). None in the
+        # picker, where no session is selected yet.
+        self._current_session: SessionInfo | None = None
 
     # ----------------------------------------------------------------
     # Layout
@@ -321,6 +330,7 @@ class CCTraceApp(App):
                 self.expanded_items = set()
                 self.subagent_item = None
                 self.subagent_detail_msg = None
+                self._current_session = session
                 self.run_worker(
                     self._load_session(session.path),
                     exclusive=True,
@@ -484,6 +494,21 @@ class CCTraceApp(App):
     def action_show_teams(self) -> None:
         if self.view == "list" and self.teams:
             self.view = "team"
+
+    def action_copy_resume(self) -> None:
+        """y: copy the `claude --resume` command for the current session."""
+        sel = self._current_session
+        if sel is None:
+            return
+        self.copy_to_clipboard(resume_command(sel.cwd, sel.session_id))
+
+    def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
+        """Hide copy_resume outside the list/detail views (no session in
+        context in the picker) — kept a per-view binding rather than a global
+        footer key so it doesn't add to the picker footer's known overflow."""
+        if action == "copy_resume":
+            return self.view in ("list", "detail") and self._current_session is not None
+        return True
 
     def action_d_action(self) -> None:
         """d: scroll down in current view, or show debug log from list view."""

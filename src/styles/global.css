@@ -643,6 +643,73 @@ body {
   animation: pulse 1.5s ease-in-out infinite;
 }
 
+/* ---- Session Actions (in Info Bar) ---- */
+
+.session-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  /* push to the right edge of the info-bar so actions sit on the right (info left,
+     actions right) regardless of how much session metadata precedes them */
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.info-bar__status-badge {
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.session-actions__button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  height: 22px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background 0.1s,
+    border-color 0.1s;
+  white-space: nowrap;
+}
+
+.session-actions__button:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* transient "Copied!" confirmation — clear filled state, distinct from hover */
+.session-actions__button--copied,
+.session-actions__button--copied:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg-elevated);
+}
+
+/* divides the copy actions from the immediate Focus action (copy vs execute) */
+.session-actions__separator {
+  width: 1px;
+  align-self: stretch;
+  min-height: 14px;
+  margin: 0 3px;
+  background: var(--border);
+}
+
+.session-actions__error {
+  font-size: 11px;
+  color: var(--error);
+  white-space: nowrap;
+}
+
 @keyframes pulse {
   0%,
   100% {
