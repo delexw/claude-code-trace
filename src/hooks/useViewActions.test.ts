@@ -46,4 +46,22 @@ describe("useViewActions", () => {
     unmount();
     expect(refResult.current.current.expandAll).toBeUndefined();
   });
+
+  it("scroll callbacks delegate to registered handlers", () => {
+    const top = vi.fn();
+    const bottom = vi.fn();
+
+    const { result: refResult } = renderHook(() => useViewActionsRef());
+    const { result: cbResult } = renderHook(() => useViewActionCallbacks(refResult.current));
+
+    renderHook(() =>
+      useRegisterViewActions(refResult.current, { scrollToTop: top, scrollToBottom: bottom }),
+    );
+
+    act(() => cbResult.current.scrollToTop());
+    act(() => cbResult.current.scrollToBottom());
+
+    expect(top).toHaveBeenCalledTimes(1);
+    expect(bottom).toHaveBeenCalledTimes(1);
+  });
 });

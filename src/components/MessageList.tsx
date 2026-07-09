@@ -103,9 +103,17 @@ export function MessageList({
   onExpandAll,
   onCollapseAll,
 }: MessageListProps) {
-  useRegisterViewActions(viewActionsRef, { expandAll: onExpandAll, collapseAll: onCollapseAll });
-
   const virtuosoRef = useRef<VirtuosoHandle>(null);
+
+  // The message list is displayed reversed (newest first), so the visual top is
+  // the last index and the visual bottom is index 0 — matching the keyboard
+  // Top/Bottom jumps in App.
+  useRegisterViewActions(viewActionsRef, {
+    expandAll: onExpandAll,
+    collapseAll: onCollapseAll,
+    scrollToTop: () => virtuosoRef.current?.scrollToIndex(Math.max(0, count - 1)),
+    scrollToBottom: () => virtuosoRef.current?.scrollToIndex(0),
+  });
   // Track the currently rendered window so we only scroll when the selection
   // leaves it — mirrors the old "no-op if already visible" behaviour.
   const rangeRef = useRef({ startIndex: 0, endIndex: 0 });

@@ -1,6 +1,7 @@
 import { useRef, useMemo } from "react";
 import { useScrollToSelected } from "../hooks/useScrollToSelected";
 import { useVisibleSessions } from "../hooks/useVisibleSessions";
+import { useRegisterViewActions, type ViewActionsRef } from "../hooks/useViewActions";
 import type { SessionInfo } from "../types";
 import { OngoingDots } from "./OngoingDots";
 import {
@@ -36,6 +37,11 @@ interface SessionPickerProps {
    * show the full recap (instead of the truncated name/first_message) as their preview.
    */
   recapPreview?: boolean;
+  /**
+   * Shared toolbar-action registry. The picker registers Top/Bottom so they
+   * scroll its own list; without it the toolbar's scroll buttons are inert here.
+   */
+  viewActionsRef?: ViewActionsRef;
 }
 
 export function SessionPicker({
@@ -48,11 +54,21 @@ export function SessionPicker({
   onSelectIndex,
   onVisiblePathsChange,
   recapPreview = false,
+  viewActionsRef,
 }: SessionPickerProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const selectedRef = useScrollToSelected(selectedIndex);
   const searchRef = useRef<HTMLInputElement>(null);
   const registerVisible = useVisibleSessions(onVisiblePathsChange ?? noop);
+
+  // Register Top/Bottom against the picker's own scroll container. Falls back to
+  // a local ref when no registry is supplied (e.g. in isolated tests).
+  const fallbackActionsRef = useRef({});
+  useRegisterViewActions(viewActionsRef ?? fallbackActionsRef, {
+    scrollToTop: () => listRef.current?.scrollTo({ top: 0, behavior: "smooth" }),
+    scrollToBottom: () =>
+      listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" }),
+  });
 
   const dateGroups = groupByDate(sessions);
 
