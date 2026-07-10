@@ -3,6 +3,56 @@
 All notable changes to claude-code-trace are documented here. Versions follow
 [semantic versioning](https://semver.org/).
 
+## [0.11.0] — 2026-07-10
+
+This release turns the viewer into a launchpad: you can resume, fork, or jump to the
+terminal window of the session you're reading, and the picker can preview each session
+by its end-of-session recap. It also fixes toolbar actions that silently did nothing,
+keeps the permission-mode badge correct for Claude Code v2.1.200+, and corrects cost
+estimates for sessions running Sonnet 5.
+
+### Added
+
+- **Resume, fork, or focus the session you're viewing**
+  ([`5fe375c`](https://github.com/delexw/claude-code-trace/commit/5fe375c), @michaelstingl).
+  A new session-control panel in the session view: Resume and Fork copy a ready-to-paste
+  `cd '<cwd>' && claude --resume <id>` command (Fork adds `--fork-session`), and Focus —
+  on a local macOS backend — brings the session's terminal window to the front. Sessions
+  also get a live busy/idle badge read from Claude Code's `~/.claude/sessions` registry,
+  replacing the transcript-derived "active" indicator. The TUI mirrors the liveness badge
+  and a copy-resume key binding.
+
+- **End-of-session recap as the picker preview**
+  ([`0904952`](https://github.com/delexw/claude-code-trace/commit/0904952), @michaelstingl).
+  When a session ends with a recap, the picker now shows that recap as the session's
+  preview instead of the first message, so you can tell what a session accomplished at a
+  glance. A SESSION PREVIEW toggle in Settings turns it off if you prefer the old
+  first-message preview (default on).
+
+- **Toolbar actions scoped to the view they act on**
+  ([`b4483a7`](https://github.com/delexw/claude-code-trace/commit/b4483a7), @michaelstingl).
+  Top and Bottom now actually scroll in every view — they previously targeted a
+  non-scrolling container and did nothing. Expand All / Collapse All no longer appear in
+  the picker, where nothing is collapsible, and the content actions moved to the right
+  cluster, above the column they operate on.
+
+### Fixed
+
+- **Sonnet 5 sessions no longer overestimate cost**
+  ([`7396d03`](https://github.com/delexw/claude-code-trace/commit/7396d03)). Sonnet 5
+  ships with promotional pricing ($2/Mtok input, $10/Mtok output through Aug 31, 2026),
+  but the cost calculator was applying the standard $3/$15 Sonnet rate — inflating every
+  `claude-sonnet-5` session's cost by roughly a third. A dedicated pricing tier now
+  matches any `sonnet-5` model ID before the generic Sonnet fallback.
+
+- **Spurious permission-mode badge on Claude Code v2.1.200+ sessions**
+  ([`17344f0`](https://github.com/delexw/claude-code-trace/commit/17344f0)). Claude Code
+  v2.1.200 renamed the default permission mode written to session files from "default"
+  to "manual", which made every normal session show a permission-mode badge in the info
+  bar with a raw-string label. Both values are now recognised as the badge-free default.
+
+[0.11.0]: https://github.com/delexw/claude-code-trace/releases/tag/v0.11.0
+
 ## [0.10.0] — 2026-07-01
 
 This release keeps the JSONL parser current with another run of Claude Code releases
