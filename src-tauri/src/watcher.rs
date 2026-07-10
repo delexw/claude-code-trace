@@ -3,12 +3,28 @@ use std::sync::Arc;
 use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
 use std::path::Path;
 use std::time::Duration;
-use tauri::{AppHandle, Emitter};
 use tokio::sync::mpsc;
+
+#[cfg(feature = "desktop")]
+use tauri::Emitter;
+
+use crate::AppHandle;
 
 use crate::parser::session::IncrementalTokenScanner;
 use crate::session_load::{build_view, TimeFilter};
 use crate::state::AppState;
+
+/// Emit an event to the desktop webview, if one is attached. Compiles to a
+/// no-op in headless-only builds (no Tauri), where `app` is always `None`.
+#[cfg(feature = "desktop")]
+fn emit_to_webview<P: serde::Serialize + Clone>(app: &Option<AppHandle>, event: &str, payload: P) {
+    if let Some(handle) = app {
+        let _ = handle.emit(event, payload);
+    }
+}
+
+#[cfg(not(feature = "desktop"))]
+fn emit_to_webview<P>(_app: &Option<AppHandle>, _event: &str, _payload: P) {}
 
 const WATCHER_DEBOUNCE: Duration = Duration::from_millis(1000);
 
@@ -248,9 +264,7 @@ pub fn start_session_watcher(
                         state.broadcast("session-update", &json);
                     }
 
-                    if let Some(ref app_handle) = app {
-                        let _ = app_handle.emit("session-update", payload);
-                    }
+                    emit_to_webview(&app, "session-update", payload);
                 }
             }
         }
@@ -338,9 +352,7 @@ pub fn start_picker_watcher(
                     // server-side cache coalesces concurrent requests.
                     state.broadcast("picker-refresh", "{}");
 
-                    if let Some(ref app_handle) = app {
-                        let _ = app_handle.emit("picker-refresh", serde_json::json!({}));
-                    }
+                    emit_to_webview(&app, "picker-refresh", serde_json::json!({}));
                 }
             }
         }

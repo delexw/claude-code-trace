@@ -206,6 +206,7 @@ pub fn resolve_tty(pid: i64) -> Option<String> {
 /// `focus_session_window_impl`, over the HTTP API (`POST /api/focus`) — any
 /// frontend whose backend is local + macOS can focus a terminal window, not
 /// just the Tauri app.
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn focus_session_window(session_id: String) -> Result<(), String> {
     focus_session_window_impl(&session_id).map_err(|e| e.user_message())

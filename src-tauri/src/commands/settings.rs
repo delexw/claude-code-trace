@@ -1,8 +1,11 @@
-use std::sync::Arc;
-
 use serde::Serialize;
+
+#[cfg(feature = "desktop")]
+use std::sync::Arc;
+#[cfg(feature = "desktop")]
 use tauri::State;
 
+#[cfg(feature = "desktop")]
 use crate::state::AppState;
 
 /// Response for the frontend — always includes both the configured and default paths.
@@ -50,12 +53,14 @@ pub fn build_response_pub(settings: &crate::settings::Settings) -> SettingsRespo
     }
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn get_settings(state: State<'_, Arc<AppState>>) -> Result<SettingsResponse, String> {
     let guard = state.settings.lock().map_err(|e| e.to_string())?;
     Ok(build_response_pub(&guard))
 }
 
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn set_projects_dir(
     path: Option<String>,

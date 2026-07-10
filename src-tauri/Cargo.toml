@@ -8,12 +8,26 @@ rust-version = "1.77.2"
 name = "claude_code_trace_lib"
 crate-type = ["cdylib", "rlib"]
 
+[features]
+# `desktop` (default) builds the full Tauri desktop app, which links the
+# webview runtime (wry -> webkit2gtk on Linux). Disable it
+# (`--no-default-features`) to build a headless-only HTTP server binary with no
+# Tauri/webkit dependency — suitable for containers and web/TUI deployments.
+default = ["desktop"]
+desktop = [
+  "dep:tauri",
+  "dep:tauri-build",
+  "dep:tauri-plugin-fs",
+  "dep:tauri-plugin-opener",
+  "dep:tauri-plugin-single-instance",
+]
+
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
+tauri-build = { version = "2", features = [], optional = true }
 
 [dependencies]
-tauri = { version = "2", features = [] }
-tauri-plugin-fs = "2"
+tauri = { version = "2", features = [], optional = true }
+tauri-plugin-fs = { version = "2", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 chrono = { version = "0.4", features = ["serde"] }
@@ -23,8 +37,8 @@ notify = "8"
 tokio = { version = "1", features = ["full"] }
 thiserror = "2"
 dirs = "6"
-tauri-plugin-opener = "2.5.4"
-tauri-plugin-single-instance = "2"
+tauri-plugin-opener = { version = "2.5.4", optional = true }
+tauri-plugin-single-instance = { version = "2", optional = true }
 axum = { version = "0.8", features = ["json"] }
 tower-http = { version = "0.7", features = ["cors", "fs"] }
 tokio-stream = { version = "0.1", features = ["sync"] }

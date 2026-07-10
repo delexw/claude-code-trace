@@ -9,7 +9,6 @@ use axum::response::{IntoResponse, Json, Response};
 use axum::routing::{get, post};
 use axum::Router;
 use serde::Deserialize;
-use tauri::{AppHandle, Manager};
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
 use tower_http::cors::CorsLayer;
@@ -19,6 +18,7 @@ use crate::parser::debuglog::*;
 use crate::parser::session::extract_session_meta;
 use crate::state::AppState;
 use crate::watcher::{start_picker_watcher, start_session_watcher};
+use crate::AppHandle;
 
 /// Shared state for axum handlers.
 #[derive(Clone)]
@@ -64,7 +64,9 @@ pub fn resolve_static_dir() -> Option<String> {
 }
 
 /// Start the HTTP API server from a Tauri AppHandle (desktop/web mode).
+#[cfg(feature = "desktop")]
 pub async fn start_http_server(app: AppHandle) {
+    use tauri::Manager;
     let app_state: Arc<AppState> = app.state::<Arc<AppState>>().inner().clone();
     run_server(Arc::new(HttpState {
         app_state,

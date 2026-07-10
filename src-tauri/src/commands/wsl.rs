@@ -1,9 +1,13 @@
 use std::collections::HashSet;
-use std::sync::Arc;
 
+#[cfg(feature = "desktop")]
+use std::sync::Arc;
+#[cfg(feature = "desktop")]
 use tauri::State;
 
+#[cfg(feature = "desktop")]
 use crate::commands::settings::{build_response_pub, SettingsResponse};
+#[cfg(feature = "desktop")]
 use crate::state::AppState;
 
 /// Trim, drop empty entries, and de-duplicate distro names while preserving order.
@@ -18,12 +22,14 @@ pub fn sanitize_distros(distros: Vec<String>) -> Vec<String> {
 
 /// List installed WSL distributions. Empty on non-Windows hosts or when WSL is
 /// not installed.
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn list_wsl_distros() -> Result<Vec<String>, String> {
     Ok(crate::wsl::list_distros())
 }
 
 /// Persist the set of WSL distros whose projects should be discovered.
+#[cfg(feature = "desktop")]
 #[tauri::command]
 pub async fn set_wsl_distros(
     distros: Vec<String>,
