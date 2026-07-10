@@ -140,16 +140,12 @@ session.
 
 ```json
 {
-  "messages": [
-    /* DisplayMessage[] — only the requested window */
-  ],
+  "messages": [/* DisplayMessage[] — only the requested window */],
   "count": 5000,
   "start": 0,
   "roles": ["user", "assistant", "..."],
   "context_tokens": 12345,
-  "teams": [
-    /* TeamSnapshot[] */
-  ],
+  "teams": [/* TeamSnapshot[] */],
   "ongoing": true,
   "meta": { "cwd": "...", "git_branch": "main", "permission_mode": "manual" },
   "session_totals": { "total_tokens": 5000, "cost_usd": 0.02, "model": "..." }
