@@ -13,26 +13,56 @@ mod wsl;
 
 use std::sync::Arc;
 
+#[cfg(feature = "desktop")]
 use tauri::Manager;
 
-pub fn run() {
-    let args: Vec<String> = std::env::args().collect();
-    let web_only = args.iter().any(|a| a == "--web");
-    let headless = args.iter().any(|a| a == "--headless");
-    let no_open = args.iter().any(|a| a == "--no-open");
-    let desktop = !web_only && !headless;
+/// Handle to the running desktop app, used to emit events to the webview.
+///
+/// In headless-only builds (the `desktop` feature disabled, e.g.
+/// `--no-default-features`) there is no webview and no Tauri runtime, so this
+/// is an uninhabited type: every `Option<AppHandle>` is always `None` and the
+/// emit-to-webview code paths compile out entirely.
+#[cfg(feature = "desktop")]
+pub use tauri::AppHandle;
+#[cfg(not(feature = "desktop"))]
+#[derive(Clone)]
+pub enum AppHandle {}
 
-    // Headless mode: skip Tauri/WebKit entirely — run only the HTTP server.
-    // This eliminates the WebKitWebProcess + WebKitNetworkProcess that Tauri
-    // unconditionally spawns even when no window is displayed, which was the
-    // dominant cause of high CPU usage in Docker containers.
-    if headless {
-        eprintln!("Headless mode: HTTP API on http://127.0.0.1:11423");
-        let app_state = Arc::new(state::AppState::new());
-        let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
-        rt.block_on(http_api::start_http_server_headless(app_state));
-        return;
+pub fn run() {
+    // With the `desktop` feature disabled, headless is the only mode: there is
+    // no Tauri/WebKit compiled in, so we always run just the HTTP server.
+    #[cfg(not(feature = "desktop"))]
+    run_headless();
+
+    #[cfg(feature = "desktop")]
+    {
+        let args: Vec<String> = std::env::args().collect();
+        if args.iter().any(|a| a == "--headless") {
+            run_headless();
+        } else {
+            run_desktop(&args);
+        }
     }
+}
+
+/// Run only the axum HTTP API server, with no Tauri/WebKit. This eliminates the
+/// WebKitWebProcess + WebKitNetworkProcess that Tauri unconditionally spawns
+/// even when no window is displayed, which was the dominant cause of high CPU
+/// usage in Docker containers.
+fn run_headless() {
+    eprintln!("Headless mode: HTTP API on http://127.0.0.1:11423");
+    let app_state = Arc::new(state::AppState::new());
+    let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+    rt.block_on(http_api::start_http_server_headless(app_state));
+}
+
+/// Run the Tauri desktop app (or `--web`, which still hosts the webview runtime
+/// and just points a browser at it). Requires the `desktop` feature.
+#[cfg(feature = "desktop")]
+fn run_desktop(args: &[String]) {
+    let web_only = args.iter().any(|a| a == "--web");
+    let no_open = args.iter().any(|a| a == "--no-open");
+    let desktop = !web_only;
 
     let app_state = Arc::new(state::AppState::new());
 
@@ -102,6 +132,7 @@ pub fn run() {
 }
 
 /// Open the web UI in the default browser and hide the desktop window.
+#[cfg(feature = "desktop")]
 #[tauri::command]
 async fn switch_to_browser(app: tauri::AppHandle) -> Result<(), String> {
     tauri_plugin_opener::open_url("http://localhost:1420", None::<&str>)

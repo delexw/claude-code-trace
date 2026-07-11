@@ -10,7 +10,10 @@ pub struct GitInfo {
 }
 
 /// Get git info (branch, dirty state, worktree dirs) for a directory.
-#[tauri::command]
+///
+/// Called directly by the HTTP API (`GET /api/git-info`) in all builds; the
+/// `#[tauri::command]` wrapper is applied only in desktop builds.
+#[cfg_attr(feature = "desktop", tauri::command)]
 pub fn get_git_info(cwd: String) -> GitInfo {
     if cwd.is_empty() {
         return GitInfo {
