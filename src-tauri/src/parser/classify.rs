@@ -529,8 +529,15 @@ pub fn classify(e: Entry) -> Option<ClassifiedMsg> {
     // User message.
     if e.entry_type == "user" && !e.is_meta {
         let trimmed = content_str.trim();
+        // v2.1.201+ (Sonnet 5): harness reminders are inlined as <system-reminder> tags inside
+        // user entries rather than delivered as separate JSONL entries. Do not exclude entries
+        // that merely START with <system-reminder> — is_user_noise() already dropped the
+        // pure-reminder case (starts AND ends with the tag). Entries that pass is_user_noise()
+        // and start with <system-reminder> contain additional user content after the reminder;
+        // classify them as UserMsg and let sanitize_content() strip the reminder block.
         let excluded = SYSTEM_OUTPUT_TAGS
             .iter()
+            .filter(|&&tag| tag != "<system-reminder>")
             .any(|tag| trimmed.starts_with(tag));
         if !excluded && has_user_content(&e.message.content, &content_str) {
             return Some(ClassifiedMsg::User(UserMsg {
@@ -1167,6 +1174,54 @@ mod tests {
         let content = "<system-reminder>some reminder</system-reminder>";
         let e = make_entry("user", Some(json!(content)));
         assert!(classify(e).is_none());
+    }
+
+    // v2.1.201+ (Sonnet 5) compat: harness reminders are inlined at the start of user entries.
+    // The entry must be classified as UserMsg with the reminder stripped, not dropped/meta-AI.
+    #[test]
+    fn classify_v2_1_201_reminder_prefix_string_content_becomes_user_msg() {
+        let content =
+            "<system-reminder>Context from previous turns.</system-reminder>\nWhat is 2+2?";
+        let e = make_entry("user", Some(json!(content)));
+        match classify(e) {
+            Some(ClassifiedMsg::User(u)) => {
+                assert!(
+                    !u.text.contains("<system-reminder>"),
+                    "reminder tag must be stripped: {:?}",
+                    u.text
+                );
+                assert!(
+                    u.text.contains("What is 2+2?"),
+                    "user question must be preserved: {:?}",
+                    u.text
+                );
+            }
+            other => panic!("Expected User, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_v2_1_201_reminder_prefix_array_content_becomes_user_msg() {
+        let content = json!([
+            {"type": "text", "text": "<system-reminder>Harness context.</system-reminder>"},
+            {"type": "text", "text": "Explain recursion."}
+        ]);
+        let e = make_entry("user", Some(content));
+        match classify(e) {
+            Some(ClassifiedMsg::User(u)) => {
+                assert!(
+                    !u.text.contains("<system-reminder>"),
+                    "reminder tag must be stripped: {:?}",
+                    u.text
+                );
+                assert!(
+                    u.text.contains("Explain recursion."),
+                    "user question must be preserved: {:?}",
+                    u.text
+                );
+            }
+            other => panic!("Expected User, got {other:?}"),
+        }
     }
 
     #[test]

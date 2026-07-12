@@ -1516,8 +1516,16 @@ fn is_user_chunk_for_turn_count(
     }
 
     // System output tags.
+    // v2.1.201+ (Sonnet 5): <system-reminder> tags may be inlined at the start of user entries
+    // that also contain real user content. Only exclude when the ENTIRE content is a reminder
+    // (starts AND ends with the tag); mixed entries must still count as user turns.
     for tag in SYSTEM_OUTPUT_TAGS {
-        if trimmed.starts_with(tag) {
+        if *tag == "<system-reminder>" {
+            let close_tag = tag.replace('<', "</");
+            if trimmed.starts_with(tag) && trimmed.ends_with(close_tag.as_str()) {
+                return false;
+            }
+        } else if trimmed.starts_with(tag) {
             return false;
         }
     }
@@ -3530,5 +3538,51 @@ mod tests {
         assert_eq!(meta.git_branch, "main");
 
         std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    // --- is_user_chunk_for_turn_count compat tests (v2.1.201+) ---
+
+    fn make_user_raw(content: serde_json::Value) -> serde_json::Value {
+        serde_json::json!({
+            "type": "user",
+            "message": {
+                "role": "user",
+                "content": content
+            }
+        })
+    }
+
+    #[test]
+    fn turn_count_excludes_pure_system_reminder_entry() {
+        let raw = make_user_raw(serde_json::json!(
+            "<system-reminder>Some context reminder.</system-reminder>"
+        ));
+        assert!(
+            !is_user_chunk_for_turn_count(&raw, "user", false, false),
+            "pure reminder must not count as a turn"
+        );
+    }
+
+    #[test]
+    fn turn_count_includes_v2_1_201_reminder_plus_user_message_string() {
+        let raw = make_user_raw(serde_json::json!(
+            "<system-reminder>Reminder context.</system-reminder>\nActual user question"
+        ));
+        assert!(
+            is_user_chunk_for_turn_count(&raw, "user", false, false),
+            "reminder-prefixed entry with additional content must count as a turn"
+        );
+    }
+
+    #[test]
+    fn turn_count_includes_v2_1_201_reminder_plus_user_message_array() {
+        let raw = make_user_raw(serde_json::json!([
+            {"type": "text", "text": "<system-reminder>Harness context.</system-reminder>"},
+            {"type": "text", "text": "Tell me about recursion."}
+        ]));
+        assert!(
+            is_user_chunk_for_turn_count(&raw, "user", false, false),
+            "reminder-prefixed array entry with additional content must count as a turn"
+        );
     }
 }
