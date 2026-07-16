@@ -4,6 +4,7 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 
 use axum::extract::{Query, State};
+use axum::http::{header, HeaderValue, Method};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Json, Response};
 use axum::routing::{get, post};
@@ -63,6 +64,54 @@ pub fn resolve_static_dir() -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+/// Origins the browser UI is served from. In web/dev mode the frontend runs on
+/// `localhost:1420` and calls the API on port 11423 — a distinct origin — so
+/// these are allowlisted for CORS. The Tauri desktop webview talks to the
+/// backend over the IPC bridge (never HTTP), and the Docker image serves the UI
+/// same-origin, so neither needs an entry here.
+const DEFAULT_ALLOWED_ORIGINS: [&str; 2] = ["http://localhost:1420", "http://127.0.0.1:1420"];
+
+/// Split a raw `CCTRACE_ALLOWED_ORIGINS` value into individual origins,
+/// dropping empty entries and surrounding whitespace.
+fn parse_extra_origins(raw: Option<String>) -> Vec<String> {
+    raw.into_iter()
+        .flat_map(|s| {
+            s.split(',')
+                .map(|p| p.trim().to_string())
+                .filter(|p| !p.is_empty())
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+/// Resolve the CORS origin allowlist: the built-in dev/web origins plus any
+/// added via the `CCTRACE_ALLOWED_ORIGINS` env var (comma-separated).
+fn resolve_allowed_origins() -> Vec<String> {
+    let mut origins: Vec<String> = DEFAULT_ALLOWED_ORIGINS
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    origins.extend(parse_extra_origins(
+        std::env::var("CCTRACE_ALLOWED_ORIGINS").ok(),
+    ));
+    origins
+}
+
+/// Build a CORS layer scoped to the allowlisted origins. This replaces a
+/// permissive `*` policy under which any website the user visited could read
+/// local Claude session data (prompts, code, tool output) cross-origin while
+/// the app was running.
+fn build_cors() -> CorsLayer {
+    let origins: Vec<HeaderValue> = resolve_allowed_origins()
+        .iter()
+        .filter_map(|o| HeaderValue::from_str(o).ok())
+        .collect();
+    CorsLayer::new()
+        .allow_origin(origins)
+        .allow_methods([Method::GET, Method::POST])
+        .allow_headers([header::CONTENT_TYPE])
+}
+
 /// Start the HTTP API server from a Tauri AppHandle (desktop/web mode).
 #[cfg(feature = "desktop")]
 pub async fn start_http_server(app: AppHandle) {
@@ -113,7 +162,7 @@ async fn run_server(state: Arc<HttpState>) {
         eprintln!("HTTP API: serving static assets from {dir}");
     }
 
-    let router = router.layer(CorsLayer::permissive()).with_state(state);
+    let router = router.layer(build_cors()).with_state(state);
 
     let (host, port) = resolve_bind_addr();
     let addr = format!("{host}:{port}");
@@ -639,6 +688,48 @@ mod tests {
     #[test]
     fn pick_port_uses_parsed_value() {
         assert_eq!(pick_port(Some("8080".to_string())), 8080);
+    }
+
+    // -----------------------------------------------------------------------
+    // CORS allowlist
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn parse_extra_origins_is_empty_when_missing() {
+        assert!(parse_extra_origins(None).is_empty());
+    }
+
+    #[test]
+    fn parse_extra_origins_splits_and_trims() {
+        assert_eq!(
+            parse_extra_origins(Some(" http://a.example , http://b.example ".to_string())),
+            vec!["http://a.example", "http://b.example"],
+        );
+    }
+
+    #[test]
+    fn parse_extra_origins_drops_empty_entries() {
+        assert!(parse_extra_origins(Some(" , ,".to_string())).is_empty());
+    }
+
+    #[test]
+    fn default_origins_are_the_dev_web_ui() {
+        assert_eq!(
+            DEFAULT_ALLOWED_ORIGINS,
+            ["http://localhost:1420", "http://127.0.0.1:1420"],
+        );
+    }
+
+    #[test]
+    fn default_origins_parse_to_valid_header_values() {
+        for origin in DEFAULT_ALLOWED_ORIGINS {
+            assert!(HeaderValue::from_str(origin).is_ok(), "{origin}");
+        }
+    }
+
+    #[test]
+    fn build_cors_constructs_without_panicking() {
+        let _ = build_cors();
     }
 
     // -----------------------------------------------------------------------
