@@ -47,6 +47,8 @@ pub struct ContentBlock {
     /// For hook_event blocks (v2.1.186+): attribution for cross-session permission prompts.
     pub hook_source_agent_name: String,
     pub hook_requesting_agent_uuid: String,
+    /// For the advisor tool's call/result blocks: the model that produced the advice.
+    pub advisor_model: String,
 }
 
 /// Classified message types.
@@ -561,7 +563,9 @@ pub fn classify(e: Entry) -> Option<ClassifiedMsg> {
         if content_is_empty {
             return None;
         }
-        let (thinking, tool_calls, blocks) = extract_assistant_details(&e.message.content);
+        let advisor_model = e.message.usage.advisor_model().unwrap_or_default();
+        let (thinking, tool_calls, blocks) =
+            extract_assistant_details(&e.message.content, &advisor_model);
         let stop_reason = e.message.stop_reason.clone().unwrap_or_default();
         return Some(ClassifiedMsg::AI(AIMsg {
             timestamp: ts,
@@ -742,7 +746,10 @@ fn normalize_tool_input(input: Value) -> Value {
     }
 }
 
-fn extract_assistant_details(content: &Option<Value>) -> (usize, Vec<ToolCall>, Vec<ContentBlock>) {
+fn extract_assistant_details(
+    content: &Option<Value>,
+    advisor_model: &str,
+) -> (usize, Vec<ToolCall>, Vec<ContentBlock>) {
     let blocks = match content {
         Some(Value::Array(arr)) => arr,
         _ => return (0, Vec::new(), Vec::new()),
@@ -778,7 +785,10 @@ fn extract_assistant_details(content: &Option<Value>) -> (usize, Vec<ToolCall>, 
                     ..Default::default()
                 });
             }
-            "tool_use" => {
+            // "tool_use" is the client-orchestrated tool call block. "server_tool_use" is
+            // Anthropic's server-managed equivalent (currently only used by the `advisor`
+            // tool locally) — same shape, so it's extracted identically.
+            "tool_use" | "server_tool_use" => {
                 let id = b
                     .get("id")
                     .and_then(|v| v.as_str())
@@ -798,8 +808,36 @@ fn extract_assistant_details(content: &Option<Value>) -> (usize, Vec<ToolCall>, 
                 content_blocks.push(ContentBlock {
                     block_type: "tool_use".to_string(),
                     tool_id: id,
-                    tool_name: name,
+                    tool_name: name.clone(),
                     tool_input: b.get("input").cloned().map(normalize_tool_input),
+                    advisor_model: if name == "advisor" {
+                        advisor_model.to_string()
+                    } else {
+                        String::new()
+                    },
+                    ..Default::default()
+                });
+            }
+            // The advisor tool's response, paired to its "server_tool_use" call via
+            // tool_use_id. Its text sits two levels deep at content.text, unlike a normal
+            // tool_result's top-level `content` string/array.
+            "advisor_tool_result" => {
+                let tool_id = b
+                    .get("tool_use_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let text = b
+                    .get("content")
+                    .and_then(|c| c.get("text"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                content_blocks.push(ContentBlock {
+                    block_type: "tool_result".to_string(),
+                    tool_id,
+                    content: text,
+                    advisor_model: advisor_model.to_string(),
                     ..Default::default()
                 });
             }
@@ -2500,6 +2538,96 @@ mod tests {
                 assert_eq!(f.model, "claude-haiku-4-5");
             }
             other => panic!("Expected two AI messages, got {other:?}"),
+        }
+    }
+
+    // --- Advisor tool: server_tool_use call + advisor_tool_result response blocks ---
+
+    #[test]
+    fn classify_advisor_server_tool_use_becomes_tool_use_block() {
+        // The advisor tool's call arrives as a `server_tool_use` block (Anthropic's
+        // server-managed tool mechanism), not the client-orchestrated `tool_use` block
+        // used by every other tool. It must still surface as a ToolCall.
+        let content = json!([
+            {"type": "server_tool_use", "id": "srvtoolu_01ABC", "name": "advisor", "input": {}}
+        ]);
+        let e = Entry {
+            entry_type: "assistant".to_string(),
+            uuid: "advisor-call".to_string(),
+            timestamp: "2026-07-17T10:00:00Z".to_string(),
+            message: super::super::entry::EntryMessage {
+                role: "assistant".to_string(),
+                model: "claude-sonnet-5".to_string(),
+                content: Some(content),
+                stop_reason: Some("tool_use".to_string()),
+                usage: super::super::entry::EntryUsage {
+                    iterations: vec![super::super::entry::IterationUsage {
+                        iteration_type: "advisor_message".to_string(),
+                        model: Some("claude-opus-4-8".to_string()),
+                    }],
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::AI(ai)) => {
+                assert_eq!(ai.tool_calls.len(), 1);
+                assert_eq!(ai.tool_calls[0].id, "srvtoolu_01ABC");
+                assert_eq!(ai.tool_calls[0].name, "advisor");
+                assert_eq!(ai.blocks.len(), 1);
+                assert_eq!(ai.blocks[0].block_type, "tool_use");
+                assert_eq!(ai.blocks[0].tool_id, "srvtoolu_01ABC");
+                assert_eq!(ai.blocks[0].tool_name, "advisor");
+                assert_eq!(ai.blocks[0].advisor_model, "claude-opus-4-8");
+            }
+            other => panic!("Expected AI message, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_advisor_tool_result_extracts_nested_response_text() {
+        // The advisor's response text is nested two levels deep: content.text, inside an
+        // `advisor_tool_result` block — unlike normal tool_result blocks, which carry a
+        // top-level string/array `content`.
+        let content = json!([
+            {
+                "type": "advisor_tool_result",
+                "tool_use_id": "srvtoolu_01ABC",
+                "content": {"type": "advisor_result", "text": "You're on the right track..."}
+            }
+        ]);
+        let e = Entry {
+            entry_type: "assistant".to_string(),
+            uuid: "advisor-result".to_string(),
+            timestamp: "2026-07-17T10:00:01Z".to_string(),
+            message: super::super::entry::EntryMessage {
+                role: "assistant".to_string(),
+                model: "claude-sonnet-5".to_string(),
+                content: Some(content),
+                stop_reason: Some("end_turn".to_string()),
+                usage: super::super::entry::EntryUsage {
+                    iterations: vec![super::super::entry::IterationUsage {
+                        iteration_type: "advisor_message".to_string(),
+                        model: Some("claude-opus-4-8".to_string()),
+                    }],
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::AI(ai)) => {
+                assert_eq!(ai.blocks.len(), 1);
+                assert_eq!(ai.blocks[0].block_type, "tool_result");
+                assert_eq!(ai.blocks[0].tool_id, "srvtoolu_01ABC");
+                assert_eq!(ai.blocks[0].content, "You're on the right track...");
+                assert!(!ai.blocks[0].is_error);
+                assert_eq!(ai.blocks[0].advisor_model, "claude-opus-4-8");
+            }
+            other => panic!("Expected AI message, got {other:?}"),
         }
     }
 

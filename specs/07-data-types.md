@@ -61,6 +61,7 @@ classDiagram
         +hook_metadata: string
         +tool_result_json: string
         +is_orphan: boolean
+        +advisor_model: string
     }
 
     class LastOutput {
@@ -200,6 +201,7 @@ type TaskStatus = "pending" | "in_progress" | "completed" | "cancelled";
 | `subagent_ongoing`  | `true` if the spawned agent is still running                               |
 | `is_orphan`         | `true` for tool calls from discarded/rewound timelines                     |
 | `hook_metadata`     | Pretty-printed JSON of all hook attachment key-value pairs                 |
+| `advisor_model`     | Set only for the `advisor` tool call — the model that produced the advice  |
 
 ---
 

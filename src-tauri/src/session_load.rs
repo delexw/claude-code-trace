@@ -403,6 +403,7 @@ fn lighten_item(it: &crate::convert::FrontendDisplayItem) -> crate::convert::Fro
         is_deferred: it.is_deferred,
         hook_source_agent_name: it.hook_source_agent_name.clone(),
         hook_requesting_agent_uuid: it.hook_requesting_agent_uuid.clone(),
+        advisor_model: it.advisor_model.clone(),
     }
 }
 
@@ -717,6 +718,7 @@ mod tests {
             is_deferred: false,
             hook_source_agent_name: String::new(),
             hook_requesting_agent_uuid: String::new(),
+            advisor_model: String::new(),
         }
     }
 

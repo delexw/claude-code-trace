@@ -53,6 +53,8 @@ pub struct DisplayItem {
     // v2.1.186+: agent attribution for cross-session permission prompts from background subagents.
     pub hook_source_agent_name: String,
     pub hook_requesting_agent_uuid: String,
+    /// For the advisor tool call: the model that produced the advice (e.g. "claude-opus-4-8").
+    pub advisor_model: String,
 }
 
 impl Default for DisplayItem {
@@ -83,6 +85,7 @@ impl Default for DisplayItem {
             is_deferred: false,
             hook_source_agent_name: String::new(),
             hook_requesting_agent_uuid: String::new(),
+            advisor_model: String::new(),
         }
     }
 }
@@ -252,6 +255,33 @@ struct PendingTool {
     timestamp: DateTime<Utc>,
 }
 
+/// Fills in a pending ToolCall/Subagent DisplayItem's result once its matching "tool_result"
+/// block arrives, or emits a standalone Output item if no matching call was pending (orphan
+/// result). Shared by both the non-meta (advisor) and meta (every other tool) result paths.
+fn resolve_tool_result(
+    items: &mut Vec<DisplayItem>,
+    pending: &mut HashMap<String, PendingTool>,
+    b: &ContentBlock,
+    ts: DateTime<Utc>,
+) {
+    if let Some(p) = pending.remove(&b.tool_id) {
+        items[p.index].tool_result = b.content.clone();
+        items[p.index].tool_result_json = b.content_json.clone();
+        items[p.index].tool_error = b.is_error;
+        if !b.advisor_model.is_empty() {
+            items[p.index].advisor_model = b.advisor_model.clone();
+        }
+        let dur = ts.signed_duration_since(p.timestamp);
+        items[p.index].duration_ms = dur.num_milliseconds();
+    } else {
+        items.push(DisplayItem {
+            item_type: DisplayItemType::Output,
+            text: b.content.clone(),
+            ..Default::default()
+        });
+    }
+}
+
 fn merge_ai_buffer(buf: &[AIMsg], orphan_pending: bool) -> Chunk {
     let mut texts: Vec<String> = Vec::new();
     let mut thinking = 0usize;
@@ -329,6 +359,7 @@ fn merge_ai_buffer(buf: &[AIMsg], orphan_pending: bool) -> Chunk {
                                 tool_input: b.tool_input.clone(),
                                 tool_summary: summary,
                                 tool_category: category,
+                                advisor_model: b.advisor_model.clone(),
                                 ..Default::default()
                             });
                         }
@@ -340,6 +371,12 @@ fn merge_ai_buffer(buf: &[AIMsg], orphan_pending: bool) -> Chunk {
                             },
                         );
                     }
+                    // The advisor tool's result arrives as a "tool_result" block inside a
+                    // non-meta (assistant-role) AIMsg, unlike every other tool whose result
+                    // arrives via a meta (user-role) AIMsg. Same pairing logic applies.
+                    "tool_result" => {
+                        resolve_tool_result(&mut items, &mut pending, b, m.timestamp);
+                    }
                     _ => {}
                 }
             }
@@ -347,19 +384,7 @@ fn merge_ai_buffer(buf: &[AIMsg], orphan_pending: bool) -> Chunk {
             for b in &m.blocks {
                 match b.block_type.as_str() {
                     "tool_result" => {
-                        if let Some(p) = pending.remove(&b.tool_id) {
-                            items[p.index].tool_result = b.content.clone();
-                            items[p.index].tool_result_json = b.content_json.clone();
-                            items[p.index].tool_error = b.is_error;
-                            let dur = m.timestamp.signed_duration_since(p.timestamp);
-                            items[p.index].duration_ms = dur.num_milliseconds();
-                        } else {
-                            items.push(DisplayItem {
-                                item_type: DisplayItemType::Output,
-                                text: b.content.clone(),
-                                ..Default::default()
-                            });
-                        }
+                        resolve_tool_result(&mut items, &mut pending, b, m.timestamp);
                     }
                     "teammate" => {
                         items.push(DisplayItem {
@@ -567,6 +592,53 @@ mod tests {
             !items[0].is_deferred,
             "matched tool_use should not be deferred"
         );
+    }
+
+    #[test]
+    fn advisor_tool_result_in_non_meta_message_still_pairs_with_its_call() {
+        // The advisor tool's call ("server_tool_use") and result ("advisor_tool_result") both
+        // arrive as non-meta (assistant-role) AIMsgs — classify.rs translates them to ordinary
+        // "tool_use"/"tool_result" ContentBlocks, but unlike every other tool, the result here
+        // is NOT wrapped in a meta (user-role) AIMsg. Confirms merge_ai_buffer's non-meta
+        // branch also resolves pending tool_use blocks, not just the meta branch.
+        let tool_id = "srvtoolu_01ABC";
+        let msgs = vec![
+            ClassifiedMsg::AI(make_ai_msg(vec![tool_use_block(tool_id, "advisor")], false)),
+            ClassifiedMsg::AI(make_ai_msg(
+                vec![tool_result_block(tool_id, "You're on the right track...")],
+                false,
+            )),
+        ];
+        let chunks = build_chunks(&msgs);
+        assert_eq!(chunks.len(), 1);
+        let items = &chunks[0].items;
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].item_type, DisplayItemType::ToolCall);
+        assert_eq!(items[0].tool_name, "advisor");
+        assert_eq!(items[0].tool_result, "You're on the right track...");
+        assert!(
+            !items[0].is_deferred,
+            "advisor tool_use paired via non-meta tool_result should not be deferred"
+        );
+    }
+
+    #[test]
+    fn advisor_model_from_result_block_backfills_the_call_item() {
+        // classify.rs stamps advisor_model on both the call and result blocks (both come from
+        // the same entry's usage.iterations). Confirm merge_ai_buffer surfaces it on the final
+        // ToolCall item even when only the result block carries it.
+        let tool_id = "srvtoolu_01ABC";
+        let mut call = tool_use_block(tool_id, "advisor");
+        call.advisor_model = String::new();
+        let mut result = tool_result_block(tool_id, "You're on the right track...");
+        result.advisor_model = "claude-opus-4-8".to_string();
+        let msgs = vec![
+            ClassifiedMsg::AI(make_ai_msg(vec![call], false)),
+            ClassifiedMsg::AI(make_ai_msg(vec![result], false)),
+        ];
+        let chunks = build_chunks(&msgs);
+        let items = &chunks[0].items;
+        assert_eq!(items[0].advisor_model, "claude-opus-4-8");
     }
 
     #[test]

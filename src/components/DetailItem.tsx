@@ -8,9 +8,10 @@ import {
   truncate,
   parseEditInput,
   computeEditDiff,
+  shortModel,
 } from "../lib/format";
 import type { DiffLineKind } from "../lib/format";
-import { getTeamColor } from "../lib/theme";
+import { getTeamColor, getModelColor } from "../lib/theme";
 import { StatsBar, useSubagentStats } from "./StatsBar";
 import { PopoutModal } from "./PopoutModal";
 import { OngoingDots } from "./OngoingDots";
@@ -116,6 +117,11 @@ export function DetailItem({
         <span className="detail-item__name" style={teamClr ? { color: teamClr } : undefined}>
           {name}
         </span>
+        {item.advisor_model && (
+          <span className="message__model" style={{ color: getModelColor(item.advisor_model) }}>
+            {shortModel(item.advisor_model)}
+          </span>
+        )}
         <span className="detail-item__summary">{summary}</span>
         {item.is_orphan && <span className="detail-item__orphan-badge">orphan</span>}
         {item.agent_id && <span className="detail-item__agent-id">{item.agent_id}</span>}
@@ -176,6 +182,14 @@ export function DetailItem({
             <>
               <span className="popout-modal__icon">{icon}</span>
               <span className="popout-modal__name">{name}</span>
+              {item.advisor_model && (
+                <span
+                  className="message__model"
+                  style={{ color: getModelColor(item.advisor_model) }}
+                >
+                  {shortModel(item.advisor_model)}
+                </span>
+              )}
               {item.tool_summary && (
                 <span className="popout-modal__summary">{item.tool_summary}</span>
               )}

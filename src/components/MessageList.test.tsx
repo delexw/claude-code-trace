@@ -254,6 +254,7 @@ describe("MessageList", () => {
             is_orphan: false,
             hook_source_agent_name: "",
             hook_requesting_agent_uuid: "",
+            advisor_model: "",
           },
         ],
       }),

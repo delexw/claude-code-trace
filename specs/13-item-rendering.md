@@ -56,6 +56,10 @@ The three "introspection" functions are mirrored between web (`DetailItem.tsx`) 
 | `TeammateMessage` | `team_member_name` or `"Teammate"` | `text.slice(0,100)` (web) / `text` (TUI)       | `ClaudeIcon`                                    | `◈` (U+25C8)       |
 | `HookEvent`       | `hook_event` or `"Hook"`           | `hook_name` + `: ` + truncated `hook_command`  | `VscExtensions` (hook icon)                     | `⚡` (U+26A1)      |
 
+> **Parity gap.** When `item.advisor_model` is non-empty (the `advisor` tool call), web renders
+> a colour-coded model badge next to the name (`DetailItem.tsx`, via `getModelColor`/`shortModel`).
+> `tui-py` has no equivalent yet — `advisor_model` isn't referenced anywhere under `tui-py/`.
+
 ### Web Tool Category Icons (`Icons.tsx`)
 
 ```mermaid

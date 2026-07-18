@@ -64,6 +64,8 @@ export interface DisplayItem {
   hook_source_agent_name: string;
   /** v2.1.186+: session UUID of the background subagent requesting permission. */
   hook_requesting_agent_uuid: string;
+  /** For the advisor tool call: the model that produced the advice (e.g. "claude-opus-4-8"). */
+  advisor_model: string;
 }
 
 export interface LastOutput {

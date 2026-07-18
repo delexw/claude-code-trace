@@ -33,6 +33,7 @@ function makeItem(overrides: Partial<DisplayItem> = {}): DisplayItem {
     is_orphan: false,
     hook_source_agent_name: "",
     hook_requesting_agent_uuid: "",
+    advisor_model: "",
     ...overrides,
   };
 }
@@ -321,6 +322,40 @@ describe("DetailItem", () => {
     expect(screen.getByText("Input")).toBeInTheDocument();
     expect(screen.getByText("Output")).toBeInTheDocument();
     expect(screen.getByText("file content here")).toBeInTheDocument();
+  });
+
+  it("shows the advisor model badge next to the tool name in the header", () => {
+    render(
+      <DetailItem
+        item={makeItem({
+          tool_name: "advisor",
+          advisor_model: "claude-opus-4-8",
+          tool_result: "You're on the right track...",
+        })}
+        index={0}
+        isSelected={false}
+        isExpanded={false}
+        onToggle={vi.fn()}
+        onToggleExpand={vi.fn()}
+        onSelect={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("opus4.8")).toBeInTheDocument();
+  });
+
+  it("omits the model badge when advisor_model is empty", () => {
+    render(
+      <DetailItem
+        item={makeItem({ tool_name: "Read" })}
+        index={0}
+        isSelected={false}
+        isExpanded={false}
+        onToggle={vi.fn()}
+        onToggleExpand={vi.fn()}
+        onSelect={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText("opus4.8")).not.toBeInTheDocument();
   });
 
   it("pretty-prints JSON tool_result as a code block", () => {

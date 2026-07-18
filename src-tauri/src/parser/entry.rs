@@ -264,6 +264,31 @@ pub struct EntryUsage {
     /// Nested format (v2.1.152+). Takes precedence when non-zero.
     #[serde(default)]
     pub cache_creation: Option<CacheCreationUsage>,
+    /// Per-iteration usage breakdown. The advisor tool call (a single logical turn) actually
+    /// spans multiple model invocations under the hood — the caller's own message plus a
+    /// nested call to the advisor model — and Claude Code records each as one entry here.
+    #[serde(default)]
+    pub iterations: Vec<IterationUsage>,
+}
+
+impl EntryUsage {
+    /// The model used for the advisor's own reasoning, when this entry's turn included an
+    /// advisor invocation. `None` for ordinary turns with no advisor call.
+    pub fn advisor_model(&self) -> Option<String> {
+        self.iterations
+            .iter()
+            .find(|it| it.iteration_type == "advisor_message")
+            .and_then(|it| it.model.clone())
+    }
+}
+
+/// One entry in `usage.iterations` — a single model invocation within a turn.
+#[derive(Debug, Deserialize, Default, Clone)]
+pub struct IterationUsage {
+    #[serde(default, rename = "type")]
+    pub iteration_type: String,
+    #[serde(default)]
+    pub model: Option<String>,
 }
 
 impl EntryUsage {
@@ -445,6 +470,29 @@ mod tests {
         let usage: EntryUsage = serde_json::from_str(json_str).unwrap();
         assert_eq!(usage.cache_creation_input_tokens, 200);
         assert_eq!(usage.effective_cache_creation_input_tokens(), 200);
+    }
+
+    // --- EntryUsage::advisor_model tests ---
+
+    #[test]
+    fn advisor_model_found_in_iterations() {
+        let json_str = r#"{"iterations":[{"type":"message"},{"type":"advisor_message","model":"claude-opus-4-8"},{"type":"message"}]}"#;
+        let usage: EntryUsage = serde_json::from_str(json_str).unwrap();
+        assert_eq!(usage.advisor_model(), Some("claude-opus-4-8".to_string()));
+    }
+
+    #[test]
+    fn advisor_model_absent_when_no_advisor_iteration() {
+        let json_str = r#"{"iterations":[{"type":"message"}]}"#;
+        let usage: EntryUsage = serde_json::from_str(json_str).unwrap();
+        assert_eq!(usage.advisor_model(), None);
+    }
+
+    #[test]
+    fn advisor_model_absent_when_no_iterations_field() {
+        let json_str = r#"{"input_tokens":10}"#;
+        let usage: EntryUsage = serde_json::from_str(json_str).unwrap();
+        assert_eq!(usage.advisor_model(), None);
     }
 
     // --- parse_entry tests ---

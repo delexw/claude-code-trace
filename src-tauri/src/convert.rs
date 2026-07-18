@@ -49,6 +49,8 @@ pub struct FrontendDisplayItem {
     // v2.1.186+: agent attribution for cross-session permission prompts from background subagents.
     pub hook_source_agent_name: String,
     pub hook_requesting_agent_uuid: String,
+    /// For the advisor tool call: the model that produced the advice (e.g. "claude-opus-4-8").
+    pub advisor_model: String,
 }
 
 /// Frontend last output.
@@ -295,6 +297,7 @@ fn convert_display_items(
                 is_deferred: it.is_deferred,
                 hook_source_agent_name: it.hook_source_agent_name.clone(),
                 hook_requesting_agent_uuid: it.hook_requesting_agent_uuid.clone(),
+                advisor_model: it.advisor_model.clone(),
             };
 
             // Link subagent process if available (Subagent items and ToolCall items like Skill).
@@ -850,6 +853,30 @@ mod tests {
 
         assert_eq!(result.len(), 1);
         assert!(!result[0].is_deferred);
+    }
+
+    #[test]
+    fn advisor_model_is_propagated_to_frontend_display_item() {
+        use crate::parser::chunk::{DisplayItem, DisplayItemType};
+
+        let items = vec![DisplayItem {
+            item_type: DisplayItemType::ToolCall,
+            tool_id: "srvtoolu_01ABC".to_string(),
+            tool_name: "advisor".to_string(),
+            advisor_model: "claude-opus-4-8".to_string(),
+            ..Default::default()
+        }];
+
+        let subagents = vec![];
+        let graph = ProcGraph::new(&subagents);
+        let color_map = std::collections::HashMap::new();
+        let mut pool_idx = 0;
+
+        let result =
+            convert_display_items(&items, &graph, &color_map, &mut pool_idx, &HashSet::new());
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].advisor_model, "claude-opus-4-8");
     }
 
     #[test]
