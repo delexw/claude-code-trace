@@ -147,8 +147,16 @@ fn resolve_live_chain_uuids(entries: &[Entry]) -> HashSet<String> {
         }
     }
 
-    // Step 1: prefer the explicit leafUuid hint when it resolves to a known entry.
-    let live_tip = if !leaf_hint.is_empty() && uuid_idx.contains_key(&leaf_hint) {
+    // Step 1: prefer the explicit leafUuid hint when it resolves to a known entry that is
+    // still an actual leaf (no children). A `last-prompt` checkpoint's leafUuid is only a
+    // snapshot taken when that prompt was submitted — if the conversation continued in the
+    // same file afterward (normal foreground use, not a background-agent resume), later
+    // entries chain off of it and it is no longer the tip. Trusting a stale hint here would
+    // cut off everything written after the checkpoint.
+    let live_tip = if !leaf_hint.is_empty()
+        && uuid_idx.contains_key(&leaf_hint)
+        && !has_child.contains(&leaf_hint)
+    {
         leaf_hint
     } else {
         // Step 2: fallback — pick the last non-sidechain leaf entry in file order.
@@ -2424,6 +2432,38 @@ mod tests {
         assert!(
             !set.contains("D"),
             "dead-end after live tip must be excluded"
+        );
+    }
+
+    #[test]
+    fn live_chain_stale_leaf_uuid_hint_with_children_is_ignored() {
+        // Real-world bug: a `last-prompt` checkpoint entry stamps leafUuid at prompt-submit
+        // time (pointing at B), but the conversation continues live in the same file
+        // afterward (C, D) with no further entry updating leafUuid. B now has a child (C),
+        // so it is stale and must NOT be trusted as the tip — D (the true terminal node)
+        // must win instead.
+        let entries = vec![
+            make_entry("A", "", "", false),
+            make_entry("B", "A", "", false),
+            Entry {
+                // last-prompt checkpoint written when B was still the tip.
+                uuid: String::new(),
+                leaf_uuid: "B".to_string(),
+                ..Default::default()
+            },
+            make_entry("C", "B", "", false), // conversation continues past the stale hint
+            make_entry("D", "C", "", false), // true live tip
+        ];
+        let set = resolve_live_chain_uuids(&entries);
+        assert!(set.contains("A"), "root must be included");
+        assert!(set.contains("B"), "stale hint node is still on the chain");
+        assert!(
+            set.contains("C"),
+            "entry chained after the stale hint must be included"
+        );
+        assert!(
+            set.contains("D"),
+            "true live tip must win over a stale leafUuid hint"
         );
     }
 
