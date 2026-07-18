@@ -51,25 +51,40 @@ CCTRACE_HOST_PORT=9090 CLAUDE_HOME=/srv/claude docker compose up
 All runtime knobs are environment variables, so you can override them with
 `-e VAR=value` on `docker run` or under `environment:` in compose.
 
-| Variable             | Default     | What it does                                 |
-| -------------------- | ----------- | -------------------------------------------- |
-| `CCTRACE_HTTP_HOST`  | `0.0.0.0`   | Bind host for the HTTP server                |
-| `CCTRACE_HTTP_PORT`  | `1421`      | Bind port for the HTTP server                |
-| `CCTRACE_STATIC_DIR` | `/app/dist` | Directory of static frontend assets to serve |
+| Variable                  | Default     | What it does                                    |
+| ------------------------- | ----------- | ----------------------------------------------- |
+| `CCTRACE_HTTP_HOST`       | `0.0.0.0`   | Bind host for the HTTP server                   |
+| `CCTRACE_HTTP_PORT`       | `1421`      | Bind port for the HTTP server                   |
+| `CCTRACE_STATIC_DIR`      | `/app/dist` | Directory of static frontend assets to serve    |
+| `CCTRACE_ALLOWED_ORIGINS` | (unset)     | Extra CORS origins, comma-separated (see below) |
 
 Outside Docker (i.e. the normal desktop/web app) these variables are not
 set, and the server falls back to the historical defaults
 (`127.0.0.1:11423`, no static assets). So adding these vars has no effect on
 native installations.
 
+In the default Compose setup, the frontend and API are served same-origin
+(both on port 1421 via `CCTRACE_STATIC_DIR`), so `CCTRACE_ALLOWED_ORIGINS`
+isn't needed for the bundled UI to work — it only matters if you're reaching
+this container's API from a _different_ origin (e.g. a reverse proxy on
+another hostname). The app's Settings UI can also configure extra allowed
+origins; those are stored in `~/.config/claude-code-trace/settings.json`
+inside the container, which the shipped `docker-compose.yml` persists via a
+named `cctrace-config` volume (and the Dockerfile's own `VOLUME` declaration
+gives plain `docker run` an anonymous volume for the same path) — so they
+survive a container recreate either way. Both mechanisms compose (the
+allowlist is a union), so you can use either or both.
+
 ## Volumes
 
-| Container path      | Purpose                                                            |
-| ------------------- | ------------------------------------------------------------------ |
-| `/home/app/.claude` | Source of session JSONL files (mount your host's `~/.claude` here) |
+| Container path      | Purpose                                                              |
+| ------------------- | -------------------------------------------------------------------- |
+| `/home/app/.claude` | Source of session JSONL files (mount your host's `~/.claude` here)   |
+| `/home/app/.config` | `settings.json` — persisted read-write so settings survive recreates |
 
-The app only needs to **read** session logs, so mounting read-only (`:ro`)
-is recommended and is what the shipped `docker-compose.yml` does.
+The app only needs to **read** session logs, so mounting `/home/app/.claude`
+read-only (`:ro`) is recommended and is what the shipped `docker-compose.yml`
+does. `/home/app/.config` needs to stay read-write since the app saves to it.
 
 If you keep session logs somewhere other than `~/.claude/projects` — e.g.
 `/srv/claude` — mount that directory instead, or point the app at a

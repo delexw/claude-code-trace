@@ -7,7 +7,7 @@
 //! cache window, not once per `discover_sessions_cached` call. Windows has no
 //! `kill`: liveness degrades to "closed" there.
 
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 /// True if `pid` is a live process. `kill -0 <pid>` sends no signal — it only
 /// performs the permission/existence check and exits 0 iff the process exists.
@@ -17,7 +17,16 @@ pub fn is_pid_alive(pid: i64) -> bool {
     }
     #[cfg(unix)]
     {
-        match Command::new("kill").args(["-0", &pid.to_string()]).status() {
+        // Liveness is read entirely from the exit code — `kill`'s own
+        // "No such process" stderr message on a dead pid is expected and
+        // meaningless here, so it's suppressed rather than leaking into the
+        // app's logs on every TTL-cache refresh for a permanently-dead entry.
+        match Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+        {
             Ok(s) => s.success(),
             Err(e) => {
                 // Distinguish "couldn't run kill at all" (PATH/sandbox/resource

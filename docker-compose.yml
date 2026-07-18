@@ -18,9 +18,18 @@ services:
       # Claude Code writes sessions to ~/.claude/projects on the host.
       # Mount read-only — the app never needs to write here.
       - "${CLAUDE_HOME:-${HOME}/.claude}:/home/app/.claude:ro"
+      # Persist settings.json (projects dir, WSL distros, allowed CORS
+      # origins) across container recreation — without this it only lives in
+      # the container's writable layer and resets to {} on every recreate.
+      - cctrace-config:/home/app/.config
     healthcheck:
-      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/1421"]
+      # CMD-SHELL always runs via /bin/sh, which on this image is dash and
+      # doesn't support the /dev/tcp redirect below — invoke bash explicitly.
+      test: ["CMD", "/bin/bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/1421"]
       interval: 30s
       timeout: 5s
       start_period: 10s
       retries: 3
+
+volumes:
+  cctrace-config:

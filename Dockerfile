@@ -98,7 +98,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         dumb-init \
         ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
-    && useradd --create-home --home-dir /home/app --shell /bin/bash --uid 1000 app
+    && useradd --create-home --home-dir /home/app --shell /bin/bash --uid 1000 app \
+    && mkdir -p /home/app/.config \
+    && chown app:app /home/app/.config
 
 WORKDIR /app
 
@@ -118,10 +120,16 @@ USER app
 # Mountpoint for the host's ~/.claude directory — session JSONL files live here.
 VOLUME ["/home/app/.claude"]
 
+# Persists settings.json (XDG_CONFIG_HOME above) across container recreation.
+# `docker run` without an explicit -v for this path still gets an anonymous
+# volume, so settings survive a `docker stop && docker run` cycle; compose
+# users get a named volume instead (see docker-compose.yml).
+VOLUME ["/home/app/.config"]
+
 EXPOSE 1421
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD /bin/sh -c 'exec 3<>/dev/tcp/127.0.0.1/${CCTRACE_HTTP_PORT:-1421}' || exit 1
+    CMD /bin/bash -c 'exec 3<>/dev/tcp/127.0.0.1/${CCTRACE_HTTP_PORT:-1421}' || exit 1
 
 ENTRYPOINT ["dumb-init", "--", "/usr/local/bin/docker-entrypoint.sh"]
 CMD ["claude-code-trace", "--headless"]
