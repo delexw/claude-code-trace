@@ -3,6 +3,80 @@
 All notable changes to claude-code-trace are documented here. Versions follow
 [semantic versioning](https://semver.org/).
 
+## [0.12.0] — 2026-07-18
+
+This release closes a real privacy gap: the backend's CORS policy allowed any origin, so
+any site you visited could read your local Claude session data — prompts, code, tool
+output — while the app was running. The fix ships alongside a new Settings UI for
+managing extra allowed origins yourself. Also new: an advisor-tool model badge in the
+detail view, and a `desktop` Cargo feature that lets the server build and run without
+webkit2gtk on machines that don't have it. Plus fixes to the Docker image's healthcheck
+and settings persistence, a parser live-chain edge case, and Sonnet 5's inlined
+system-reminders.
+
+### Added
+
+- **Configurable CORS-allowed origins in Settings**
+  ([`2ae2725`](https://github.com/delexw/claude-code-trace/commit/2ae2725)).
+  You can now add extra CORS-allowed origins from the Settings modal instead of only via
+  the `CCTRACE_ALLOWED_ORIGINS` environment variable at launch. Changes take effect
+  immediately — no server restart required, matching every other setting.
+
+- **Advisor tool model badge**
+  ([`5f372a8`](https://github.com/delexw/claude-code-trace/commit/5f372a8)).
+  Sessions that call the `advisor` tool now show which model produced the advice as a
+  badge next to the tool name in the detail view. (Web only for now — the TUI doesn't
+  render this badge yet.)
+
+- **Headless-only builds without webkit2gtk**
+  ([`bc188e0`](https://github.com/delexw/claude-code-trace/commit/bc188e0), @smoser).
+  A new `desktop` Cargo feature (on by default) gates the Tauri/webview stack, so building
+  with `--no-default-features` produces a headless HTTP-server-only binary that links no
+  webkit2gtk — useful for machines and base images (e.g. Wolfi/Chainguard) without a
+  display or that library available. Desktop builds are unaffected.
+
+### Fixed
+
+- **CORS no longer allows any origin**
+  ([`0b0432a`](https://github.com/delexw/claude-code-trace/commit/0b0432a), @Guthman).
+  The backend previously used a permissive CORS policy, returning
+  `Access-Control-Allow-Origin: *` from its unauthenticated local server — any site you
+  visited in a browser could read your local session data cross-origin. CORS is now
+  scoped to an allowlist of the web UI's own origins (extendable via
+  `CCTRACE_ALLOWED_ORIGINS` or the new Settings UI above), with methods limited to
+  GET/POST.
+
+- **Docker image healthcheck, settings persistence, and log spam**
+  ([`de2f9a1`](https://github.com/delexw/claude-code-trace/commit/de2f9a1)).
+  The container's healthcheck used a `/dev/tcp/...` redirect that the image's `dash`
+  shell doesn't support, so it reported unhealthy forever; it now runs under `bash`.
+  `settings.json` lived only in the container's writable layer and reset to `{}` on every
+  recreate — it's now persisted to a named volume. A dead process's own "No such
+  process" diagnostic output no longer leaks into the app's logs on every liveness
+  recheck.
+
+- **Live sessions no longer lose messages written after a stale checkpoint**
+  ([`29e8682`](https://github.com/delexw/claude-code-trace/commit/29e8682)).
+  A `last-prompt` checkpoint's `leafUuid` hint is stamped at prompt-submit time, but if
+  the conversation kept going live in the same file afterward, trusting the hint as the
+  tip cut off everything written after it. The parser now falls back to the true last
+  leaf entry when the hint has children.
+
+- **Sonnet 5 messages with inlined system-reminders**
+  ([`7c39e04`](https://github.com/delexw/claude-code-trace/commit/7c39e04)).
+  Claude Code v2.1.201 started inlining harness reminders as `<system-reminder>` tags at
+  the start of user entries in Sonnet 5 sessions instead of using dedicated entries. The
+  parser was treating any such entry as noise and silently dropping the user's actual
+  message; mixed entries are now classified correctly with the reminder stripped.
+
+- **Stale libc constraints removed from the lockfile**
+  ([`c00dd36`](https://github.com/delexw/claude-code-trace/commit/c00dd36)).
+  `package-lock.json` carried redundant `libc` platform tags on several `@oxfmt`/`@oxlint`
+  native-binary optional dependencies, which could make `npm ci` reject a valid platform
+  match on some Linux base images. The tags are removed.
+
+[0.12.0]: https://github.com/delexw/claude-code-trace/releases/tag/v0.12.0
+
 ## [0.11.0] — 2026-07-10
 
 This release turns the viewer into a launchpad: you can resume, fork, or jump to the
