@@ -13,12 +13,14 @@ const makeSettings = (
   projects_dir: string | null,
   effective_dir_exists = true,
   wsl_distros: string[] = [],
+  allowed_origins: string[] = [],
 ) => ({
   projects_dir,
   default_dir: DEFAULT_DIR,
   effective_dir: projects_dir ?? DEFAULT_DIR,
   effective_dir_exists,
   wsl_distros,
+  allowed_origins,
 });
 
 describe("SettingsModal", () => {
@@ -33,6 +35,7 @@ describe("SettingsModal", () => {
       if (cmd === "get_settings") return Promise.resolve(makeSettings(null));
       if (cmd === "set_projects_dir") return Promise.resolve(makeSettings(null));
       if (cmd === "set_wsl_distros") return Promise.resolve(makeSettings(null));
+      if (cmd === "set_allowed_origins") return Promise.resolve(makeSettings(null));
       if (cmd === "list_wsl_distros") return Promise.resolve([]);
       return Promise.resolve();
     });
@@ -233,6 +236,91 @@ describe("SettingsModal", () => {
     });
     expect(onSaved).toHaveBeenCalled();
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it("shows configured allowed origins in the textarea", async () => {
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "get_settings") {
+        return Promise.resolve(
+          makeSettings(null, true, [], ["https://a.example", "https://b.example"]),
+        );
+      }
+      return Promise.resolve();
+    });
+    render(
+      <SettingsModal
+        onClose={onClose}
+        onSaved={onSaved}
+        fontScale={1}
+        onFontScaleChange={onFontScaleChange}
+        recapPreview={true}
+        onRecapPreviewChange={onRecapPreviewChange}
+      />,
+    );
+
+    const textarea = await screen.findByLabelText("Allowed Origins (CORS)");
+    expect((textarea as HTMLTextAreaElement).value).toBe("https://a.example\nhttps://b.example");
+  });
+
+  it("calls set_allowed_origins with parsed origins on save", async () => {
+    render(
+      <SettingsModal
+        onClose={onClose}
+        onSaved={onSaved}
+        fontScale={1}
+        onFontScaleChange={onFontScaleChange}
+        recapPreview={true}
+        onRecapPreviewChange={onRecapPreviewChange}
+      />,
+    );
+    await waitFor(() => expect(screen.getByText(`Default: ${DEFAULT_DIR}`)).toBeInTheDocument());
+
+    const textarea = screen.getByLabelText("Allowed Origins (CORS)");
+    fireEvent.change(textarea, {
+      target: { value: "https://a.example\n https://b.example ,https://c.example" },
+    });
+    fireEvent.click(screen.getByText("Save"));
+
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("set_allowed_origins", {
+        origins: ["https://a.example", "https://b.example", "https://c.example"],
+      });
+    });
+    expect(onSaved).toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("shows error when allowed-origins save fails", async () => {
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "get_settings") return Promise.resolve(makeSettings(null));
+      if (cmd === "set_projects_dir") return Promise.resolve(makeSettings(null));
+      if (cmd === "set_wsl_distros") return Promise.resolve(makeSettings(null));
+      if (cmd === "set_allowed_origins")
+        return Promise.reject("invalid origin: bad (expected e.g. http://example.com:8080)");
+      return Promise.resolve();
+    });
+    render(
+      <SettingsModal
+        onClose={onClose}
+        onSaved={onSaved}
+        fontScale={1}
+        onFontScaleChange={onFontScaleChange}
+        recapPreview={true}
+        onRecapPreviewChange={onRecapPreviewChange}
+      />,
+    );
+    await waitFor(() => expect(screen.getByText(`Default: ${DEFAULT_DIR}`)).toBeInTheDocument());
+
+    const textarea = screen.getByLabelText("Allowed Origins (CORS)");
+    fireEvent.change(textarea, { target: { value: "bad" } });
+    fireEvent.click(screen.getByText("Save"));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("invalid origin: bad (expected e.g. http://example.com:8080)"),
+      ).toBeInTheDocument();
+    });
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it("highlights the active font scale and applies a new one on click", async () => {

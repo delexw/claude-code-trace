@@ -16,6 +16,7 @@ permissions = [
   "allow-set-projects-dir",
   "allow-list-wsl-distros",
   "allow-set-wsl-distros",
+  "allow-set-allowed-origins",
   "allow-switch-to-browser",
   "allow-focus-session-window",
 ]
@@ -94,6 +95,11 @@ commands.allow = ["list_wsl_distros"]
 identifier = "allow-set-wsl-distros"
 description = "Allow setting the WSL distributions to discover"
 commands.allow = ["set_wsl_distros"]
+
+[[permission]]
+identifier = "allow-set-allowed-origins"
+description = "Allow setting extra CORS allowed origins"
+commands.allow = ["set_allowed_origins"]
 
 [[permission]]
 identifier = "allow-switch-to-browser"

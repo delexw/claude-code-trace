@@ -10,6 +10,11 @@ pub struct Settings {
     /// scanned for sessions (Windows host discovering sessions inside WSL).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub wsl_distros: Vec<String>,
+    /// Extra CORS origins allowed to call the local HTTP API, configured via
+    /// the Settings UI. Unioned at request time with the built-in defaults
+    /// and the `CCTRACE_ALLOWED_ORIGINS` env var — see `http_api::build_cors`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allowed_origins: Vec<String>,
 }
 
 fn settings_path() -> Result<PathBuf, String> {
@@ -69,13 +74,14 @@ mod tests {
         let settings: Settings = serde_json::from_str("{}").unwrap();
         assert!(settings.projects_dir.is_none());
         assert!(settings.wsl_distros.is_empty());
+        assert!(settings.allowed_origins.is_empty());
     }
 
     #[test]
     fn wsl_distros_roundtrip() {
         let settings = Settings {
-            projects_dir: None,
             wsl_distros: vec!["Ubuntu".to_string(), "Debian".to_string()],
+            ..Default::default()
         };
         let json = serde_json::to_string_pretty(&settings).unwrap();
         let loaded: Settings = serde_json::from_str(&json).unwrap();
@@ -87,5 +93,29 @@ mod tests {
         let settings = Settings::default();
         let json = serde_json::to_string(&settings).unwrap();
         assert!(!json.contains("wsl_distros"));
+    }
+
+    #[test]
+    fn allowed_origins_roundtrip() {
+        let settings = Settings {
+            allowed_origins: vec![
+                "http://a.example".to_string(),
+                "http://b.example".to_string(),
+            ],
+            ..Default::default()
+        };
+        let json = serde_json::to_string_pretty(&settings).unwrap();
+        let loaded: Settings = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            loaded.allowed_origins,
+            vec!["http://a.example", "http://b.example"]
+        );
+    }
+
+    #[test]
+    fn empty_allowed_origins_omitted_from_json() {
+        let settings = Settings::default();
+        let json = serde_json::to_string(&settings).unwrap();
+        assert!(!json.contains("allowed_origins"));
     }
 }

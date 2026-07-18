@@ -21,6 +21,10 @@ pub struct SettingsResponse {
     pub effective_dir_exists: bool,
     /// WSL distributions whose projects are also discovered.
     pub wsl_distros: Vec<String>,
+    /// Extra CORS origins allowed to call the local HTTP API, configured via
+    /// the Settings UI. Unioned at request time with the built-in defaults
+    /// and `CCTRACE_ALLOWED_ORIGINS` (see `http_api::build_cors`).
+    pub allowed_origins: Vec<String>,
     /// Whether this backend can focus a session's terminal window (see
     /// `commands::terminal::can_focus`). Drives the frontend's Focus button —
     /// true for any local + macOS backend, whether the frontend is the Tauri
@@ -49,6 +53,7 @@ pub fn build_response_pub(settings: &crate::settings::Settings) -> SettingsRespo
         effective_dir: effective.to_string_lossy().to_string(),
         effective_dir_exists,
         wsl_distros: settings.wsl_distros.clone(),
+        allowed_origins: settings.allowed_origins.clone(),
         can_focus: crate::commands::terminal::can_focus(),
     }
 }

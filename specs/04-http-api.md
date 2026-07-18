@@ -14,7 +14,7 @@ functionality as the Tauri desktop frontend. The server runs on port **11423** b
 graph TB
     subgraph Rust["Rust Backend (Axum)"]
         ROUTER["Axum Router\n/api/*"]
-        MW["Middleware\nCORS (any origin)\nJSON responses"]
+        MW["Middleware\nCORS (allowlisted origins)\nJSON responses"]
         STATE["Arc&lt;AppState&gt;"]
     end
 
@@ -304,11 +304,12 @@ the way the web frontend does.
 
 ## Configuration
 
-| Env var              | Default                  | Description                               |
-| -------------------- | ------------------------ | ----------------------------------------- |
-| `CCTRACE_HTTP_HOST`  | `127.0.0.1`              | Bind address                              |
-| `CCTRACE_HTTP_PORT`  | `11423` (Docker: `1421`) | Listen port                               |
-| `CCTRACE_STATIC_DIR` | (unset)                  | Directory to serve as static files at `/` |
+| Env var                   | Default                  | Description                                                 |
+| ------------------------- | ------------------------ | ----------------------------------------------------------- |
+| `CCTRACE_HTTP_HOST`       | `127.0.0.1`              | Bind address                                                |
+| `CCTRACE_HTTP_PORT`       | `11423` (Docker: `1421`) | Listen port                                                 |
+| `CCTRACE_STATIC_DIR`      | (unset)                  | Directory to serve as static files at `/`                   |
+| `CCTRACE_ALLOWED_ORIGINS` | (unset)                  | Extra CORS origins, comma-separated (see CORS Policy below) |
 
 The default port for native binaries is `11423` (defined in `http_api.rs:38` as
 `DEFAULT_HTTP_PORT`). The Docker image overrides this to `1421` via `CCTRACE_HTTP_PORT=1421` so
@@ -357,8 +358,26 @@ flowchart LR
 
 ## CORS Policy
 
-The HTTP server accepts requests from any origin (`Access-Control-Allow-Origin: *`) to support
-local browser-based development without proxy setup.
+The HTTP server checks every request's `Origin` header against an allowlist — never a wildcard.
+An origin is allowed only if it exactly matches one of (`http_api.rs::origin_allowed`):
+
+- The built-in dev/web UI defaults: `http://localhost:1420`, `http://127.0.0.1:1420`
+  (`DEFAULT_ALLOWED_ORIGINS`).
+- Extra origins from the `CCTRACE_ALLOWED_ORIGINS` env var (comma-separated), resolved once at
+  server startup.
+- Extra origins configured via the Settings UI (`Settings.allowed_origins`, set through
+  `POST /api/settings/origins`), checked live on every request — no restart required for a change
+  to take effect.
+
+The env var and the Settings-UI list are unioned, not exclusive — either or both can be used. The
+env var is the better fit for Docker/deployment (where `settings.json` may not survive a container
+restart without a volume mount); the Settings-UI field is for desktop/persistent-web use. Matching
+is exact-string only — no prefix, substring, or wildcard matching.
+
+The Tauri desktop webview never goes through this check — it talks to the backend over the IPC
+bridge, not HTTP. The Docker image doesn't need an allowlist entry either — it serves the frontend
+and API on the same origin (`CCTRACE_STATIC_DIR`), so browser requests there are same-origin and
+CORS doesn't apply.
 
 ---
 

@@ -9,6 +9,7 @@ interface SettingsResponse {
   effective_dir: string;
   effective_dir_exists: boolean;
   wsl_distros: string[];
+  allowed_origins: string[];
 }
 
 interface SettingsModalProps {
@@ -31,6 +32,16 @@ function mergeDistros(available: string[], configured: string[]): string[] {
   return [...available, ...configured.filter((d) => !seen.has(d))];
 }
 
+/** Turn textarea contents into a trimmed, non-empty origin list. Splits on
+ * newlines or commas so pasting the `CCTRACE_ALLOWED_ORIGINS` env var's own
+ * comma-separated format works too. Validation itself is the backend's job. */
+function parseOrigins(text: string): string[] {
+  return text
+    .split(/[\n,]/)
+    .map((o) => o.trim())
+    .filter((o) => o.length > 0);
+}
+
 export function SettingsModal({
   onClose,
   onSaved,
@@ -45,6 +56,7 @@ export function SettingsModal({
   const [effectiveDirExists, setEffectiveDirExists] = useState(true);
   const [availableDistros, setAvailableDistros] = useState<string[]>([]);
   const [selectedDistros, setSelectedDistros] = useState<Set<string>>(new Set());
+  const [allowedOriginsText, setAllowedOriginsText] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -54,6 +66,7 @@ export function SettingsModal({
     setEffectiveDir(res.effective_dir);
     setEffectiveDirExists(res.effective_dir_exists);
     setSelectedDistros(new Set(res.wsl_distros ?? []));
+    setAllowedOriginsText((res.allowed_origins ?? []).join("\n"));
   }, []);
 
   useEffect(() => {
@@ -93,7 +106,10 @@ export function SettingsModal({
       const wslRes = await invoke<SettingsResponse>("set_wsl_distros", {
         distros: [...selectedDistros],
       });
-      applyResponse(wslRes ?? dirRes);
+      const originsRes = await invoke<SettingsResponse>("set_allowed_origins", {
+        origins: parseOrigins(allowedOriginsText),
+      });
+      applyResponse(originsRes ?? wslRes ?? dirRes);
       onSaved();
       onClose();
     } catch (err) {
@@ -101,7 +117,7 @@ export function SettingsModal({
     } finally {
       setSaving(false);
     }
-  }, [projectsDir, selectedDistros, applyResponse, onSaved, onClose]);
+  }, [projectsDir, selectedDistros, allowedOriginsText, applyResponse, onSaved, onClose]);
 
   const handleReset = useCallback(async () => {
     setSaving(true);
@@ -135,7 +151,7 @@ export function SettingsModal({
       onClose={onClose}
       header={<span className="settings-modal__title">Settings</span>}
       initialWidth={520}
-      initialHeight={400}
+      initialHeight={460}
     >
       <div className="settings-modal">
         <label className="settings-modal__label" htmlFor="projects-dir">
@@ -193,6 +209,29 @@ export function SettingsModal({
             </div>
           </>
         )}
+
+        <label
+          className="settings-modal__label settings-modal__label--section"
+          htmlFor="allowed-origins"
+        >
+          Allowed Origins (CORS)
+        </label>
+        <p className="settings-modal__hint">
+          Extra origins allowed to call the local API (e.g. a reverse proxy or custom hostname), one
+          per line.
+        </p>
+        <textarea
+          id="allowed-origins"
+          className="settings-modal__textarea"
+          value={allowedOriginsText}
+          onChange={(e) => {
+            setAllowedOriginsText(e.target.value);
+            setError("");
+          }}
+          placeholder="https://cctrace.example.com"
+          spellCheck={false}
+          rows={3}
+        />
 
         <label className="settings-modal__label settings-modal__label--section">Font Size</label>
         <p className="settings-modal__hint">Zoom the whole interface in or out.</p>

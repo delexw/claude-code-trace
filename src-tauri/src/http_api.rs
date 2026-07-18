@@ -12,7 +12,7 @@ use axum::Router;
 use serde::Deserialize;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
-use tower_http::cors::CorsLayer;
+use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::services::ServeDir;
 
 use crate::parser::debuglog::*;
@@ -68,7 +68,10 @@ pub fn resolve_static_dir() -> Option<String> {
 /// `localhost:1420` and calls the API on port 11423 — a distinct origin — so
 /// these are allowlisted for CORS. The Tauri desktop webview talks to the
 /// backend over the IPC bridge (never HTTP), and the Docker image serves the UI
-/// same-origin, so neither needs an entry here.
+/// same-origin, so neither needs an entry here. Extra origins can be added
+/// statically via `CCTRACE_ALLOWED_ORIGINS` or live via the Settings UI
+/// (`Settings.allowed_origins`, checked per-request in `build_cors`); both
+/// compose with these defaults rather than replacing them.
 const DEFAULT_ALLOWED_ORIGINS: [&str; 2] = ["http://localhost:1420", "http://127.0.0.1:1420"];
 
 /// Split a raw `CCTRACE_ALLOWED_ORIGINS` value into individual origins,
@@ -84,8 +87,12 @@ fn parse_extra_origins(raw: Option<String>) -> Vec<String> {
         .collect()
 }
 
-/// Resolve the CORS origin allowlist: the built-in dev/web origins plus any
-/// added via the `CCTRACE_ALLOWED_ORIGINS` env var (comma-separated).
+/// Resolve the *static* half of the CORS origin allowlist: the built-in
+/// dev/web origins plus any added via the `CCTRACE_ALLOWED_ORIGINS` env var
+/// (comma-separated). Resolved once at startup — the env var never changes at
+/// runtime. The *live* half (origins configured via the Settings UI) is
+/// checked per-request in `build_cors`'s predicate; the two are unioned, not
+/// one replacing the other.
 fn resolve_allowed_origins() -> Vec<String> {
     let mut origins: Vec<String> = DEFAULT_ALLOWED_ORIGINS
         .iter()
@@ -97,17 +104,42 @@ fn resolve_allowed_origins() -> Vec<String> {
     origins
 }
 
+/// Exact-match check against the union of the static (default/env) and live
+/// (Settings-UI-configured) allowlists. No prefix/substring/wildcard
+/// matching — this is the function PR 206 hardened against a real
+/// cross-origin data leak; keep it exact.
+fn origin_allowed(origin: &str, static_origins: &[String], live_origins: &[String]) -> bool {
+    static_origins.iter().any(|o| o == origin) || live_origins.iter().any(|o| o == origin)
+}
+
 /// Build a CORS layer scoped to the allowlisted origins. This replaces a
 /// permissive `*` policy under which any website the user visited could read
 /// local Claude session data (prompts, code, tool output) cross-origin while
 /// the app was running.
-fn build_cors() -> CorsLayer {
-    let origins: Vec<HeaderValue> = resolve_allowed_origins()
-        .iter()
-        .filter_map(|o| HeaderValue::from_str(o).ok())
-        .collect();
+///
+/// The origin check is a live predicate rather than a static list so that
+/// origins added via the Settings UI (`Settings.allowed_origins`) take effect
+/// immediately, with no server restart — consistent with every other setting
+/// in this app. The static defaults/env var are resolved once; the
+/// Settings-UI list is re-read from `app_state` on every request.
+fn build_cors(app_state: Arc<AppState>) -> CorsLayer {
+    let static_origins = resolve_allowed_origins();
     CorsLayer::new()
-        .allow_origin(origins)
+        .allow_origin(AllowOrigin::predicate(
+            move |origin: &HeaderValue, _parts: &axum::http::request::Parts| {
+                let Ok(origin_str) = origin.to_str() else {
+                    return false;
+                };
+                // Fail closed on a poisoned lock — this is a security
+                // allowlist, not a feature that should fail open.
+                let live_origins = app_state
+                    .settings
+                    .lock()
+                    .map(|g| g.allowed_origins.clone())
+                    .unwrap_or_default();
+                origin_allowed(origin_str, &static_origins, &live_origins)
+            },
+        ))
         .allow_methods([Method::GET, Method::POST])
         .allow_headers([header::CONTENT_TYPE])
 }
@@ -137,6 +169,7 @@ async fn run_server(state: Arc<HttpState>) {
     let mut router = Router::new()
         .route("/api/settings", get(api_get_settings))
         .route("/api/settings/dir", post(api_set_projects_dir))
+        .route("/api/settings/origins", post(api_set_allowed_origins))
         .route(
             "/api/wsl/distros",
             get(api_list_wsl_distros).post(api_set_wsl_distros),
@@ -162,7 +195,8 @@ async fn run_server(state: Arc<HttpState>) {
         eprintln!("HTTP API: serving static assets from {dir}");
     }
 
-    let router = router.layer(build_cors()).with_state(state);
+    let cors_state = state.app_state.clone();
+    let router = router.layer(build_cors(cors_state)).with_state(state);
 
     let (host, port) = resolve_bind_addr();
     let addr = format!("{host}:{port}");
@@ -245,6 +279,35 @@ async fn api_set_projects_dir(
         }
     };
     guard.projects_dir = body.path;
+    if let Err(e) = crate::settings::save_settings(&guard) {
+        return err_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e);
+    }
+    ok_json(&crate::commands::settings::build_response_pub(&guard))
+}
+
+#[derive(Deserialize)]
+struct SetOriginsBody {
+    origins: Vec<String>,
+}
+
+async fn api_set_allowed_origins(
+    State(state): State<Arc<HttpState>>,
+    Json(body): Json<SetOriginsBody>,
+) -> Response {
+    let app_state = app_state(&state);
+
+    let validated = match crate::commands::cors::sanitize_and_validate_origins(body.origins) {
+        Ok(v) => v,
+        Err(e) => return err_response(axum::http::StatusCode::BAD_REQUEST, e),
+    };
+
+    let mut guard = match app_state.settings.lock() {
+        Ok(g) => g,
+        Err(e) => {
+            return err_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+        }
+    };
+    guard.allowed_origins = validated;
     if let Err(e) = crate::settings::save_settings(&guard) {
         return err_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e);
     }
@@ -729,7 +792,52 @@ mod tests {
 
     #[test]
     fn build_cors_constructs_without_panicking() {
-        let _ = build_cors();
+        let state = Arc::new(crate::state::AppState::new());
+        let _ = build_cors(state);
+    }
+
+    #[test]
+    fn origin_allowed_matches_static_default() {
+        let static_origins = resolve_allowed_origins();
+        assert!(origin_allowed(
+            "http://localhost:1420",
+            &static_origins,
+            &[]
+        ));
+    }
+
+    #[test]
+    fn origin_allowed_matches_live_settings_origin() {
+        let live = vec!["https://cctrace.example.com".to_string()];
+        assert!(origin_allowed("https://cctrace.example.com", &[], &live));
+    }
+
+    #[test]
+    fn origin_allowed_denies_unrelated_origin() {
+        let static_origins = resolve_allowed_origins();
+        let live = vec!["https://cctrace.example.com".to_string()];
+        assert!(!origin_allowed(
+            "https://evil.example",
+            &static_origins,
+            &live
+        ));
+    }
+
+    #[test]
+    fn origin_allowed_denies_when_both_lists_empty() {
+        assert!(!origin_allowed("http://localhost:1420", &[], &[]));
+    }
+
+    #[test]
+    fn origin_allowed_denies_substring_or_prefix_match() {
+        let static_origins = vec!["http://localhost:1420".to_string()];
+        // Guards against ever "helpfully" loosening the exact-match check to
+        // `.starts_with()`/`.contains()` — both would let this through.
+        assert!(!origin_allowed(
+            "http://localhost:1420.evil.com",
+            &static_origins,
+            &[]
+        ));
     }
 
     // -----------------------------------------------------------------------

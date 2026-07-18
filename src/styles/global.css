@@ -2814,6 +2814,24 @@ body {
   border-color: var(--accent);
 }
 
+.settings-modal__textarea {
+  width: 100%;
+  padding: 6px 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 13px;
+  box-sizing: border-box;
+  outline: none;
+  resize: vertical;
+}
+
+.settings-modal__textarea:focus {
+  border-color: var(--accent);
+}
+
 .settings-modal__hint {
   margin: 0;
   font-size: 11px;

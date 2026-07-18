@@ -104,6 +104,7 @@ fn run_desktop(args: &[String]) {
             commands::settings::set_projects_dir,
             commands::wsl::list_wsl_distros,
             commands::wsl::set_wsl_distros,
+            commands::cors::set_allowed_origins,
             commands::terminal::focus_session_window,
             switch_to_browser,
         ])
