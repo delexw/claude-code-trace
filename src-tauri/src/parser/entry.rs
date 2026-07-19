@@ -2015,6 +2015,41 @@ mod tests {
         assert_eq!(entry.requesting_agent_uuid, "session-uuid-bg-001");
     }
 
+    // --- Issue #211: v2.1.214 periodic progress heartbeat for long-running tool calls ---
+
+    #[test]
+    fn parse_entry_succeeds_for_heartbeat_progress_with_unknown_fields() {
+        // v2.1.214+ emits periodic heartbeat entries while a tool call is running.
+        // They use type:"progress" with data.type:"tool_heartbeat" and carry extra
+        // fields (elapsedMs, sequenceNumber, toolUseId) that Entry does not model.
+        // The parser must NOT fail on unknown fields — serde(default) + no deny_unknown_fields
+        // guarantees this, and this test pins that guarantee so a future struct refactor
+        // cannot accidentally break it.
+        let line = json!({
+            "type": "progress",
+            "uuid": "heartbeat-uuid-001",
+            "timestamp": "2026-07-19T10:00:00Z",
+            "data": {
+                "type": "tool_heartbeat",
+                "toolUseId": "tool-use-abc123",
+                "elapsedMs": 5000,
+                "sequenceNumber": 3
+            }
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes)
+            .expect("parse_entry must succeed for heartbeat progress entry with unknown fields");
+        assert_eq!(entry.entry_type, "progress");
+        assert_eq!(entry.uuid, "heartbeat-uuid-001");
+        // data blob is captured verbatim
+        let data = entry.data.expect("data field must be captured");
+        assert_eq!(
+            data.get("type").and_then(|v| v.as_str()),
+            Some("tool_heartbeat")
+        );
+        assert_eq!(data.get("elapsedMs").and_then(|v| v.as_u64()), Some(5000));
+    }
+
     #[test]
     fn parse_entry_source_agent_name_defaults_to_empty_when_absent() {
         // Regular hook entries produced by the main agent have no attribution fields.

@@ -3176,6 +3176,54 @@ mod tests {
         );
     }
 
+    // --- Issue #211: v2.1.214 periodic progress heartbeat for long-running tool calls ---
+
+    #[test]
+    fn classify_progress_heartbeat_is_dropped_as_noise_not_rescued_as_hook() {
+        // v2.1.214+ emits periodic heartbeat entries (data.type:"tool_heartbeat") while
+        // a long-running tool call is in progress. They carry no hookEvent, so the hook
+        // rescue branch must NOT fire. They must fall through to NOISE_ENTRY_TYPES and
+        // be dropped, preventing UI flooding during long tool calls.
+        let e = Entry {
+            entry_type: "progress".to_string(),
+            uuid: "heartbeat-uuid-001".to_string(),
+            timestamp: "2026-07-19T10:00:00Z".to_string(),
+            data: Some(json!({
+                "type": "tool_heartbeat",
+                "toolUseId": "tool-use-abc123",
+                "elapsedMs": 5000,
+                "sequenceNumber": 3
+            })),
+            ..Default::default()
+        };
+        assert!(
+            classify(e).is_none(),
+            "heartbeat progress entries must be dropped as noise — they must not be rescued as hooks"
+        );
+    }
+
+    #[test]
+    fn classify_progress_heartbeat_with_tool_use_id_field_is_still_dropped() {
+        // The toolUseId field on heartbeat entries must not be confused with hookEvent.
+        // Only data.hookEvent presence triggers the hook rescue branch.
+        let e = Entry {
+            entry_type: "progress".to_string(),
+            uuid: "heartbeat-uuid-002".to_string(),
+            timestamp: "2026-07-19T10:01:00Z".to_string(),
+            data: Some(json!({
+                "type": "tool_heartbeat",
+                "toolUseId": "tool-use-xyz789",
+                "elapsedMs": 10000,
+                "sequenceNumber": 6
+            })),
+            ..Default::default()
+        };
+        assert!(
+            classify(e).is_none(),
+            "toolUseId on a heartbeat must not trigger the hook rescue branch"
+        );
+    }
+
     #[test]
     fn format_denial_output_produces_correct_strings() {
         assert_eq!(
