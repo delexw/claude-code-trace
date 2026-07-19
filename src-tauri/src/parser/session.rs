@@ -3681,4 +3681,67 @@ mod tests {
             "reminder-prefixed array entry with additional content must count as a turn"
         );
     }
+
+    // --- Issue #210: v2.1.208+ file-history-snapshot pruning ---
+
+    #[test]
+    fn file_history_snapshot_pruned_entries_do_not_break_conversation_chain() {
+        // v2.1.208+: Claude Code prunes superseded file-history backups during active
+        // sessions. Intermediate snapshot entries may be absent from the JSONL — the
+        // parser must still extract the full conversational content unchanged.
+        //
+        // This test places snapshot entries with UUIDs between conversational turns
+        // (not just trailing), with one snapshot absent (simulating pruning), and
+        // verifies that resolve_live_chain_uuids plus classify() together produce
+        // the complete two-turn conversation with no snapshot output.
+        let tmp = env::temp_dir().join("tail-test-issue210-fhs-pruning");
+        std::fs::create_dir_all(&tmp).unwrap();
+        let path = tmp.join("session.jsonl");
+
+        // Turn 1
+        let u1 = "{\"type\":\"user\",\"uuid\":\"u1\",\"parentUuid\":null,\"timestamp\":\"2026-01-01T00:00:00Z\",\"message\":{\"role\":\"user\",\"content\":\"start editing\"}}\n";
+        let a1 = "{\"type\":\"assistant\",\"uuid\":\"a1\",\"parentUuid\":\"u1\",\"leafUuid\":\"a1\",\"timestamp\":\"2026-01-01T00:00:01Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"editing files\"}],\"stop_reason\":\"end_turn\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0}}}\n";
+        // fhs1: snapshot written after the first edit (present in JSONL)
+        let fhs1 = "{\"type\":\"file-history-snapshot\",\"uuid\":\"fhs1\",\"parentUuid\":\"a1\",\"timestamp\":\"2026-01-01T00:00:02Z\"}\n";
+        // fhs2: superseded by fhs3 — pruned by v2.1.208+, absent from JSONL
+
+        // Turn 2 — conversational parentUuid chains to a1, never to any snapshot
+        let u2 = "{\"type\":\"user\",\"uuid\":\"u2\",\"parentUuid\":\"a1\",\"timestamp\":\"2026-01-01T00:00:03Z\",\"message\":{\"role\":\"user\",\"content\":\"continue editing\"}}\n";
+        let a2 = "{\"type\":\"assistant\",\"uuid\":\"a2\",\"parentUuid\":\"u2\",\"leafUuid\":\"a2\",\"timestamp\":\"2026-01-01T00:00:04Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"done editing\"}],\"stop_reason\":\"end_turn\",\"usage\":{\"input_tokens\":20,\"output_tokens\":5,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0}}}\n";
+        // fhs3: snapshot written after the second edit (present; fhs2 was pruned — gap in snapshot sequence)
+        let fhs3 = "{\"type\":\"file-history-snapshot\",\"uuid\":\"fhs3\",\"parentUuid\":\"a2\",\"timestamp\":\"2026-01-01T00:00:05Z\"}\n";
+
+        std::fs::write(&path, format!("{u1}{a1}{fhs1}{u2}{a2}{fhs3}")).unwrap();
+
+        let (msgs, _, _) = read_session_incremental(path.to_str().unwrap(), 0).unwrap();
+
+        let user_count = msgs
+            .iter()
+            .filter(|m| matches!(m, ClassifiedMsg::User(_)))
+            .count();
+        let ai_count = msgs
+            .iter()
+            .filter(|m| matches!(m, ClassifiedMsg::AI(_)))
+            .count();
+        assert_eq!(
+            user_count, 2,
+            "both user turns must survive snapshot pruning (got {user_count})"
+        );
+        assert_eq!(
+            ai_count, 2,
+            "both AI turns must survive snapshot pruning (got {ai_count})"
+        );
+
+        // Snapshot entries must never surface in the classified output.
+        let snapshot_leaked = msgs.iter().any(|m| match m {
+            ClassifiedMsg::System(s) => s.output.contains("file-history-snapshot"),
+            _ => false,
+        });
+        assert!(
+            !snapshot_leaked,
+            "file-history-snapshot entries must not appear in classified output"
+        );
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
 }
