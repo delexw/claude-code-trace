@@ -1902,6 +1902,34 @@ mod tests {
     }
 
     #[test]
+    fn scan_session_metadata_tolerates_pruned_file_history_snapshots() {
+        // v2.1.208+: Claude Code prunes superseded file-history-snapshot entries, retaining
+        // only the latest backup per file. A session with two Edit tool calls but only one
+        // snapshot (or none) must parse correctly — turn count and recap must be unaffected
+        // by the gap in the snapshot chain.
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("s.jsonl");
+        std::fs::write(
+            &p,
+            concat!(
+                "{\"type\":\"user\",\"uuid\":\"u1\",\"message\":{\"role\":\"user\",\"content\":\"fix the bug\"}}\n",
+                "{\"type\":\"assistant\",\"uuid\":\"a1\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"Edit\",\"input\":{\"file_path\":\"a.rs\"}}]}}\n",
+                "{\"type\":\"user\",\"uuid\":\"u2\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"t1\",\"content\":\"ok\"}]}}\n",
+                "{\"type\":\"assistant\",\"uuid\":\"a2\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"t2\",\"name\":\"Edit\",\"input\":{\"file_path\":\"b.rs\"}}]}}\n",
+                "{\"type\":\"user\",\"uuid\":\"u3\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"t2\",\"content\":\"ok\"}]}}\n",
+                "{\"type\":\"assistant\",\"uuid\":\"a3\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Done.\"}]}}\n",
+                // Only 1 snapshot for 2 edits — simulates v2.1.208 pruning of superseded entries.
+                "{\"type\":\"file-history-snapshot\"}\n",
+            ),
+        )
+        .unwrap();
+        let meta = scan_session_metadata(p.to_str().unwrap());
+        // Turn count and recap must be unaffected by the pruned snapshot gap.
+        assert_eq!(meta.turn_count, 2, "two user+AI turn pairs");
+        assert_eq!(meta.recap, None, "no away_summary, no recap");
+    }
+
+    #[test]
     fn session_names_from_dir_joins_on_session_id() {
         let dir = tempfile::tempdir().unwrap();
         // Named session. The pid filename differs from the session id on purpose:

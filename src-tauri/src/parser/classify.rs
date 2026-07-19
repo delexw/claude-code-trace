@@ -132,6 +132,9 @@ pub const SYSTEM_OUTPUT_TAGS: &[&str] = &[
 
 const NOISE_ENTRY_TYPES: &[&str] = &[
     "system",
+    // v2.1.208+: Claude Code prunes superseded file-history-snapshot entries, keeping only
+    // the latest backup per file. A complete chain of one snapshot per edit must NOT be
+    // assumed — the parser must remain correct when snapshots are absent or sparse.
     "file-history-snapshot",
     "queue-operation",
     "progress",
