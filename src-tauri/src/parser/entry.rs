@@ -237,6 +237,12 @@ pub struct EntryMessage {
     // null. null_as_default converts null → EntryUsage::default() so the entry is preserved.
     #[serde(default, deserialize_with = "null_as_default")]
     pub usage: EntryUsage,
+    // Present in assistant message objects (v2.1.212+). Claude Code records the active reasoning
+    // effort level on each assistant message in session transcripts as
+    // effort:{level:"low"|"normal"|"high"}. Previously this only appeared in hook input JSON at
+    // the top-level entry (v2.1.133+, issue #86); v2.1.212 promotes it to every assistant turn.
+    #[serde(default)]
+    pub effort: Option<Value>,
 }
 
 /// Nested cache-creation breakdown returned by the Anthropic API since Claude Code v2.1.152.
@@ -2031,6 +2037,95 @@ mod tests {
         assert_eq!(
             entry.requesting_agent_uuid, "",
             "requestingAgentUuid must default to empty when absent"
+        );
+    }
+
+    // --- Issue #209: v2.1.212+ assistant message effort level in session transcripts ---
+
+    #[test]
+    fn parse_entry_assistant_message_captures_effort_level_v2_1_212() {
+        // v2.1.212+: every assistant entry carries effort:{level:"..."} on the message object.
+        // The parser must capture it so callers can inspect the effort level.
+        let line = json!({
+            "type": "assistant",
+            "uuid": "assistant-effort-uuid",
+            "timestamp": "2026-07-15T10:00:00Z",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "Hello"}],
+                "model": "claude-opus-4-7",
+                "stop_reason": "end_turn",
+                "usage": {"input_tokens": 10, "output_tokens": 5},
+                "effort": {"level": "normal"}
+            }
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("must parse assistant entry with effort on message");
+        let effort = entry
+            .message
+            .effort
+            .expect("message.effort must be captured");
+        assert_eq!(
+            effort.get("level").and_then(|v| v.as_str()),
+            Some("normal"),
+            "message.effort.level must be 'normal'"
+        );
+    }
+
+    #[test]
+    fn parse_entry_assistant_message_effort_low_and_high_captured() {
+        // Verify all three effort level values parse correctly on the message object.
+        for level in &["low", "high"] {
+            let line = json!({
+                "type": "assistant",
+                "uuid": format!("effort-{level}-uuid"),
+                "timestamp": "2026-07-15T10:00:00Z",
+                "message": {
+                    "role": "assistant",
+                    "content": [],
+                    "model": "claude-sonnet-4-6",
+                    "stop_reason": "end_turn",
+                    "usage": {"input_tokens": 1, "output_tokens": 1},
+                    "effort": {"level": level}
+                }
+            });
+            let bytes = serde_json::to_vec(&line).unwrap();
+            let entry =
+                parse_entry(&bytes).expect("must parse assistant entry with effort on message");
+            let effort = entry
+                .message
+                .effort
+                .expect("message.effort must be captured");
+            assert_eq!(
+                effort.get("level").and_then(|v| v.as_str()),
+                Some(*level),
+                "message.effort.level must be '{level}'"
+            );
+        }
+    }
+
+    #[test]
+    fn parse_entry_assistant_message_effort_defaults_to_none_when_absent() {
+        // Pre-v2.1.212 assistant entries carry no effort field on the message object.
+        // The parser must tolerate its absence and default to None.
+        let line = json!({
+            "type": "assistant",
+            "uuid": "old-assistant-uuid",
+            "timestamp": "2026-01-01T00:00:00Z",
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "Hello"}],
+                "model": "claude-opus-4-7",
+                "stop_reason": "end_turn",
+                "usage": {"input_tokens": 10, "output_tokens": 5}
+            }
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry =
+            parse_entry(&bytes).expect("must parse pre-v2.1.212 assistant entry without effort");
+        assert!(
+            entry.message.effort.is_none(),
+            "message.effort must be None when absent (pre-v2.1.212 entries)"
         );
     }
 }
