@@ -1876,6 +1876,34 @@ mod tests {
     }
 
     #[test]
+    fn file_history_snapshot_sparse_chain_parses_cleanly() {
+        // v2.1.208+: Claude Code prunes superseded file-history backups, so sessions
+        // legitimately contain fewer file-history-snapshot entries than Edit tool calls.
+        // Three edits but only one snapshot — the parser must not error or miscount.
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("sparse.jsonl");
+        std::fs::write(
+            &p,
+            concat!(
+                "{\"type\":\"user\",\"uuid\":\"u1\",\"message\":{\"role\":\"user\",\"content\":\"fix it\"}}\n",
+                "{\"type\":\"assistant\",\"uuid\":\"a1\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"Edit\",\"input\":{\"file_path\":\"a.rs\"}}]}}\n",
+                "{\"type\":\"tool\",\"uuid\":\"r1\",\"message\":{\"role\":\"tool\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"t1\",\"content\":\"ok\"}]}}\n",
+                "{\"type\":\"assistant\",\"uuid\":\"a2\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"t2\",\"name\":\"Edit\",\"input\":{\"file_path\":\"b.rs\"}}]}}\n",
+                "{\"type\":\"tool\",\"uuid\":\"r2\",\"message\":{\"role\":\"tool\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"t2\",\"content\":\"ok\"}]}}\n",
+                "{\"type\":\"assistant\",\"uuid\":\"a3\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"t3\",\"name\":\"Edit\",\"input\":{\"file_path\":\"c.rs\"}}]}}\n",
+                "{\"type\":\"tool\",\"uuid\":\"r3\",\"message\":{\"role\":\"tool\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"t3\",\"content\":\"ok\"}]}}\n",
+                "{\"type\":\"file-history-snapshot\"}\n",
+                "{\"type\":\"assistant\",\"uuid\":\"a4\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"All done.\"}]}}\n",
+            ),
+        )
+        .unwrap();
+        let meta = scan_session_metadata(p.to_str().unwrap());
+        // Session parsed cleanly: first message extracted, no recap accumulated.
+        assert_eq!(meta.first_msg, "fix it");
+        assert_eq!(meta.recap, None);
+    }
+
+    #[test]
     fn scan_recap_survives_channel_injections() {
         // Claude Code's channels feature can post many events after a session parks
         // on a recap — each a `<channel …>` user entry with a short assistant reply.
