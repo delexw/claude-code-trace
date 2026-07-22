@@ -221,6 +221,18 @@ pub struct Entry {
     pub source_agent_name: String,
     #[serde(default, rename = "requestingAgentUuid")]
     pub requesting_agent_uuid: String,
+    // Present in type:"progress" heartbeat entries (v2.1.214+). Claude Code emits periodic
+    // heartbeats for long-running tool calls that previously went silent so the session file
+    // mod-time stays fresh and liveness detection keeps working. `heartbeat_tool_use_id`
+    // identifies the in-flight tool call; `heartbeat_elapsed_ms` is elapsed milliseconds
+    // since the call started; `heartbeat_seq` is a monotonically increasing counter per
+    // tool_use_id. These entries are noise (no data.hookEvent) and are dropped by classify.
+    #[serde(default, rename = "toolUseId")]
+    pub heartbeat_tool_use_id: String,
+    #[serde(default, rename = "elapsedMs")]
+    pub heartbeat_elapsed_ms: u64,
+    #[serde(default, rename = "seq")]
+    pub heartbeat_seq: u32,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -2015,6 +2027,41 @@ mod tests {
         assert_eq!(entry.requesting_agent_uuid, "session-uuid-bg-001");
     }
 
+    // --- Issue #211: v2.1.214 periodic progress heartbeat for long-running tool calls ---
+
+    #[test]
+    fn parse_entry_succeeds_for_heartbeat_progress_with_unknown_fields() {
+        // v2.1.214+ emits periodic heartbeat entries while a tool call is running.
+        // They use type:"progress" with data.type:"tool_heartbeat" and carry extra
+        // fields (elapsedMs, sequenceNumber, toolUseId) that Entry does not model.
+        // The parser must NOT fail on unknown fields — serde(default) + no deny_unknown_fields
+        // guarantees this, and this test pins that guarantee so a future struct refactor
+        // cannot accidentally break it.
+        let line = json!({
+            "type": "progress",
+            "uuid": "heartbeat-uuid-001",
+            "timestamp": "2026-07-19T10:00:00Z",
+            "data": {
+                "type": "tool_heartbeat",
+                "toolUseId": "tool-use-abc123",
+                "elapsedMs": 5000,
+                "sequenceNumber": 3
+            }
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes)
+            .expect("parse_entry must succeed for heartbeat progress entry with unknown fields");
+        assert_eq!(entry.entry_type, "progress");
+        assert_eq!(entry.uuid, "heartbeat-uuid-001");
+        // data blob is captured verbatim
+        let data = entry.data.expect("data field must be captured");
+        assert_eq!(
+            data.get("type").and_then(|v| v.as_str()),
+            Some("tool_heartbeat")
+        );
+        assert_eq!(data.get("elapsedMs").and_then(|v| v.as_u64()), Some(5000));
+    }
+
     #[test]
     fn parse_entry_source_agent_name_defaults_to_empty_when_absent() {
         // Regular hook entries produced by the main agent have no attribution fields.
@@ -2127,5 +2174,53 @@ mod tests {
             entry.message.effort.is_none(),
             "message.effort must be None when absent (pre-v2.1.212 entries)"
         );
+    }
+
+    // --- Issue #211: v2.1.214+ periodic heartbeat progress entries ---
+
+    #[test]
+    fn parse_entry_captures_heartbeat_fields_v2_1_214() {
+        // v2.1.214+: Claude Code emits periodic heartbeat entries for long-running tool calls.
+        // The entry carries toolUseId, elapsedMs, and seq at the top level with no data.hookEvent.
+        let line = json!({
+            "type": "progress",
+            "uuid": "heartbeat-uuid-001",
+            "timestamp": "2026-07-01T12:00:00Z",
+            "toolUseId": "tool-use-abc123",
+            "elapsedMs": 15000,
+            "seq": 3
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("must parse heartbeat progress entry");
+        assert_eq!(entry.heartbeat_tool_use_id, "tool-use-abc123");
+        assert_eq!(entry.heartbeat_elapsed_ms, 15000);
+        assert_eq!(entry.heartbeat_seq, 3);
+    }
+
+    #[test]
+    fn parse_entry_heartbeat_fields_default_to_zero_when_absent() {
+        // Non-heartbeat entries must not be affected — heartbeat fields default cleanly.
+        let line = json!({
+            "type": "progress",
+            "uuid": "non-heartbeat-uuid",
+            "timestamp": "2026-07-01T12:01:00Z",
+            "data": {
+                "type": "hook_progress",
+                "hookEvent": "PreToolUse",
+                "hookName": "lint",
+                "command": ""
+            }
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("must parse hook progress entry");
+        assert_eq!(
+            entry.heartbeat_tool_use_id, "",
+            "toolUseId must default to empty when absent"
+        );
+        assert_eq!(
+            entry.heartbeat_elapsed_ms, 0,
+            "elapsedMs must default to 0 when absent"
+        );
+        assert_eq!(entry.heartbeat_seq, 0, "seq must default to 0 when absent");
     }
 }

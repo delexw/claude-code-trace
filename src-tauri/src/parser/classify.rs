@@ -216,6 +216,12 @@ pub fn classify(e: Entry) -> Option<ClassifiedMsg> {
     // All existing hooks use data.type="hook_progress", but guard on hookEvent presence
     // so that future hook types (e.g. TaskCreated added in v2.1.84, PreCompact in v2.1.105)
     // are also rescued without needing to enumerate data.type values.
+    //
+    // v2.1.214+: Claude Code also emits periodic heartbeat progress entries for long-running
+    // tool calls (carrying top-level toolUseId/elapsedMs/seq, no data.hookEvent). These have
+    // no data block or a data block without hookEvent, so they fall through the hook rescue
+    // below and are correctly dropped by the NOISE_ENTRY_TYPES filter. No special handling
+    // needed — their value is purely as file mod-time refreshes for liveness detection.
     if e.entry_type == "progress" {
         if let Some(ref data) = e.data {
             // v2.1.193+: auto-mode denial reasons may be embedded in progress entries.
@@ -1357,6 +1363,45 @@ mod tests {
         assert!(
             classify(e).is_none(),
             "Non-hook progress entry must be dropped"
+        );
+    }
+
+    // --- Issue #211: v2.1.214+ periodic heartbeat progress entries ---
+
+    #[test]
+    fn classify_drops_heartbeat_progress_entry_v2_1_214() {
+        // Heartbeat entries have no data block and no hookEvent — they must be dropped as noise.
+        let e = Entry {
+            entry_type: "progress".to_string(),
+            uuid: "heartbeat-uuid-001".to_string(),
+            timestamp: "2026-07-01T12:00:00Z".to_string(),
+            heartbeat_tool_use_id: "tool-use-abc123".to_string(),
+            heartbeat_elapsed_ms: 15000,
+            heartbeat_seq: 3,
+            ..Default::default()
+        };
+        assert!(
+            classify(e).is_none(),
+            "Heartbeat progress entry must be dropped as noise"
+        );
+    }
+
+    #[test]
+    fn classify_drops_heartbeat_progress_with_data_type_tool_heartbeat() {
+        // Some heartbeat entries may carry data.type="tool_heartbeat" — must still be noise.
+        let e = Entry {
+            entry_type: "progress".to_string(),
+            uuid: "heartbeat-uuid-002".to_string(),
+            timestamp: "2026-07-01T12:00:05Z".to_string(),
+            heartbeat_tool_use_id: "tool-use-abc123".to_string(),
+            heartbeat_elapsed_ms: 20000,
+            heartbeat_seq: 4,
+            data: Some(json!({"type": "tool_heartbeat"})),
+            ..Default::default()
+        };
+        assert!(
+            classify(e).is_none(),
+            "Heartbeat progress entry with data.type=tool_heartbeat must be dropped as noise"
         );
     }
 
@@ -3173,6 +3218,54 @@ mod tests {
         assert!(
             classify(e).is_none(),
             "non-denial, non-hook progress entries must be discarded"
+        );
+    }
+
+    // --- Issue #211: v2.1.214 periodic progress heartbeat for long-running tool calls ---
+
+    #[test]
+    fn classify_progress_heartbeat_is_dropped_as_noise_not_rescued_as_hook() {
+        // v2.1.214+ emits periodic heartbeat entries (data.type:"tool_heartbeat") while
+        // a long-running tool call is in progress. They carry no hookEvent, so the hook
+        // rescue branch must NOT fire. They must fall through to NOISE_ENTRY_TYPES and
+        // be dropped, preventing UI flooding during long tool calls.
+        let e = Entry {
+            entry_type: "progress".to_string(),
+            uuid: "heartbeat-uuid-001".to_string(),
+            timestamp: "2026-07-19T10:00:00Z".to_string(),
+            data: Some(json!({
+                "type": "tool_heartbeat",
+                "toolUseId": "tool-use-abc123",
+                "elapsedMs": 5000,
+                "sequenceNumber": 3
+            })),
+            ..Default::default()
+        };
+        assert!(
+            classify(e).is_none(),
+            "heartbeat progress entries must be dropped as noise — they must not be rescued as hooks"
+        );
+    }
+
+    #[test]
+    fn classify_progress_heartbeat_with_tool_use_id_field_is_still_dropped() {
+        // The toolUseId field on heartbeat entries must not be confused with hookEvent.
+        // Only data.hookEvent presence triggers the hook rescue branch.
+        let e = Entry {
+            entry_type: "progress".to_string(),
+            uuid: "heartbeat-uuid-002".to_string(),
+            timestamp: "2026-07-19T10:01:00Z".to_string(),
+            data: Some(json!({
+                "type": "tool_heartbeat",
+                "toolUseId": "tool-use-xyz789",
+                "elapsedMs": 10000,
+                "sequenceNumber": 6
+            })),
+            ..Default::default()
+        };
+        assert!(
+            classify(e).is_none(),
+            "toolUseId on a heartbeat must not trigger the hook rescue branch"
         );
     }
 
