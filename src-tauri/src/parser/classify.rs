@@ -132,6 +132,11 @@ pub const SYSTEM_OUTPUT_TAGS: &[&str] = &[
 
 const NOISE_ENTRY_TYPES: &[&str] = &[
     "system",
+    // v2.1.208+: Claude Code reduced session transcript size (up to 79×) by pruning
+    // superseded file-history backups, so a session may legitimately contain fewer
+    // file-history-snapshot entries than Edit tool calls. The parser already treats
+    // every file-history-snapshot as structural noise — gaps in the snapshot chain
+    // are safe and expected.
     "file-history-snapshot",
     "queue-operation",
     "progress",

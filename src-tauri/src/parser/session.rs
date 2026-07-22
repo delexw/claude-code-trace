@@ -1876,6 +1876,34 @@ mod tests {
     }
 
     #[test]
+    fn file_history_snapshot_sparse_chain_parses_cleanly() {
+        // v2.1.208+: Claude Code prunes superseded file-history backups, so sessions
+        // legitimately contain fewer file-history-snapshot entries than Edit tool calls.
+        // Three edits but only one snapshot — the parser must not error or miscount.
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("sparse.jsonl");
+        std::fs::write(
+            &p,
+            concat!(
+                "{\"type\":\"user\",\"uuid\":\"u1\",\"message\":{\"role\":\"user\",\"content\":\"fix it\"}}\n",
+                "{\"type\":\"assistant\",\"uuid\":\"a1\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"Edit\",\"input\":{\"file_path\":\"a.rs\"}}]}}\n",
+                "{\"type\":\"tool\",\"uuid\":\"r1\",\"message\":{\"role\":\"tool\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"t1\",\"content\":\"ok\"}]}}\n",
+                "{\"type\":\"assistant\",\"uuid\":\"a2\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"t2\",\"name\":\"Edit\",\"input\":{\"file_path\":\"b.rs\"}}]}}\n",
+                "{\"type\":\"tool\",\"uuid\":\"r2\",\"message\":{\"role\":\"tool\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"t2\",\"content\":\"ok\"}]}}\n",
+                "{\"type\":\"assistant\",\"uuid\":\"a3\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"t3\",\"name\":\"Edit\",\"input\":{\"file_path\":\"c.rs\"}}]}}\n",
+                "{\"type\":\"tool\",\"uuid\":\"r3\",\"message\":{\"role\":\"tool\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"t3\",\"content\":\"ok\"}]}}\n",
+                "{\"type\":\"file-history-snapshot\"}\n",
+                "{\"type\":\"assistant\",\"uuid\":\"a4\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"All done.\"}]}}\n",
+            ),
+        )
+        .unwrap();
+        let meta = scan_session_metadata(p.to_str().unwrap());
+        // Session parsed cleanly: first message extracted, no recap accumulated.
+        assert_eq!(meta.first_msg, "fix it");
+        assert_eq!(meta.recap, None);
+    }
+
+    #[test]
     fn scan_recap_survives_channel_injections() {
         // Claude Code's channels feature can post many events after a session parks
         // on a recap — each a `<channel …>` user entry with a short assistant reply.
@@ -1899,6 +1927,34 @@ mod tests {
             scan_session_metadata(p.to_str().unwrap()).recap.as_deref(),
             Some("Parked cleanly.")
         );
+    }
+
+    #[test]
+    fn scan_session_metadata_tolerates_pruned_file_history_snapshots() {
+        // v2.1.208+: Claude Code prunes superseded file-history-snapshot entries, retaining
+        // only the latest backup per file. A session with two Edit tool calls but only one
+        // snapshot (or none) must parse correctly — turn count and recap must be unaffected
+        // by the gap in the snapshot chain.
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("s.jsonl");
+        std::fs::write(
+            &p,
+            concat!(
+                "{\"type\":\"user\",\"uuid\":\"u1\",\"message\":{\"role\":\"user\",\"content\":\"fix the bug\"}}\n",
+                "{\"type\":\"assistant\",\"uuid\":\"a1\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"Edit\",\"input\":{\"file_path\":\"a.rs\"}}]}}\n",
+                "{\"type\":\"user\",\"uuid\":\"u2\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"t1\",\"content\":\"ok\"}]}}\n",
+                "{\"type\":\"assistant\",\"uuid\":\"a2\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"t2\",\"name\":\"Edit\",\"input\":{\"file_path\":\"b.rs\"}}]}}\n",
+                "{\"type\":\"user\",\"uuid\":\"u3\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"t2\",\"content\":\"ok\"}]}}\n",
+                "{\"type\":\"assistant\",\"uuid\":\"a3\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Done.\"}]}}\n",
+                // Only 1 snapshot for 2 edits — simulates v2.1.208 pruning of superseded entries.
+                "{\"type\":\"file-history-snapshot\"}\n",
+            ),
+        )
+        .unwrap();
+        let meta = scan_session_metadata(p.to_str().unwrap());
+        // Turn count and recap must be unaffected by the pruned snapshot gap.
+        assert_eq!(meta.turn_count, 2, "two user+AI turn pairs");
+        assert_eq!(meta.recap, None, "no away_summary, no recap");
     }
 
     #[test]
@@ -3624,5 +3680,68 @@ mod tests {
             is_user_chunk_for_turn_count(&raw, "user", false, false),
             "reminder-prefixed array entry with additional content must count as a turn"
         );
+    }
+
+    // --- Issue #210: v2.1.208+ file-history-snapshot pruning ---
+
+    #[test]
+    fn file_history_snapshot_pruned_entries_do_not_break_conversation_chain() {
+        // v2.1.208+: Claude Code prunes superseded file-history backups during active
+        // sessions. Intermediate snapshot entries may be absent from the JSONL — the
+        // parser must still extract the full conversational content unchanged.
+        //
+        // This test places snapshot entries with UUIDs between conversational turns
+        // (not just trailing), with one snapshot absent (simulating pruning), and
+        // verifies that resolve_live_chain_uuids plus classify() together produce
+        // the complete two-turn conversation with no snapshot output.
+        let tmp = env::temp_dir().join("tail-test-issue210-fhs-pruning");
+        std::fs::create_dir_all(&tmp).unwrap();
+        let path = tmp.join("session.jsonl");
+
+        // Turn 1
+        let u1 = "{\"type\":\"user\",\"uuid\":\"u1\",\"parentUuid\":null,\"timestamp\":\"2026-01-01T00:00:00Z\",\"message\":{\"role\":\"user\",\"content\":\"start editing\"}}\n";
+        let a1 = "{\"type\":\"assistant\",\"uuid\":\"a1\",\"parentUuid\":\"u1\",\"leafUuid\":\"a1\",\"timestamp\":\"2026-01-01T00:00:01Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"editing files\"}],\"stop_reason\":\"end_turn\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0}}}\n";
+        // fhs1: snapshot written after the first edit (present in JSONL)
+        let fhs1 = "{\"type\":\"file-history-snapshot\",\"uuid\":\"fhs1\",\"parentUuid\":\"a1\",\"timestamp\":\"2026-01-01T00:00:02Z\"}\n";
+        // fhs2: superseded by fhs3 — pruned by v2.1.208+, absent from JSONL
+
+        // Turn 2 — conversational parentUuid chains to a1, never to any snapshot
+        let u2 = "{\"type\":\"user\",\"uuid\":\"u2\",\"parentUuid\":\"a1\",\"timestamp\":\"2026-01-01T00:00:03Z\",\"message\":{\"role\":\"user\",\"content\":\"continue editing\"}}\n";
+        let a2 = "{\"type\":\"assistant\",\"uuid\":\"a2\",\"parentUuid\":\"u2\",\"leafUuid\":\"a2\",\"timestamp\":\"2026-01-01T00:00:04Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"done editing\"}],\"stop_reason\":\"end_turn\",\"usage\":{\"input_tokens\":20,\"output_tokens\":5,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0}}}\n";
+        // fhs3: snapshot written after the second edit (present; fhs2 was pruned — gap in snapshot sequence)
+        let fhs3 = "{\"type\":\"file-history-snapshot\",\"uuid\":\"fhs3\",\"parentUuid\":\"a2\",\"timestamp\":\"2026-01-01T00:00:05Z\"}\n";
+
+        std::fs::write(&path, format!("{u1}{a1}{fhs1}{u2}{a2}{fhs3}")).unwrap();
+
+        let (msgs, _, _) = read_session_incremental(path.to_str().unwrap(), 0).unwrap();
+
+        let user_count = msgs
+            .iter()
+            .filter(|m| matches!(m, ClassifiedMsg::User(_)))
+            .count();
+        let ai_count = msgs
+            .iter()
+            .filter(|m| matches!(m, ClassifiedMsg::AI(_)))
+            .count();
+        assert_eq!(
+            user_count, 2,
+            "both user turns must survive snapshot pruning (got {user_count})"
+        );
+        assert_eq!(
+            ai_count, 2,
+            "both AI turns must survive snapshot pruning (got {ai_count})"
+        );
+
+        // Snapshot entries must never surface in the classified output.
+        let snapshot_leaked = msgs.iter().any(|m| match m {
+            ClassifiedMsg::System(s) => s.output.contains("file-history-snapshot"),
+            _ => false,
+        });
+        assert!(
+            !snapshot_leaked,
+            "file-history-snapshot entries must not appear in classified output"
+        );
+
+        std::fs::remove_dir_all(&tmp).ok();
     }
 }
