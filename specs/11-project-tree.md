@@ -80,7 +80,7 @@ stable home, and it is also lossless: decoding the encoded key is ambiguous (`ss
 would decode to `server`, since `-` is both a separator and a literal character).
 
 A session that touched more than one working directory additionally surfaces the full,
-first-seen-order list (`dirs`) on its own row in the picker as a `worked in: a, b, c` line —
+first-seen-order list (`dirs`) on its own row in the picker as a `CWDs: a, b, c` line —
 see [05-frontend-web.md](05-frontend-web.md) and [06-tui.md](06-tui.md).
 
 ---

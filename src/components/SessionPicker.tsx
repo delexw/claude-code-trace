@@ -181,7 +181,7 @@ export function SessionPicker({
                   ) : null}
                   {session.dirs && session.dirs.length > 1 && (
                     <div className="picker__session-dirs">
-                      <span className="picker__session-dirs-label">worked in:</span>{" "}
+                      <span className="picker__session-dirs-label">CWDs:</span>{" "}
                       {session.dirs.map(shortPath).join(", ")}
                     </div>
                   )}

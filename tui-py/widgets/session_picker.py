@@ -106,12 +106,12 @@ def _render_session(s: SessionInfo, anim_frame: int = 0) -> object:
         )
         line2.append(f"  {badge}", style=badge_style)
 
-    # "worked in" line: only when the session roamed across >1 working directory
+    # "CWDs" line: only when the session roamed across >1 working directory
     # (e.g. /cd between repos). Lists every distinct dir so none is hidden.
     dirs_line: Text | None = None
     if len(s.dirs) > 1:
         dirs_line = Text()
-        dirs_line.append("worked in: ", style=theme.TEXT_DIM)
+        dirs_line.append("CWDs: ", style=f"bold {theme.ACCENT}")
         # Accent the roamed directories so they stand out from the dim meta row.
         dirs_line.append(", ".join(short_path(d) for d in s.dirs), style=theme.ACCENT)
 
