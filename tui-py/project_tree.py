@@ -29,7 +29,11 @@ def build_project_nodes(sessions: list[SessionInfo]) -> list[ProjectNode]:
             if s.is_ongoing:
                 mapping[key].has_ongoing = True
         else:
-            name = short_path(s.cwd) or project_display_name(key)
+            # Label by the session's ORIGIN directory (dirs[0]), not its last-seen
+            # cwd — a session that /cd'd across repos still lives under the folder it
+            # started in, so the origin is the correct, stable home label.
+            origin = s.dirs[0] if s.dirs else s.cwd
+            name = short_path(origin) or project_display_name(key)
             mapping[key] = ProjectNode(
                 name=name,
                 key=key,

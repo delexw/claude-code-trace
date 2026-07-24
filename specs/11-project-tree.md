@@ -66,11 +66,22 @@ classDiagram
     }
 ```
 
-`label` is the human-readable display name:
+`label` is the human-readable display name. It is derived from the session's **origin
+working directory** — `dirs[0]`, the first `cwd` seen in the JSONL, which is the directory
+the session started in and the folder the JSONL file lives under:
 
-- Strip the leading `-Users-yang-` prefix
-- Replace remaining `-` with `/` to recover the original path
-- Show only the last 1-2 path segments for brevity
+- Take the last path segment of the origin dir (e.g. `/Users/yang/repos/sso-server` → `sso-server`)
+- Fall back to decoding the project key only when no origin dir is available (older cached payloads)
+
+The origin dir — not the last-seen `cwd` — is used on purpose. A session that `/cd`s across
+repos records a different `cwd` per entry; naming the node from the last one would file a
+session started in `sso-server` under whatever repo it happened to end in. The origin is the
+stable home, and it is also lossless: decoding the encoded key is ambiguous (`sso-server`
+would decode to `server`, since `-` is both a separator and a literal character).
+
+A session that touched more than one working directory additionally surfaces the full,
+first-seen-order list (`dirs`) on its own row in the picker as a `worked in: a, b, c` line —
+see [05-frontend-web.md](05-frontend-web.md) and [06-tui.md](06-tui.md).
 
 ---
 

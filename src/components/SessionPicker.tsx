@@ -12,6 +12,7 @@ import {
   truncate,
   groupByDate,
   shortModel,
+  shortPath,
 } from "../lib/format";
 import { getModelColor } from "../lib/theme";
 import { mergeRefs } from "../lib/mergeRefs";
@@ -178,6 +179,12 @@ export function SessionPicker({
                       {truncate(session.first_message, 80)}
                     </div>
                   ) : null}
+                  {session.dirs && session.dirs.length > 1 && (
+                    <div className="picker__session-dirs">
+                      <span className="picker__session-dirs-label">worked in:</span>{" "}
+                      {session.dirs.map(shortPath).join(", ")}
+                    </div>
+                  )}
                   <div className="picker__session-meta">
                     <span className="picker__session-model" style={{ color: modelClr }}>
                       {model}

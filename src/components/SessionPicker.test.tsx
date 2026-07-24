@@ -248,6 +248,50 @@ describe("SessionPicker", () => {
     expect(screen.queryByText(/VictoriaLogs/)).not.toBeInTheDocument();
   });
 
+  it("shows a 'worked in' line listing every distinct directory when a session roamed", () => {
+    const sessions = [
+      makeSession({
+        dirs: [
+          "/Users/me/repos/sso-server",
+          "/Users/me/seo/elements-storefront",
+          "/Users/me/seo/elements-backend",
+        ],
+        cwd: "/Users/me/seo/elements-backend",
+      }),
+    ];
+    render(
+      <SessionPicker
+        sessions={sessions}
+        loading={false}
+        searchQuery=""
+        selectedIndex={0}
+        onSelect={vi.fn()}
+        onSearchChange={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("worked in:")).toBeInTheDocument();
+    expect(
+      screen.getByText(/sso-server, elements-storefront, elements-backend/),
+    ).toBeInTheDocument();
+    // The line carries its own styling hook so the dirs are accent-coloured.
+    expect(screen.getByText("worked in:").closest(".picker__session-dirs")).not.toBeNull();
+  });
+
+  it("hides the 'worked in' line for a single-directory session", () => {
+    const sessions = [makeSession({ dirs: ["/Users/me/repos/sso-server"] })];
+    render(
+      <SessionPicker
+        sessions={sessions}
+        loading={false}
+        searchQuery=""
+        selectedIndex={0}
+        onSelect={vi.fn()}
+        onSearchChange={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText("worked in:")).not.toBeInTheDocument();
+  });
+
   it("shows active badge for ongoing sessions", () => {
     const sessions = [makeSession({ is_ongoing: true })];
     render(

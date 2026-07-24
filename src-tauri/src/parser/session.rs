@@ -45,6 +45,12 @@ pub struct SessionInfo {
     pub duration_ms: i64,
     pub model: String,
     pub cwd: String,
+    /// Every distinct working directory the session touched, in first-seen order.
+    /// `dirs[0]` is the origin (where the session started — the folder the JSONL
+    /// lives under); `dirs.last()` equals `cwd` (the last-seen working directory).
+    /// A session that never `/cd`'d holds a single entry. Used to label the project
+    /// node by its origin and to surface cross-repo roaming on the session row.
+    pub dirs: Vec<String>,
     pub git_branch: String,
     pub permission_mode: String,
 }
@@ -508,6 +514,7 @@ pub fn discover_project_sessions(project_dir: &str) -> Result<Vec<SessionInfo>, 
             duration_ms: meta.duration_ms,
             model: meta.model,
             cwd: meta.cwd,
+            dirs: meta.dirs,
             git_branch: meta.git_branch,
             permission_mode: meta.permission_mode,
         });
@@ -828,6 +835,7 @@ pub fn session_info_from_metadata(
         duration_ms: meta.duration_ms,
         model: meta.model,
         cwd: meta.cwd,
+        dirs: meta.dirs,
         git_branch: meta.git_branch,
         permission_mode: meta.permission_mode,
     }
@@ -886,6 +894,8 @@ pub(crate) struct SessionMetadata {
     pub(crate) duration_ms: i64,
     pub(crate) model: String,
     pub(crate) cwd: String,
+    /// Distinct working directories in first-seen order (see `SessionInfo::dirs`).
+    pub(crate) dirs: Vec<String>,
     pub(crate) git_branch: String,
     pub(crate) permission_mode: String,
     pub(crate) recap: Option<String>,
@@ -906,6 +916,7 @@ impl Default for SessionMetadata {
             duration_ms: 0,
             model: String::new(),
             cwd: String::new(),
+            dirs: Vec::new(),
             git_branch: String::new(),
             permission_mode: String::new(),
             recap: None,
@@ -988,6 +999,11 @@ pub(crate) fn scan_session_metadata(path: &str) -> SessionMetadata {
         if let Some(cwd) = raw.get("cwd").and_then(|v| v.as_str()) {
             if !cwd.is_empty() {
                 meta.cwd = cwd.to_string();
+                // Track distinct working directories in first-seen order. A session
+                // that `/cd`s across repos records each one; `dirs[0]` stays the origin.
+                if !meta.dirs.iter().any(|d| d == cwd) {
+                    meta.dirs.push(cwd.to_string());
+                }
             }
         }
         if let Some(branch) = raw.get("gitBranch").and_then(|v| v.as_str()) {
@@ -1771,6 +1787,7 @@ mod tests {
             duration_ms: 0,
             model: String::new(),
             cwd: String::new(),
+            dirs: Vec::new(),
             git_branch: String::new(),
             permission_mode: String::new(),
         }
@@ -3614,6 +3631,59 @@ mod tests {
             "gitBranch must reflect the last seen value after /cd (got {:?})",
             meta.git_branch
         );
+        assert_eq!(
+            meta.dirs,
+            vec![
+                "/home/user/project-a".to_string(),
+                "/home/user/project-b".to_string()
+            ],
+            "dirs must list distinct working directories in first-seen order (got {:?})",
+            meta.dirs
+        );
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn scan_session_metadata_dirs_dedup_first_seen_order() {
+        // A session that revisits an earlier directory must record each distinct
+        // cwd once, in the order first seen: a -> b -> a -> c yields [a, b, c].
+        let tmp = env::temp_dir().join("tail-test-dirs-revisit");
+        std::fs::create_dir_all(&tmp).unwrap();
+        let path = tmp.join("session.jsonl");
+
+        let mk = |uuid: &str, parent: &str, ts: &str, cwd: &str| {
+            let parent = if parent.is_empty() {
+                "null".to_string()
+            } else {
+                format!("\"{parent}\"")
+            };
+            format!(
+                "{{\"type\":\"user\",\"uuid\":\"{uuid}\",\"parentUuid\":{parent},\"isSidechain\":false,\"timestamp\":\"{ts}\",\"cwd\":\"{cwd}\",\"gitBranch\":\"main\",\"message\":{{\"role\":\"user\",\"content\":\"x\"}}}}\n"
+            )
+        };
+        let contents = format!(
+            "{}{}{}{}",
+            mk("u1", "", "2026-06-08T10:00:00Z", "/repo/a"),
+            mk("u2", "u1", "2026-06-08T10:00:01Z", "/repo/b"),
+            mk("u3", "u2", "2026-06-08T10:00:02Z", "/repo/a"),
+            mk("u4", "u3", "2026-06-08T10:00:03Z", "/repo/c"),
+        );
+        std::fs::write(&path, contents).unwrap();
+
+        let meta = scan_session_metadata(path.to_str().unwrap());
+        assert_eq!(
+            meta.dirs,
+            vec![
+                "/repo/a".to_string(),
+                "/repo/b".to_string(),
+                "/repo/c".to_string()
+            ],
+            "dirs must dedup while preserving first-seen order (got {:?})",
+            meta.dirs
+        );
+        // cwd stays the last-seen value even though it is not the last unique dir added.
+        assert_eq!(meta.cwd, "/repo/c");
 
         std::fs::remove_dir_all(&tmp).ok();
     }
@@ -3632,6 +3702,7 @@ mod tests {
         let meta = scan_session_metadata(path.to_str().unwrap());
         assert_eq!(meta.cwd, "/home/user/stable");
         assert_eq!(meta.git_branch, "main");
+        assert_eq!(meta.dirs, vec!["/home/user/stable".to_string()]);
 
         std::fs::remove_dir_all(&tmp).ok();
     }

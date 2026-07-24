@@ -107,6 +107,11 @@ export interface SessionInfo {
   duration_ms: number;
   model: string;
   cwd: string;
+  /** Every distinct working directory the session touched, in first-seen order.
+   *  `dirs[0]` is the origin (where the session started); the last entry equals
+   *  `cwd`. A session that never `/cd`'d holds a single entry. Optional for
+   *  backward-compatibility with older cached payloads. */
+  dirs?: string[];
   git_branch: string;
   permission_mode: string;
 }
