@@ -95,6 +95,7 @@ mod tests {
             cost_usd: 0.01,
             duration_ms: 1000,
             cwd: "/tmp".to_string(),
+            dirs: vec!["/tmp".to_string()],
             git_branch: "main".to_string(),
             permission_mode: "default".to_string(),
             is_ongoing: false,

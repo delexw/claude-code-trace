@@ -24,8 +24,13 @@ export function buildProjectNodes(sessions: SessionInfo[]): ProjectNode[] {
       existing.sessionCount++;
       if (s.is_ongoing) existing.hasOngoing = true;
     } else {
+      // Label the node by the session's ORIGIN directory (dirs[0]), not its
+      // last-seen cwd. A session that `/cd`s across repos still lives under the
+      // folder it started in, so the origin is the correct, stable home label;
+      // using the last cwd would mislabel a roaming session under the wrong repo.
+      const origin = s.dirs?.[0] ?? s.cwd;
       map.set(key, {
-        name: shortPath(s.cwd) || projectDisplayName(key),
+        name: shortPath(origin) || projectDisplayName(key),
         key,
         sessionCount: 1,
         hasOngoing: s.is_ongoing,

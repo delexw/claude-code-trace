@@ -1098,6 +1098,22 @@ body {
   line-height: 1.4;
 }
 
+/* "CWDs: a, b, c" — shown only when a session roamed across >1 working
+   directory (e.g. /cd between repos). Wraps in full so no directory is hidden.
+   Coloured with the git-branch accent (location/context metadata) so the roamed
+   directories stand out from the dim meta row rather than blending into it. */
+.picker__session-dirs {
+  margin-top: 2px;
+  color: var(--git-branch);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.picker__session-dirs-label {
+  color: var(--accent);
+  font-weight: 600;
+}
+
 .picker__session-ongoing {
   display: inline-flex;
   align-items: center;

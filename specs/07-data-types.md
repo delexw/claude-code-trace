@@ -207,12 +207,14 @@ type TaskStatus = "pending" | "in_progress" | "completed" | "cancelled";
 
 ## `SessionInfo` Field Notes
 
-| Field           | Notes                                                                                                                                                                                  |
-| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `first_message` | First user turn content (truncated at ~200 chars)                                                                                                                                      |
-| `mod_time`      | ISO-8601 timestamp of last file modification                                                                                                                                           |
-| `session_id`    | UUID of the root session entry                                                                                                                                                         |
-| `git_branch`    | Git branch from the last JSONL entry (per-entry; tracks `/cd` and v2.1.157+ EnterWorktree switches). Pre-v2.1.176 sessions may show a stale branch after `/cd` — cwd is authoritative. |
+| Field           | Notes                                                                                                                                                                                                                                                                                                |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `first_message` | First user turn content (truncated at ~200 chars)                                                                                                                                                                                                                                                    |
+| `mod_time`      | ISO-8601 timestamp of last file modification                                                                                                                                                                                                                                                         |
+| `session_id`    | UUID of the root session entry                                                                                                                                                                                                                                                                       |
+| `git_branch`    | Git branch from the last JSONL entry (per-entry; tracks `/cd` and v2.1.157+ EnterWorktree switches). Pre-v2.1.176 sessions may show a stale branch after `/cd` — cwd is authoritative.                                                                                                               |
+| `cwd`           | Working directory from the **last** JSONL entry (per-entry, last-seen; tracks `/cd` and EnterWorktree). Authoritative for resume and git-info. Equals `dirs[-1]`.                                                                                                                                    |
+| `dirs`          | Every distinct working directory the session touched, in first-seen order. `dirs[0]` is the origin (the folder the JSONL file lives under); `dirs[-1]` equals `cwd`. Drives the project-node label (by origin) and the session-row "CWDs" list. Optional — older cached payloads fall back to `cwd`. |
 
 ---
 

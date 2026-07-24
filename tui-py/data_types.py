@@ -144,6 +144,9 @@ class SessionInfo:
     duration_ms: int = 0
     model: str = ""
     cwd: str = ""
+    # Every distinct working directory the session touched, in first-seen order.
+    # dirs[0] is the origin (where the session started); dirs[-1] equals cwd.
+    dirs: list[str] = field(default_factory=list)
     git_branch: str = ""
     permission_mode: str = ""
     liveness: Liveness | None = None
@@ -367,6 +370,7 @@ def session_info_from_dict(d: dict) -> SessionInfo:
         duration_ms=int(d.get("duration_ms", 0)),
         model=d.get("model", ""),
         cwd=d.get("cwd", ""),
+        dirs=list(d.get("dirs") or []),
         git_branch=d.get("git_branch", ""),
         permission_mode=d.get("permission_mode", ""),
         liveness=_liveness_from_dict(d.get("liveness")),

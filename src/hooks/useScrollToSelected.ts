@@ -1,5 +1,18 @@
 import { useRef, useEffect } from "react";
 
+/**
+ * Keep the selected list item in view by scrolling ITS OWN nearest scroll
+ * container — never the page.
+ *
+ * We deliberately do NOT use `element.scrollIntoView()`: that scrolls *every*
+ * scrollable ancestor, and an `overflow: hidden` element is still
+ * programmatically scrollable. The app shell (`.app` / `#root` / `body`) is
+ * `overflow: hidden`, so `scrollIntoView` would scroll the shell and push the
+ * InfoBar + ViewToolbar off the top — with no scrollbar to bring them back
+ * (both bars vanish after navigating). Instead we locate the nearest real
+ * scroll container and adjust only its `scrollTop`; if there is no dedicated
+ * scroll container, we do nothing rather than risk scrolling the shell.
+ */
 export function useScrollToSelected(dep: number) {
   const ref = useRef<HTMLDivElement>(null);
 
@@ -7,7 +20,8 @@ export function useScrollToSelected(dep: number) {
     const el = ref.current;
     if (!el) return;
 
-    let container = el.parentElement;
+    // Nearest ancestor that actually scrolls (overflow auto/scroll on Y).
+    let container: HTMLElement | null = el.parentElement;
     while (container && container !== document.body) {
       const style = window.getComputedStyle(container);
       if (
@@ -21,23 +35,20 @@ export function useScrollToSelected(dep: number) {
       container = container.parentElement;
     }
 
-    const containerHeight =
-      container && container !== document.body ? container.clientHeight : window.innerHeight;
+    // No dedicated scroll container → nothing to do. Falling back to
+    // scrollIntoView here would scroll the overflow:hidden app shell.
+    if (!container || container === document.body) return;
 
-    // Use getBoundingClientRect to determine if the element is above the viewport
     const elRect = el.getBoundingClientRect();
-    const containerRect =
-      container && container !== document.body
-        ? container.getBoundingClientRect()
-        : new DOMRect(0, 0, window.innerWidth, window.innerHeight);
+    const containerRect = container.getBoundingClientRect();
 
-    // If the top is above the container, or the element is taller than the
-    // container, align to the top so the header stays visible.
-    if (elRect.top < containerRect.top || el.offsetHeight > containerHeight) {
-      el.scrollIntoView({ block: "start" });
+    if (elRect.top < containerRect.top || el.offsetHeight > container.clientHeight) {
+      // Above the container, or taller than it → align the element top to the
+      // container top (block: "start").
+      container.scrollTop += elRect.top - containerRect.top;
     } else if (elRect.bottom > containerRect.bottom) {
-      // Below the container → bring into view with nearest alignment.
-      el.scrollIntoView({ block: "nearest" });
+      // Below the container → bring it just into view (block: "nearest").
+      container.scrollTop += elRect.bottom - containerRect.bottom;
     }
     // Already fully visible → no-op.
   }, [dep]);

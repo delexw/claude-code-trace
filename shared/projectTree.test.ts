@@ -62,6 +62,33 @@ describe("buildProjectNodes", () => {
     expect(a.name).toBe("proj-a");
   });
 
+  it("labels a roaming session by its origin dir, not its last cwd", () => {
+    // A session that started in sso-server but /cd'd into other repos: the file
+    // still lives under the sso-server folder, so the node must be named for the
+    // origin (dirs[0]), not the last-seen cwd (dirs[last] == cwd).
+    const sessions = [
+      makeSession({
+        path: "/home/user/.claude/projects/-Users-me-repos-sso-server/s1.jsonl",
+        dirs: ["/Users/me/repos/sso-server", "/Users/me/seo/elements-backend"],
+        cwd: "/Users/me/seo/elements-backend",
+      }),
+    ];
+    const nodes = buildProjectNodes(sessions);
+    expect(nodes).toHaveLength(1);
+    expect(nodes[0].name).toBe("sso-server");
+  });
+
+  it("falls back to cwd for the label when dirs is absent", () => {
+    const sessions = [
+      makeSession({
+        path: "/home/user/.claude/projects/proj-a/s1.jsonl",
+        cwd: "/home/user/proj-a",
+        dirs: undefined,
+      }),
+    ];
+    expect(buildProjectNodes(sessions)[0].name).toBe("proj-a");
+  });
+
   it("tracks ongoing status", () => {
     const sessions = [
       makeSession({

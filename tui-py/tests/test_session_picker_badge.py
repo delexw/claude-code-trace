@@ -71,3 +71,34 @@ def test_render_session_no_liveness_omits_badge():
     text = _content_text(session)
     assert "busy" not in text.plain
     assert "idle" not in text.plain
+
+
+# ---------------------------------------------------------------------------
+# _render_session — the "CWDs" line for roaming sessions
+# ---------------------------------------------------------------------------
+
+
+def test_render_session_shows_worked_in_dirs_when_roaming():
+    session = SessionInfo(
+        session_id="sid-roam12345",
+        dirs=[
+            "/Users/me/repos/sso-server",
+            "/Users/me/seo/elements-storefront",
+            "/Users/me/seo/elements-backend",
+        ],
+        cwd="/Users/me/seo/elements-backend",
+    )
+    text = _content_text(session)
+    assert "CWDs: " in text.plain
+    assert "sso-server, elements-storefront, elements-backend" in text.plain
+    # The directory list is accent-coloured so it stands out from the dim meta row.
+    matches = _spans_with(text, theme.ACCENT)
+    assert any(
+        "sso-server, elements-storefront, elements-backend" in covered for covered, _ in matches
+    )
+
+
+def test_render_session_omits_worked_in_for_single_dir():
+    session = SessionInfo(session_id="sid-single1234", dirs=["/Users/me/repos/sso-server"])
+    text = _content_text(session)
+    assert "CWDs" not in text.plain

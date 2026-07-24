@@ -11,7 +11,7 @@ from textual.widgets import ListItem, Static
 
 import theme
 from data_types import Liveness, SessionInfo
-from format_utils import format_cost, format_tokens, short_model, time_ago
+from format_utils import format_cost, format_tokens, short_model, short_path, time_ago
 from theme import get_model_color
 from widgets.highlight_list import HighlightListView
 
@@ -106,11 +106,22 @@ def _render_session(s: SessionInfo, anim_frame: int = 0) -> object:
         )
         line2.append(f"  {badge}", style=badge_style)
 
+    # "CWDs" line: only when the session roamed across >1 working directory
+    # (e.g. /cd between repos). Lists every distinct dir so none is hidden.
+    dirs_line: Text | None = None
+    if len(s.dirs) > 1:
+        dirs_line = Text()
+        dirs_line.append("CWDs: ", style=f"bold {theme.ACCENT}")
+        # Accent the roamed directories so they stand out from the dim meta row.
+        dirs_line.append(", ".join(short_path(d) for d in s.dirs), style=theme.ACCENT)
+
+    parts: list[Text | str] = [line1]
     if s.name and s.first_message:
-        subtitle = Text(s.first_message, style=theme.TEXT_DIM)
-        content = Text.assemble(line1, "\n", subtitle, "\n", line2)
-    else:
-        content = Text.assemble(line1, "\n", line2)
+        parts += ["\n", Text(s.first_message, style=theme.TEXT_DIM)]
+    if dirs_line is not None:
+        parts += ["\n", dirs_line]
+    parts += ["\n", line2]
+    content = Text.assemble(*parts)
     sep = Rule(style=theme.TEXT_MUTED, characters="─")
     return Group(content, sep)
 
