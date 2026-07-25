@@ -996,9 +996,24 @@ pub(crate) fn scan_session_metadata(path: &str) -> SessionMetadata {
         // changes from `/cd` (v2.1.169+) and EnterWorktree switches (v2.1.157+) are reflected.
         // Note: pre-v2.1.176 JSONL carries a stale gitBranch after `/cd` — the field was not
         // updated by Claude Code until that release; the cwd value is still authoritative.
+        //
+        // v2.1.219+: DirectoryAdded fires when /add-dir or register_repo_root adds a new
+        // working directory mid-session. This expands the session's scope WITHOUT changing
+        // the primary cwd, so we add the directory to dirs but leave meta.cwd unchanged.
+        let is_directory_added = {
+            let hook_top = raw.get("hookEvent").and_then(|v| v.as_str()).unwrap_or("");
+            let hook_data = raw
+                .get("data")
+                .and_then(|d| d.get("hookEvent"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            hook_top == "DirectoryAdded" || hook_data == "DirectoryAdded"
+        };
         if let Some(cwd) = raw.get("cwd").and_then(|v| v.as_str()) {
             if !cwd.is_empty() {
-                meta.cwd = cwd.to_string();
+                if !is_directory_added {
+                    meta.cwd = cwd.to_string();
+                }
                 // Track distinct working directories in first-seen order. A session
                 // that `/cd`s across repos records each one; `dirs[0]` stays the origin.
                 if !meta.dirs.iter().any(|d| d == cwd) {
@@ -1006,19 +1021,20 @@ pub(crate) fn scan_session_metadata(path: &str) -> SessionMetadata {
                 }
             }
         }
-        // v2.1.219+: DirectoryAdded hook events register a new working directory via
-        // /add-dir or the SDK register_repo_root control request without changing the
-        // primary cwd. Extract the `directory` path from the hook data block and add it
-        // to dirs so the session's full working-directory set is reflected — but never
-        // update cwd itself, since the primary directory has not changed.
-        if entry_type == "progress" {
-            if let Some(data) = raw.get("data") {
-                if data.get("hookEvent").and_then(|v| v.as_str()) == Some("DirectoryAdded") {
-                    if let Some(dir) = data.get("directory").and_then(|v| v.as_str()) {
-                        if !dir.is_empty() && !meta.dirs.iter().any(|d| d == dir) {
-                            meta.dirs.push(dir.to_string());
-                        }
-                    }
+        // DirectoryAdded may carry the new dir in a top-level "directory" field or
+        // nested inside the data object. Capture both so dirs stays complete.
+        if is_directory_added {
+            for dir in [
+                raw.get("directory").and_then(|v| v.as_str()),
+                raw.get("data")
+                    .and_then(|d| d.get("directory"))
+                    .and_then(|v| v.as_str()),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                if !dir.is_empty() && !meta.dirs.iter().any(|d| d == dir) {
+                    meta.dirs.push(dir.to_string());
                 }
             }
         }
@@ -3723,38 +3739,93 @@ mod tests {
         std::fs::remove_dir_all(&tmp).ok();
     }
 
-    // --- Issue #225: v2.1.219+ DirectoryAdded hook event adds to dirs without changing cwd ---
+    // --- Issue #225: DirectoryAdded hook (v2.1.219) ---
 
     #[test]
-    fn scan_session_metadata_directory_added_hook_appends_to_dirs_not_cwd() {
-        // A progress entry with hookEvent=DirectoryAdded must add its `directory` value to
-        // meta.dirs but must NOT change meta.cwd, because the primary working directory
-        // is unchanged — the user added a secondary repo via /add-dir or the SDK
-        // register_repo_root control request.
-        let tmp = env::temp_dir().join("tail-test-dir-added-appends");
+    fn scan_session_metadata_directory_added_via_cwd_does_not_update_primary_cwd() {
+        // DirectoryAdded fires when /add-dir or register_repo_root adds a new working
+        // directory mid-session. The primary cwd must NOT change; only dirs grows.
+        let tmp = env::temp_dir().join("tail-test-directory-added-cwd");
         std::fs::create_dir_all(&tmp).unwrap();
         let path = tmp.join("session.jsonl");
 
-        // Normal session entry establishing primary cwd.
-        let entry1 = "{\"type\":\"user\",\"uuid\":\"u1\",\"parentUuid\":null,\"isSidechain\":false,\"timestamp\":\"2026-07-24T10:00:00Z\",\"cwd\":\"/home/user/primary-repo\",\"gitBranch\":\"main\",\"message\":{\"role\":\"user\",\"content\":\"hello\"}}\n";
-        // v2.1.219+ DirectoryAdded hook event emitted by Claude Code when /add-dir runs.
-        let entry2 = "{\"type\":\"progress\",\"uuid\":\"p1\",\"parentUuid\":\"u1\",\"isSidechain\":false,\"timestamp\":\"2026-07-24T10:00:01Z\",\"cwd\":\"/home/user/primary-repo\",\"gitBranch\":\"main\",\"data\":{\"type\":\"hook_progress\",\"hookEvent\":\"DirectoryAdded\",\"hookName\":\"dir-watcher\",\"directory\":\"/home/user/secondary-repo\"}}\n";
+        // Normal user entry establishing the primary cwd.
+        let entry1 = "{\"type\":\"user\",\"uuid\":\"u1\",\"parentUuid\":null,\"isSidechain\":false,\"timestamp\":\"2026-07-01T10:00:00Z\",\"cwd\":\"/repo/primary\",\"gitBranch\":\"main\",\"message\":{\"role\":\"user\",\"content\":\"start\"}}\n";
+        // DirectoryAdded hook entry carrying the added dir in `cwd` (progress entry form).
+        let entry2 = "{\"type\":\"progress\",\"uuid\":\"p1\",\"parentUuid\":\"u1\",\"isSidechain\":false,\"timestamp\":\"2026-07-01T10:00:01Z\",\"cwd\":\"/repo/secondary\",\"hookEvent\":\"DirectoryAdded\",\"data\":{}}\n";
 
         std::fs::write(&path, format!("{entry1}{entry2}")).unwrap();
 
         let meta = scan_session_metadata(path.to_str().unwrap());
         assert_eq!(
-            meta.cwd, "/home/user/primary-repo",
-            "cwd must remain the primary directory (not replaced by DirectoryAdded dir); got {:?}",
+            meta.cwd, "/repo/primary",
+            "DirectoryAdded must NOT update the primary cwd (got {:?})",
             meta.cwd
         );
         assert_eq!(
             meta.dirs,
-            vec![
-                "/home/user/primary-repo".to_string(),
-                "/home/user/secondary-repo".to_string()
-            ],
-            "dirs must include both the primary cwd and the DirectoryAdded directory; got {:?}",
+            vec!["/repo/primary".to_string(), "/repo/secondary".to_string()],
+            "dirs must include the added directory (got {:?})",
+            meta.dirs
+        );
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn scan_session_metadata_directory_added_via_directory_field() {
+        // DirectoryAdded may carry the new directory in a top-level "directory" field
+        // (rather than "cwd"). Both fields must be captured in dirs.
+        let tmp = env::temp_dir().join("tail-test-directory-added-field");
+        std::fs::create_dir_all(&tmp).unwrap();
+        let path = tmp.join("session.jsonl");
+
+        let entry1 = "{\"type\":\"user\",\"uuid\":\"u1\",\"parentUuid\":null,\"isSidechain\":false,\"timestamp\":\"2026-07-01T10:00:00Z\",\"cwd\":\"/repo/primary\",\"gitBranch\":\"main\",\"message\":{\"role\":\"user\",\"content\":\"start\"}}\n";
+        // DirectoryAdded with the new dir in "directory" field and primary in "cwd".
+        let entry2 = "{\"type\":\"progress\",\"uuid\":\"p1\",\"parentUuid\":\"u1\",\"isSidechain\":false,\"timestamp\":\"2026-07-01T10:00:01Z\",\"cwd\":\"/repo/primary\",\"hookEvent\":\"DirectoryAdded\",\"directory\":\"/repo/secondary\",\"data\":{}}\n";
+
+        std::fs::write(&path, format!("{entry1}{entry2}")).unwrap();
+
+        let meta = scan_session_metadata(path.to_str().unwrap());
+        assert_eq!(
+            meta.cwd, "/repo/primary",
+            "primary cwd must be unchanged (got {:?})",
+            meta.cwd
+        );
+        assert_eq!(
+            meta.dirs,
+            vec!["/repo/primary".to_string(), "/repo/secondary".to_string()],
+            "dirs must contain added dir from 'directory' field (got {:?})",
+            meta.dirs
+        );
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn scan_session_metadata_directory_added_in_data_hook_event() {
+        // DirectoryAdded may arrive as a system entry with hookEvent nested inside data.
+        // The is_directory_added check must recognise both the top-level and data-nested form.
+        let tmp = env::temp_dir().join("tail-test-directory-added-data");
+        std::fs::create_dir_all(&tmp).unwrap();
+        let path = tmp.join("session.jsonl");
+
+        let entry1 = "{\"type\":\"user\",\"uuid\":\"u1\",\"parentUuid\":null,\"isSidechain\":false,\"timestamp\":\"2026-07-01T10:00:00Z\",\"cwd\":\"/repo/origin\",\"gitBranch\":\"main\",\"message\":{\"role\":\"user\",\"content\":\"start\"}}\n";
+        // DirectoryAdded as a system entry with hookEvent nested in data.
+        let entry2 = "{\"type\":\"system\",\"uuid\":\"s1\",\"parentUuid\":\"u1\",\"isSidechain\":false,\"timestamp\":\"2026-07-01T10:00:01Z\",\"cwd\":\"/repo/extra\",\"data\":{\"hookEvent\":\"DirectoryAdded\",\"directory\":\"/repo/extra\"}}\n";
+
+        std::fs::write(&path, format!("{entry1}{entry2}")).unwrap();
+
+        let meta = scan_session_metadata(path.to_str().unwrap());
+        assert_eq!(
+            meta.cwd, "/repo/origin",
+            "primary cwd must not be overwritten by data-nested DirectoryAdded (got {:?})",
+            meta.cwd
+        );
+        assert_eq!(
+            meta.dirs,
+            vec!["/repo/origin".to_string(), "/repo/extra".to_string()],
+            "dirs must include extra dir added via data.hookEvent (got {:?})",
             meta.dirs
         );
 
