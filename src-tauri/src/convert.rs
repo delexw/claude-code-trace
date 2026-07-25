@@ -560,6 +560,11 @@ mod tests {
         assert_eq!(short_model("claude-fable-5-20261001[1M]"), "fable5");
     }
 
+    #[test]
+    fn short_model_opus5() {
+        assert_eq!(short_model("claude-opus-5"), "opus5");
+    }
+
     // ---- tool_category_str tests ----
 
     #[test]

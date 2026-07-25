@@ -38,8 +38,7 @@ const MODEL_PRICING: {
   cacheRead: number;
   cacheWrite: number;
 }[] = [
-  // Claude Opus 5 (claude-code v2.1.219+): $10/$50 per Mtok (fast-mode rate).
-  // Must appear before the generic "opus" entry.
+  // opus-5 must appear before the generic "opus" entry so it matches first.
   { prefix: "opus-5", input: 10, output: 50, cacheRead: 1.0, cacheWrite: 12.5 },
   { prefix: "opus", input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
   { prefix: "sonnet", input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
@@ -50,7 +49,7 @@ function pricingForModel(model: string) {
   const m = model.toLowerCase();
   return (
     MODEL_PRICING.find((p) => m.includes(p.prefix)) ??
-    MODEL_PRICING.find((p) => p.prefix === "sonnet")!
+    MODEL_PRICING.find((p) => p.prefix === "sonnet")! // default sonnet
   );
 }
 

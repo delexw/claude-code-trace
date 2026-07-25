@@ -35,7 +35,7 @@ struct ModelPricing {
 fn pricing_for_model(model: &str) -> ModelPricing {
     let m = model.to_lowercase();
     if m.contains("opus-5") {
-        // Claude Opus 5 (claude-code v2.1.219+): $10/$50 per Mtok (fast-mode rate).
+        // Claude Opus 5: $10/$50 per Mtok input/output.
         ModelPricing {
             input: 10.0,
             output: 50.0,
@@ -1909,7 +1909,7 @@ mod tests {
     }
 
     #[test]
-    fn pricing_opus5() {
+    fn pricing_opus5_uses_new_rates() {
         let p = pricing_for_model("claude-opus-5");
         assert_eq!(p.input, 10.0);
         assert_eq!(p.output, 50.0);
@@ -1918,7 +1918,7 @@ mod tests {
     }
 
     #[test]
-    fn pricing_opus5_does_not_match_opus4() {
+    fn pricing_opus4_still_uses_old_rates() {
         let p = pricing_for_model("claude-opus-4-7");
         assert_eq!(p.input, 5.0);
         assert_eq!(p.output, 25.0);

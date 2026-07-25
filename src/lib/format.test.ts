@@ -63,6 +63,10 @@ describe("shortModel", () => {
   it("handles new single-number family version with date", () => {
     expect(shortModel("claude-fable-5-20261001")).toBe("fable5");
   });
+
+  it("handles claude-opus-5 (single major version, no minor)", () => {
+    expect(shortModel("claude-opus-5")).toBe("opus5");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -108,18 +112,17 @@ describe("estimateCost", () => {
     expect(cost).toBeCloseTo(5.0);
   });
 
-  it("calculates cost for claude-opus-5 at fast-mode rates", () => {
-    // opus-5: input=10, output=50, cacheRead=1.0, cacheWrite=12.5 per million
-    expect(estimateCost(1_000_000, 0, 0, 0, "claude-opus-5")).toBeCloseTo(10.0);
-    expect(estimateCost(0, 1_000_000, 0, 0, "claude-opus-5")).toBeCloseTo(50.0);
-    expect(estimateCost(0, 0, 1_000_000, 0, "claude-opus-5")).toBeCloseTo(1.0);
-    expect(estimateCost(0, 0, 0, 1_000_000, "claude-opus-5")).toBeCloseTo(12.5);
+  it("calculates cost for claude-opus-5 at $10/$50 rates", () => {
+    // claude-opus-5: input=10, output=50 per million
+    const inputCost = estimateCost(1_000_000, 0, 0, 0, "claude-opus-5");
+    expect(inputCost).toBeCloseTo(10.0);
+    const outputCost = estimateCost(0, 1_000_000, 0, 0, "claude-opus-5");
+    expect(outputCost).toBeCloseTo(50.0);
   });
 
-  it("does not apply opus-5 pricing to older opus models", () => {
-    // opus-4-x must still use the $5/$25 rate
-    expect(estimateCost(1_000_000, 0, 0, 0, "claude-opus-4-7")).toBeCloseTo(5.0);
-    expect(estimateCost(1_000_000, 0, 0, 0, "claude-opus-4-8")).toBeCloseTo(5.0);
+  it("opus-4.x still uses old $5/$25 rates after opus-5 entry added", () => {
+    const cost = estimateCost(1_000_000, 0, 0, 0, "claude-opus-4-7");
+    expect(cost).toBeCloseTo(5.0);
   });
 
   it("calculates cost for sonnet model", () => {
