@@ -1006,6 +1006,22 @@ pub(crate) fn scan_session_metadata(path: &str) -> SessionMetadata {
                 }
             }
         }
+        // v2.1.219+: DirectoryAdded hook events register a new working directory via
+        // /add-dir or the SDK register_repo_root control request without changing the
+        // primary cwd. Extract the `directory` path from the hook data block and add it
+        // to dirs so the session's full working-directory set is reflected — but never
+        // update cwd itself, since the primary directory has not changed.
+        if entry_type == "progress" {
+            if let Some(data) = raw.get("data") {
+                if data.get("hookEvent").and_then(|v| v.as_str()) == Some("DirectoryAdded") {
+                    if let Some(dir) = data.get("directory").and_then(|v| v.as_str()) {
+                        if !dir.is_empty() && !meta.dirs.iter().any(|d| d == dir) {
+                            meta.dirs.push(dir.to_string());
+                        }
+                    }
+                }
+            }
+        }
         if let Some(branch) = raw.get("gitBranch").and_then(|v| v.as_str()) {
             if !branch.is_empty() {
                 meta.git_branch = branch.to_string();
@@ -3703,6 +3719,70 @@ mod tests {
         assert_eq!(meta.cwd, "/home/user/stable");
         assert_eq!(meta.git_branch, "main");
         assert_eq!(meta.dirs, vec!["/home/user/stable".to_string()]);
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    // --- Issue #225: v2.1.219+ DirectoryAdded hook event adds to dirs without changing cwd ---
+
+    #[test]
+    fn scan_session_metadata_directory_added_hook_appends_to_dirs_not_cwd() {
+        // A progress entry with hookEvent=DirectoryAdded must add its `directory` value to
+        // meta.dirs but must NOT change meta.cwd, because the primary working directory
+        // is unchanged — the user added a secondary repo via /add-dir or the SDK
+        // register_repo_root control request.
+        let tmp = env::temp_dir().join("tail-test-dir-added-appends");
+        std::fs::create_dir_all(&tmp).unwrap();
+        let path = tmp.join("session.jsonl");
+
+        // Normal session entry establishing primary cwd.
+        let entry1 = "{\"type\":\"user\",\"uuid\":\"u1\",\"parentUuid\":null,\"isSidechain\":false,\"timestamp\":\"2026-07-24T10:00:00Z\",\"cwd\":\"/home/user/primary-repo\",\"gitBranch\":\"main\",\"message\":{\"role\":\"user\",\"content\":\"hello\"}}\n";
+        // v2.1.219+ DirectoryAdded hook event emitted by Claude Code when /add-dir runs.
+        let entry2 = "{\"type\":\"progress\",\"uuid\":\"p1\",\"parentUuid\":\"u1\",\"isSidechain\":false,\"timestamp\":\"2026-07-24T10:00:01Z\",\"cwd\":\"/home/user/primary-repo\",\"gitBranch\":\"main\",\"data\":{\"type\":\"hook_progress\",\"hookEvent\":\"DirectoryAdded\",\"hookName\":\"dir-watcher\",\"directory\":\"/home/user/secondary-repo\"}}\n";
+
+        std::fs::write(&path, format!("{entry1}{entry2}")).unwrap();
+
+        let meta = scan_session_metadata(path.to_str().unwrap());
+        assert_eq!(
+            meta.cwd, "/home/user/primary-repo",
+            "cwd must remain the primary directory (not replaced by DirectoryAdded dir); got {:?}",
+            meta.cwd
+        );
+        assert_eq!(
+            meta.dirs,
+            vec![
+                "/home/user/primary-repo".to_string(),
+                "/home/user/secondary-repo".to_string()
+            ],
+            "dirs must include both the primary cwd and the DirectoryAdded directory; got {:?}",
+            meta.dirs
+        );
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn scan_session_metadata_directory_added_hook_deduplicates_existing_dir() {
+        // If the DirectoryAdded directory path is already present in dirs (e.g. a re-register),
+        // it must not be added again — dirs stays deduplicated.
+        let tmp = env::temp_dir().join("tail-test-dir-added-dedup");
+        std::fs::create_dir_all(&tmp).unwrap();
+        let path = tmp.join("session.jsonl");
+
+        let entry1 = "{\"type\":\"user\",\"uuid\":\"u1\",\"parentUuid\":null,\"isSidechain\":false,\"timestamp\":\"2026-07-24T10:00:00Z\",\"cwd\":\"/home/user/primary-repo\",\"gitBranch\":\"main\",\"message\":{\"role\":\"user\",\"content\":\"hello\"}}\n";
+        // DirectoryAdded fires for a path already seen as cwd — must not duplicate.
+        let entry2 = "{\"type\":\"progress\",\"uuid\":\"p1\",\"parentUuid\":\"u1\",\"isSidechain\":false,\"timestamp\":\"2026-07-24T10:00:01Z\",\"cwd\":\"/home/user/primary-repo\",\"gitBranch\":\"main\",\"data\":{\"type\":\"hook_progress\",\"hookEvent\":\"DirectoryAdded\",\"hookName\":\"dir-watcher\",\"directory\":\"/home/user/primary-repo\"}}\n";
+
+        std::fs::write(&path, format!("{entry1}{entry2}")).unwrap();
+
+        let meta = scan_session_metadata(path.to_str().unwrap());
+        assert_eq!(meta.cwd, "/home/user/primary-repo");
+        assert_eq!(
+            meta.dirs,
+            vec!["/home/user/primary-repo".to_string()],
+            "dirs must not duplicate a path already present; got {:?}",
+            meta.dirs
+        );
 
         std::fs::remove_dir_all(&tmp).ok();
     }
