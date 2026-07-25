@@ -108,6 +108,20 @@ describe("estimateCost", () => {
     expect(cost).toBeCloseTo(5.0);
   });
 
+  it("calculates cost for claude-opus-5 at fast-mode rates", () => {
+    // opus-5: input=10, output=50, cacheRead=1.0, cacheWrite=12.5 per million
+    expect(estimateCost(1_000_000, 0, 0, 0, "claude-opus-5")).toBeCloseTo(10.0);
+    expect(estimateCost(0, 1_000_000, 0, 0, "claude-opus-5")).toBeCloseTo(50.0);
+    expect(estimateCost(0, 0, 1_000_000, 0, "claude-opus-5")).toBeCloseTo(1.0);
+    expect(estimateCost(0, 0, 0, 1_000_000, "claude-opus-5")).toBeCloseTo(12.5);
+  });
+
+  it("does not apply opus-5 pricing to older opus models", () => {
+    // opus-4-x must still use the $5/$25 rate
+    expect(estimateCost(1_000_000, 0, 0, 0, "claude-opus-4-7")).toBeCloseTo(5.0);
+    expect(estimateCost(1_000_000, 0, 0, 0, "claude-opus-4-8")).toBeCloseTo(5.0);
+  });
+
   it("calculates cost for sonnet model", () => {
     // sonnet: input=3, output=15
     const cost = estimateCost(0, 1_000_000, 0, 0, "claude-sonnet-4-6");
