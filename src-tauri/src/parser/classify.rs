@@ -3293,4 +3293,88 @@ mod tests {
             "Auto-mode denial: tool \"Write\" — auto-mode restrictions"
         );
     }
+
+    // --- Issue #225: v2.1.219+ DirectoryAdded hook event is handled by existing catch-alls ---
+
+    #[test]
+    fn classify_directory_added_progress_entry_produces_hook_msg() {
+        // v2.1.219+: DirectoryAdded fires when /add-dir or SDK register_repo_root registers a
+        // new working directory mid-session. It surfaces as a progress/hook_progress entry.
+        // The generic hookEvent presence check rescues it without an explicit match arm.
+        let e = Entry {
+            entry_type: "progress".to_string(),
+            uuid: "uuid-dir-added-progress".to_string(),
+            timestamp: "2026-07-24T10:00:00Z".to_string(),
+            data: Some(json!({
+                "type": "hook_progress",
+                "hookEvent": "DirectoryAdded",
+                "hookName": "my-dir-hook",
+                "directory": "/home/user/new-repo"
+            })),
+            ..Default::default()
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::Hook(h)) => {
+                assert_eq!(h.hook_event, "DirectoryAdded");
+                assert_eq!(h.hook_name, "my-dir-hook");
+            }
+            other => panic!("Expected Hook for DirectoryAdded progress entry, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_directory_added_system_hook_progress_entry_produces_hook_msg() {
+        // v2.1.219+: DirectoryAdded may also arrive as type:"system", subtype:"hook_progress"
+        // in verbose/stream-json mode. The hook_progress subtype rescue must handle it.
+        let e = Entry {
+            entry_type: "system".to_string(),
+            uuid: "uuid-dir-added-sys".to_string(),
+            timestamp: "2026-07-24T10:01:00Z".to_string(),
+            subtype: "hook_progress".to_string(),
+            hook_event: "DirectoryAdded".to_string(),
+            hook_name: "dir-register-hook".to_string(),
+            ..Default::default()
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::Hook(h)) => {
+                assert_eq!(h.hook_event, "DirectoryAdded");
+                assert_eq!(h.hook_name, "dir-register-hook");
+            }
+            other => {
+                panic!("Expected Hook for system/hook_progress DirectoryAdded entry, got {other:?}")
+            }
+        }
+    }
+
+    #[test]
+    fn classify_directory_added_attachment_entry_produces_hook_msg() {
+        // v2.1.219+: DirectoryAdded hook results surface as attachment entries.
+        // The generic attachment hookEvent rescue must handle it without an explicit arm.
+        let e = Entry {
+            entry_type: "attachment".to_string(),
+            uuid: "uuid-dir-added-att".to_string(),
+            timestamp: "2026-07-24T10:02:00Z".to_string(),
+            attachment: Some(json!({
+                "type": "hook_success",
+                "hookEvent": "DirectoryAdded",
+                "hookName": "my-dir-hook",
+                "directory": "/home/user/new-repo"
+            })),
+            ..Default::default()
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::Hook(h)) => {
+                assert_eq!(h.hook_event, "DirectoryAdded");
+                assert_eq!(h.hook_name, "my-dir-hook");
+                let meta = h
+                    .metadata
+                    .expect("metadata must be captured for attachment hooks");
+                assert_eq!(
+                    meta.get("hookEvent").and_then(|v| v.as_str()),
+                    Some("DirectoryAdded")
+                );
+            }
+            other => panic!("Expected Hook for DirectoryAdded attachment entry, got {other:?}"),
+        }
+    }
 }
