@@ -38,6 +38,8 @@ const MODEL_PRICING: {
   cacheRead: number;
   cacheWrite: number;
 }[] = [
+  // opus-5 must appear before the generic "opus" entry so it matches first.
+  { prefix: "opus-5", input: 10, output: 50, cacheRead: 1.0, cacheWrite: 12.5 },
   { prefix: "opus", input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
   { prefix: "sonnet", input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
   { prefix: "haiku", input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 },
@@ -45,7 +47,10 @@ const MODEL_PRICING: {
 
 function pricingForModel(model: string) {
   const m = model.toLowerCase();
-  return MODEL_PRICING.find((p) => m.includes(p.prefix)) ?? MODEL_PRICING[1]; // default sonnet
+  return (
+    MODEL_PRICING.find((p) => m.includes(p.prefix)) ??
+    MODEL_PRICING.find((p) => p.prefix === "sonnet")! // default sonnet
+  );
 }
 
 /**
