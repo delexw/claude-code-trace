@@ -364,9 +364,23 @@ pub fn claude_projects_dir(configured: Option<&str>) -> Result<PathBuf, String> 
 }
 
 /// Claude Code's own sanitized-path length above which, as of CLI v2.1.224, it
-/// applies an undocumented disambiguation scheme to avoid different long paths
-/// colliding on the same project directory (see `encode_path`). We cannot
-/// reproduce that scheme, so `project_dir_for_path` refuses to guess past it.
+/// applies a disambiguation scheme to avoid different long paths colliding on
+/// the same project directory (see `encode_path`).
+///
+/// Empirically confirmed against the real CLI (v2.1.226, 2026-08-10): two
+/// absolute paths that differ only after character 200 of their naive
+/// `encode_path` encoding (219 chars in the test, differing only in the final
+/// `_case` vs `.case` segment) each got their own directory, not a shared one.
+/// Both resolved to a 207-char name: the first 200 characters of the naive
+/// encoding, followed by `-` and a distinct 6-character lowercase-alphanumeric
+/// suffix (`-lvek1m` and `-mmch4b`). Re-running the CLI against the same path
+/// reused the same directory rather than minting a new one, so the mapping is
+/// deterministic per path, not random per session — but the suffix must be
+/// derived from more than just the truncated 200-char prefix, since the two
+/// test paths share an identical prefix up to that point and still got
+/// different suffixes. The exact derivation (which hash, over what input) is
+/// not observable from the compiled CLI's behavior alone, so we cannot
+/// reproduce it bit-for-bit here.
 const LONG_PATH_DISAMBIGUATION_THRESHOLD: usize = 200;
 
 /// Return the Claude CLI projects directory for an absolute path.
@@ -374,11 +388,12 @@ const LONG_PATH_DISAMBIGUATION_THRESHOLD: usize = 200;
 /// Returns an error when the resolved path's sanitized name would exceed
 /// [`LONG_PATH_DISAMBIGUATION_THRESHOLD`] characters. Claude Code v2.1.224
 /// changed how it disambiguates such long paths to stop them colliding on a
-/// shared directory, but did not publish the new scheme — reproducing
-/// `encode_path`'s naive substitution for a long path risks resolving to a
-/// filename that no longer matches what Claude Code actually created,
-/// potentially pointing at the wrong project's sessions. Failing loudly here
-/// is preferable to silently guessing wrong.
+/// shared directory (confirmed empirically — see the constant's doc comment
+/// above for the observed real format), but the suffix derivation itself
+/// isn't reproducible from black-box CLI behavior — guessing wrong here would
+/// risk resolving to a filename that doesn't match what Claude Code actually
+/// created, potentially pointing at the wrong project's sessions. Failing
+/// loudly is preferable to silently guessing wrong.
 pub fn project_dir_for_path(abs_path: &str) -> Result<String, String> {
     let base = claude_projects_dir(None)?;
     let resolved = fs::canonicalize(abs_path).unwrap_or_else(|_| PathBuf::from(abs_path));
