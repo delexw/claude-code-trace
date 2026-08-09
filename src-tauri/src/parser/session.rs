@@ -10,6 +10,7 @@ use super::chunk::{build_chunks, Chunk};
 use super::classify::{classify, ClassifiedMsg};
 use super::debuglog::extract_hook_msgs;
 use super::entry::{cache_creation_from_value, parse_entry, Entry};
+use super::sanitize::is_attachment_block_type;
 
 /// SessionInfo holds metadata about a discovered session file for the picker.
 #[derive(Debug, Clone, Serialize)]
@@ -1655,7 +1656,7 @@ fn has_user_content_raw(raw: &Option<Value>, str_content: &str) -> bool {
         Some(Value::String(_)) => !str_content.trim().is_empty(),
         Some(Value::Array(blocks)) => blocks.iter().any(|b| {
             let bt = b.get("type").and_then(|v| v.as_str()).unwrap_or("");
-            bt == "text" || bt == "image"
+            bt == "text" || is_attachment_block_type(bt)
         }),
         _ => false,
     }
@@ -1822,10 +1823,8 @@ fn scan_ongoing_user(
     // the conversation moved forward without supplying their results. Pre-v2.1.122 /branch
     // fork sessions can produce this when the source session had rewound timeline entries.
     let has_continuation_content = blocks.iter().any(|b| {
-        matches!(
-            b.get("type").and_then(|v| v.as_str()).unwrap_or(""),
-            "text" | "image" | "document"
-        )
+        let bt = b.get("type").and_then(|v| v.as_str()).unwrap_or("");
+        bt == "text" || is_attachment_block_type(bt)
     });
     if has_continuation_content {
         pending_tool_ids.clear();

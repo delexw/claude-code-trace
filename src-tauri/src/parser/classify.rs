@@ -709,7 +709,7 @@ fn has_user_content(raw: &Option<Value>, str_content: &str) -> bool {
         Some(Value::String(_)) => !str_content.trim().is_empty(),
         Some(Value::Array(blocks)) => blocks.iter().any(|b| {
             let bt = b.get("type").and_then(|v| v.as_str()).unwrap_or("");
-            bt == "text" || bt == "image" || bt == "document"
+            bt == "text" || is_attachment_block_type(bt)
         }),
         _ => false,
     }
@@ -2433,6 +2433,37 @@ mod tests {
             Some(ClassifiedMsg::User(_)) => {}
             other => panic!("Expected UserMsg for document block, got {other:?}"),
         }
+    }
+
+    // --- Issue #235: unrecognized "diagnostics attachment" content block ---
+
+    #[test]
+    fn has_user_content_true_for_unrecognized_diagnostics_attachment_block() {
+        // v2.1.223 introduced a "diagnostics attachment" content block whose exact
+        // `type` string isn't documented. classify() must still produce a UserMsg
+        // (with a generic placeholder) instead of silently dropping the entry.
+        let content = Some(json!([{
+            "type": "diagnostics_attachment",
+            "diagnostics": {"code": "E1", "message": "session diagnostics"}
+        }]));
+        let e = make_entry("user", content);
+        match classify(e) {
+            Some(ClassifiedMsg::User(u)) => {
+                assert_eq!(u.text, "[Attachment: diagnostics_attachment]");
+            }
+            other => panic!("Expected UserMsg for diagnostics attachment block, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_malformed_diagnostics_attachment_does_not_panic() {
+        // A malformed diagnostics attachment -- non-object entries in the content
+        // array -- must not panic classify(); it should be treated as no content.
+        let content = Some(json!(["not-an-object", 42, null]));
+        let e = make_entry("user", content);
+        // Must not panic; whether it classifies as None or a message, either is fine
+        // as long as classify() returns normally.
+        let _ = classify(e);
     }
 
     // --- compact_boundary / isCompactSummary classification ---

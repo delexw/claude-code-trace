@@ -4,6 +4,22 @@ use std::fs;
 
 use super::patterns::*;
 
+/// Returns true when a content block's `type` discriminant names a non-text
+/// attachment: the known "image"/"document" shapes (v2.1.97+), or a future
+/// attachment-shaped block whose exact type name isn't documented yet. Claude
+/// Code v2.1.223's release notes mention a "diagnostics attachment" block
+/// without specifying its `type` string (issue #235); matching on the
+/// "attachment"/"diagnostic" substrings lets the parser recognize it (and any
+/// similarly-named future attachment) without hardcoding a guessed literal.
+/// None of the other known block discriminants (`text`, `tool_use`,
+/// `tool_result`, `thinking`, `server_tool_use`, `advisor_tool_result`)
+/// contain either substring, so this cannot misfire on them.
+pub fn is_attachment_block_type(block_type: &str) -> bool {
+    matches!(block_type, "image" | "document")
+        || block_type.contains("attachment")
+        || block_type.contains("diagnostic")
+}
+
 /// Extract text content from message.content (string or array of text blocks).
 pub fn extract_text(content: &Option<Value>) -> String {
     match content {
@@ -34,7 +50,26 @@ pub fn extract_text(content: &Option<Value>) -> String {
                             .unwrap_or("document");
                         parts.push(format!("[Document attached: {media_type}]"));
                     }
+                    // Issue #235: an unrecognized attachment-shaped block (e.g. a
+                    // "diagnostics attachment") still needs to surface as visible
+                    // content when it's the entry's only block -- see the fallback
+                    // below. It's intentionally *not* rendered inline alongside real
+                    // text/image/document blocks, matching how other unknown block
+                    // types (streaming deltas, etc.) are silently skipped when mixed
+                    // with real content.
                     _ => {}
+                }
+            }
+            // If nothing renderable was found, but the array held at least one
+            // attachment-shaped block we don't otherwise parse, show a generic
+            // placeholder instead of silently rendering the message as empty.
+            if parts.is_empty() {
+                if let Some(bt) = blocks
+                    .iter()
+                    .filter_map(|b| b.get("type").and_then(|v| v.as_str()))
+                    .find(|bt| is_attachment_block_type(bt))
+                {
+                    parts.push(format!("[Attachment: {bt}]"));
                 }
             }
             parts.join("\n")
@@ -296,6 +331,58 @@ mod tests {
             {"type": "text", "text": "only this"}
         ]));
         assert_eq!(extract_text(&v), "only this");
+    }
+
+    // --- Issue #235: unrecognized "diagnostics attachment"-shaped content block ---
+
+    #[test]
+    fn extract_text_diagnostics_attachment_only_produces_placeholder() {
+        // v2.1.223 introduced a "diagnostics attachment" content block whose exact
+        // `type` string isn't documented. When it's the entry's only block, it must
+        // not render as an empty message.
+        let v = Some(json!([{"type": "diagnostics_attachment", "diagnostics": {"code": "E1"}}]));
+        assert_eq!(extract_text(&v), "[Attachment: diagnostics_attachment]");
+    }
+
+    #[test]
+    fn extract_text_unknown_attachment_variant_produces_placeholder() {
+        // Any type string containing "attachment" or "diagnostic" is recognized,
+        // not just the exact literal guessed above -- the real schema is unknown.
+        let v = Some(json!([{"type": "diagnosticAttachment"}]));
+        assert_eq!(extract_text(&v), "[Attachment: diagnosticAttachment]");
+    }
+
+    #[test]
+    fn extract_text_diagnostics_attachment_alongside_text_is_not_duplicated() {
+        // When real text is present, the unrecognized attachment stays silent --
+        // matching how unknown block types are skipped when mixed with real content
+        // (extract_text_array_skips_non_text).
+        let v = Some(json!([
+            {"type": "text", "text": "see attached diagnostics"},
+            {"type": "diagnostics_attachment", "diagnostics": {"code": "E1"}}
+        ]));
+        assert_eq!(extract_text(&v), "see attached diagnostics");
+    }
+
+    #[test]
+    fn extract_text_malformed_diagnostics_attachment_does_not_panic() {
+        // A malformed attachment (missing every expected field) must still produce
+        // a placeholder rather than panicking or silently emptying the message --
+        // the exact failure mode the upstream CLI bug this issue tracks exhibited.
+        let v = Some(json!([{"type": "diagnostics_attachment"}]));
+        assert_eq!(extract_text(&v), "[Attachment: diagnostics_attachment]");
+    }
+
+    #[test]
+    fn is_attachment_block_type_matches_known_and_future_shapes() {
+        assert!(is_attachment_block_type("image"));
+        assert!(is_attachment_block_type("document"));
+        assert!(is_attachment_block_type("diagnostics_attachment"));
+        assert!(is_attachment_block_type("diagnostic_info"));
+        assert!(!is_attachment_block_type("text"));
+        assert!(!is_attachment_block_type("tool_use"));
+        assert!(!is_attachment_block_type("tool_result"));
+        assert!(!is_attachment_block_type("thinking"));
     }
 
     #[test]
