@@ -48,6 +48,16 @@ lazy_static! {
     pub static ref TEAMMATE_PROTOCOL_RE: Regex =
         Regex::new(r#"^\s*\{\s*"type"\s*:\s*"(idle_notification|shutdown_approved|shutdown_request|teammate_terminated|task_assignment)""#).unwrap();
 
+    // Cross-session message regexes (v2.1.224+, issue #237) -- used by sanitize.
+    // Claude Code delivers an inbound cross-machine SendMessage as a "user" entry whose
+    // content is wrapped in <cross-session-message from="..." from-name="...">...
+    // </cross-session-message>, analogous to the existing <teammate-message> wrapper.
+    pub static ref CROSS_SESSION_MESSAGE_RE: Regex =
+        Regex::new(r#"(?s)^<cross-session-message\b[^>]*>\n?(.*?)\n?</cross-session-message>$"#)
+            .unwrap();
+    pub static ref CROSS_SESSION_FROM_NAME_RE: Regex =
+        Regex::new(r#"\bfrom-name="([^"]+)""#).unwrap();
+
     // Persisted output regex - extracts file path from large tool outputs saved to disk.
     pub static ref RE_PERSISTED_OUTPUT_PATH: Regex =
         Regex::new(r"(?m)Full output saved to:\s*(.+)$").unwrap();

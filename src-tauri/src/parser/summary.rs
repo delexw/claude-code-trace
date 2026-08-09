@@ -981,4 +981,75 @@ mod tests {
     fn summary_cd_nil_input_falls_back_to_cd() {
         assert_eq!(tool_summary("Cd", &None), "Cd");
     }
+
+    // --- SendMessage tool summary tests (issue #237: v2.1.224+ cross-session compat) ---
+
+    #[test]
+    fn summary_send_message_shutdown_request_with_recipient() {
+        let input = json!({"type": "shutdown_request", "recipient": "worker-1"});
+        assert_eq!(
+            tool_summary("SendMessage", &Some(input)),
+            "Shutdown worker-1"
+        );
+    }
+
+    #[test]
+    fn summary_send_message_shutdown_response() {
+        let input = json!({"type": "shutdown_response", "approve": true});
+        assert_eq!(
+            tool_summary("SendMessage", &Some(input)),
+            "Shutdown response"
+        );
+    }
+
+    #[test]
+    fn summary_send_message_broadcast() {
+        let input = json!({"type": "broadcast", "summary": "Deploying to production now"});
+        assert_eq!(
+            tool_summary("SendMessage", &Some(input)),
+            "Broadcast: Deploying to production now"
+        );
+    }
+
+    #[test]
+    fn summary_send_message_with_recipient_and_summary() {
+        let input = json!({"recipient": "laptop-b-session", "summary": "check the build please"});
+        assert_eq!(
+            tool_summary("SendMessage", &Some(input)),
+            "To laptop-b-session: check the build please"
+        );
+    }
+
+    #[test]
+    fn summary_send_message_no_recipient_or_type_falls_back_to_generic_label() {
+        let input = json!({});
+        assert_eq!(tool_summary("SendMessage", &Some(input)), "Send message");
+    }
+
+    #[test]
+    fn summary_send_message_unknown_type_with_recipient_falls_back_to_recipient_label() {
+        // v2.1.224+: cross-session SendMessage can carry new `type` values (e.g. a
+        // cross-machine conversation opener) that summary_send_message has never seen —
+        // the exact value is unconfirmed since no real sample has been captured yet (see
+        // issue #237). As long as `recipient` is present, the existing generic branch
+        // already produces a sensible label; there is no per-`type` allowlist to fall
+        // through, so this can never panic or silently drop the summary.
+        let input = json!({
+            "type": "cross_session_request",
+            "recipient": "session-on-desktop-a",
+            "summary": "starting a chat"
+        });
+        assert_eq!(
+            tool_summary("SendMessage", &Some(input)),
+            "To session-on-desktop-a: starting a chat"
+        );
+    }
+
+    #[test]
+    fn summary_send_message_unknown_type_without_recipient_falls_back_to_generic_label() {
+        // Same future-`type` scenario but with no recipient populated (e.g. a bare
+        // held-for-approval marker) — must fall back to the generic label, never panic.
+        let input = json!({"type": "held_for_approval"});
+        assert_eq!(tool_summary("SendMessage", &Some(input)), "Send message");
+    }
 }
