@@ -363,11 +363,31 @@ pub fn claude_projects_dir(configured: Option<&str>) -> Result<PathBuf, String> 
     Ok(home.join(".claude").join("projects"))
 }
 
+/// Claude Code's own sanitized-path length above which, as of CLI v2.1.224, it
+/// applies an undocumented disambiguation scheme to avoid different long paths
+/// colliding on the same project directory (see `encode_path`). We cannot
+/// reproduce that scheme, so `project_dir_for_path` refuses to guess past it.
+const LONG_PATH_DISAMBIGUATION_THRESHOLD: usize = 200;
+
 /// Return the Claude CLI projects directory for an absolute path.
+///
+/// Returns an error when the resolved path's sanitized name would exceed
+/// [`LONG_PATH_DISAMBIGUATION_THRESHOLD`] characters. Claude Code v2.1.224
+/// changed how it disambiguates such long paths to stop them colliding on a
+/// shared directory, but did not publish the new scheme — reproducing
+/// `encode_path`'s naive substitution for a long path risks resolving to a
+/// filename that no longer matches what Claude Code actually created,
+/// potentially pointing at the wrong project's sessions. Failing loudly here
+/// is preferable to silently guessing wrong.
 pub fn project_dir_for_path(abs_path: &str) -> Result<String, String> {
     let base = claude_projects_dir(None)?;
     let resolved = fs::canonicalize(abs_path).unwrap_or_else(|_| PathBuf::from(abs_path));
     let encoded = encode_path(&resolved.to_string_lossy());
+    if encoded.chars().count() > LONG_PATH_DISAMBIGUATION_THRESHOLD {
+        return Err(format!(
+            "cannot resolve the project directory for '{abs_path}': its sanitized name exceeds {LONG_PATH_DISAMBIGUATION_THRESHOLD} characters, and Claude Code v2.1.224+'s long-path disambiguation scheme is undocumented"
+        ));
+    }
     Ok(base.join(encoded).to_string_lossy().to_string())
 }
 
@@ -2339,6 +2359,35 @@ mod tests {
         let home = dirs::home_dir().unwrap();
         assert_eq!(dir, home.join(".claude").join("projects"));
         env::remove_var("CLAUDE_PROJECTS_DIR");
+    }
+
+    // ---- project_dir_for_path tests (issue #236) ----
+
+    #[test]
+    fn project_dir_for_path_encodes_short_path() {
+        // A nonexistent path falls back to the raw string (canonicalize fails),
+        // so the sanitized encoding is deterministic and testable here.
+        let result = project_dir_for_path("/tmp/nonexistent-short-path-abc").unwrap();
+        assert!(result.ends_with("-tmp-nonexistent-short-path-abc"));
+    }
+
+    #[test]
+    fn project_dir_for_path_rejects_path_over_200_chars() {
+        // Claude Code v2.1.224 disambiguates sanitized names over 200 chars with an
+        // undocumented scheme; we must refuse to guess rather than risk resolving to
+        // another project's session directory.
+        let long_path = format!("/{}", "a".repeat(201));
+        assert!(long_path.len() > 200);
+        let result = project_dir_for_path(&long_path);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("200 characters"));
+    }
+
+    #[test]
+    fn project_dir_for_path_accepts_path_at_exactly_200_chars() {
+        let path = format!("/{}", "a".repeat(199));
+        assert_eq!(path.len(), 200);
+        assert!(project_dir_for_path(&path).is_ok());
     }
 
     #[test]
