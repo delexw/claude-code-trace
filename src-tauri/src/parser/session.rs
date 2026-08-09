@@ -53,6 +53,13 @@ pub struct SessionInfo {
     pub dirs: Vec<String>,
     pub git_branch: String,
     pub permission_mode: String,
+    /// The parent session this session was forked from (`/fork`), captured from a
+    /// `fork-context-ref` pointer entry's `forkedSessionId` field (v2.1.118+). `None` for
+    /// sessions that weren't forked. As of Claude Code v2.1.221, a forked session gets its
+    /// own worktree (a new `cwd`, and thus a new encoded project directory) from its very
+    /// first entry, so this id is the only reliable signal for grouping it back under its
+    /// parent's project — see #238.
+    pub forked_from_session_id: Option<String>,
 }
 
 /// Liveness of a running session, derived from the `~/.claude/sessions/*.json`
@@ -517,6 +524,7 @@ pub fn discover_project_sessions(project_dir: &str) -> Result<Vec<SessionInfo>, 
             dirs: meta.dirs,
             git_branch: meta.git_branch,
             permission_mode: meta.permission_mode,
+            forked_from_session_id: meta.forked_from_session_id,
         });
     }
 
@@ -838,6 +846,7 @@ pub fn session_info_from_metadata(
         dirs: meta.dirs,
         git_branch: meta.git_branch,
         permission_mode: meta.permission_mode,
+        forked_from_session_id: meta.forked_from_session_id,
     }
 }
 
@@ -899,6 +908,8 @@ pub(crate) struct SessionMetadata {
     pub(crate) git_branch: String,
     pub(crate) permission_mode: String,
     pub(crate) recap: Option<String>,
+    /// See `SessionInfo::forked_from_session_id`.
+    pub(crate) forked_from_session_id: Option<String>,
 }
 
 impl Default for SessionMetadata {
@@ -920,6 +931,7 @@ impl Default for SessionMetadata {
             git_branch: String::new(),
             permission_mode: String::new(),
             recap: None,
+            forked_from_session_id: None,
         }
     }
 }
@@ -1046,6 +1058,19 @@ pub(crate) fn scan_session_metadata(path: &str) -> SessionMetadata {
         if let Some(mode) = raw.get("permissionMode").and_then(|v| v.as_str()) {
             if !mode.is_empty() {
                 meta.permission_mode = mode.to_string();
+            }
+        }
+
+        // v2.1.118+: /fork writes a type:"fork-context-ref" pointer entry carrying
+        // forkedSessionId (the parent session). Capture it — extracted before the uuid
+        // check below since this pointer entry may carry no uuid of its own — so the
+        // project tree can still group this session under its fork parent's project even
+        // though v2.1.221+ gives it a brand-new, unrelated cwd/worktree (see #238).
+        if meta.forked_from_session_id.is_none() && entry_type == "fork-context-ref" {
+            if let Some(parent_id) = raw.get("forkedSessionId").and_then(|v| v.as_str()) {
+                if !parent_id.is_empty() {
+                    meta.forked_from_session_id = Some(parent_id.to_string());
+                }
             }
         }
 
@@ -1822,6 +1847,7 @@ mod tests {
             dirs: Vec::new(),
             git_branch: String::new(),
             permission_mode: String::new(),
+            forked_from_session_id: None,
         }
     }
 
@@ -3261,6 +3287,47 @@ mod tests {
             "IncrementalTokenScanner must skip forkedFrom entries (got {})",
             totals.output_tokens
         );
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    // --- Issue #238: /fork's own worktree (v2.1.221+) — capture forkedSessionId ---
+
+    #[test]
+    fn scan_session_metadata_captures_forked_from_session_id() {
+        // v2.1.221+: /fork gives the forked session its own worktree, so its cwd no
+        // longer matches the parent's — the fork-context-ref pointer's forkedSessionId
+        // is the only remaining signal for grouping it back under the parent project.
+        let tmp = env::temp_dir().join("tail-test-fork-context-ref-session-id");
+        std::fs::create_dir_all(&tmp).unwrap();
+        let path = tmp.join("session.jsonl");
+
+        let pointer = "{\"type\":\"fork-context-ref\",\"uuid\":\"fork-ref-1\",\"forkedSessionId\":\"parent-session-abc\",\"upToMessageId\":\"pu2\"}\n";
+        let new_u = "{\"type\":\"user\",\"uuid\":\"fu1\",\"message\":{\"role\":\"user\",\"content\":\"fork question\"}}\n";
+        std::fs::write(&path, format!("{pointer}{new_u}")).unwrap();
+
+        let meta = scan_session_metadata(path.to_str().unwrap());
+        assert_eq!(
+            meta.forked_from_session_id,
+            Some("parent-session-abc".to_string()),
+            "forked_from_session_id must be captured from the fork-context-ref pointer"
+        );
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn scan_session_metadata_forked_from_session_id_none_without_pointer() {
+        // A regular (non-forked) session must not report a fork parent.
+        let tmp = env::temp_dir().join("tail-test-no-fork-context-ref");
+        std::fs::create_dir_all(&tmp).unwrap();
+        let path = tmp.join("session.jsonl");
+
+        let entry = "{\"type\":\"user\",\"uuid\":\"u1\",\"message\":{\"role\":\"user\",\"content\":\"hello\"}}\n";
+        std::fs::write(&path, entry).unwrap();
+
+        let meta = scan_session_metadata(path.to_str().unwrap());
+        assert_eq!(meta.forked_from_session_id, None);
 
         std::fs::remove_dir_all(&tmp).ok();
     }

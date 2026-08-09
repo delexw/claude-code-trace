@@ -20,19 +20,46 @@ class ProjectNode:
     has_ongoing: bool
 
 
+def resolve_fork_root(session: SessionInfo, sessions_by_id: dict[str, SessionInfo]) -> SessionInfo:
+    """Follows a session's fork chain (forked_from_session_id) back to the session it was
+    ultimately forked from, so callers can group/label it by that ancestor's project
+    instead of its own. A forked session's own cwd shares no relation to its parent's —
+    as of Claude Code v2.1.221, /fork gives the forked session its own worktree from its
+    very first entry — so path-prefix matching can't reconnect them; the fork-pointer id
+    is the only signal available. See #238.
+
+    Stops at the first ancestor with no recorded parent, or one missing from
+    sessions_by_id (e.g. its file was deleted or filtered out of the current listing).
+    A `seen` guard prevents infinite loops on malformed/cyclic data.
+    """
+    current = session
+    seen: set[str] = set()
+    while current.forked_from_session_id and current.session_id not in seen:
+        seen.add(current.session_id)
+        parent = sessions_by_id.get(current.forked_from_session_id)
+        if parent is None:
+            break
+        current = parent
+    return current
+
+
 def build_project_nodes(sessions: list[SessionInfo]) -> list[ProjectNode]:
+    sessions_by_id = {s.session_id: s for s in sessions}
     mapping: dict[str, ProjectNode] = {}
     for s in sessions:
-        key = project_key(s.path)
+        # A forked session groups under the project of the session it was forked from
+        # (transitively), not its own — see resolve_fork_root.
+        anchor = resolve_fork_root(s, sessions_by_id)
+        key = project_key(anchor.path)
         if key in mapping:
             mapping[key].session_count += 1
             if s.is_ongoing:
                 mapping[key].has_ongoing = True
         else:
-            # Label by the session's ORIGIN directory (dirs[0]), not its last-seen
+            # Label by the anchor's ORIGIN directory (dirs[0]), not its last-seen
             # cwd — a session that /cd'd across repos still lives under the folder it
             # started in, so the origin is the correct, stable home label.
-            origin = s.dirs[0] if s.dirs else s.cwd
+            origin = anchor.dirs[0] if anchor.dirs else anchor.cwd
             name = short_path(origin) or project_display_name(key)
             mapping[key] = ProjectNode(
                 name=name,

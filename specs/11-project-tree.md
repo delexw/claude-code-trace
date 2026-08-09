@@ -106,6 +106,32 @@ session at the repo root. In that case `buildTree` **synthesizes** the base proj
 with a `CLAUDE-WORKTREES` group, instead of orphaning as a flat root. A synthesized node is
 created only when no real prefix-ancestor session exists, so anchored runs are unaffected.
 
+### Forked sessions (`/fork`)
+
+Worktree nesting above relies on the child's project key sharing the parent's as a string
+prefix — true when the child's `cwd` is literally a subdirectory of the parent's. As of
+Claude Code v2.1.221, `/fork` instead gives the forked session its own worktree with a
+brand-new `cwd` from its very first entry, so the fork's project key has **no path relation
+to the parent's at all** — prefix matching can never reconnect them (issue #238).
+
+```mermaid
+flowchart LR
+    FORK["forked session\n(own unrelated worktree cwd)"]
+    FORK --> PTR["fork-context-ref pointer entry\nforkedSessionId: parent's session_id"]
+    PTR --> RESOLVE["resolveForkRoot: follow\nforked_from_session_id chain\n(multi-hop, cycle-guarded)"]
+    RESOLVE --> ANCHOR["ultimate ancestor session"]
+    ANCHOR --> KEY["group/label by\nprojectKey(ancestor.path)"]
+```
+
+`buildProjectNodes` (`shared/projectTree.ts`) resolves every session's grouping key via
+`resolveForkRoot` before anything else: a forked session counts toward — and, if it's first,
+names — the project of the session it was ultimately forked from, not its own. The same
+resolution is applied in `usePicker.ts`'s selected-project filter (against the full,
+unfiltered session list, so a fork parent excluded by an active search query is still found)
+and mirrored in the Python TUI (`project_tree.py`, `app.py`). If the parent session isn't in
+the current listing (e.g. its file was deleted), the forked session falls back to grouping
+under its own project — same as today's un-forked behavior.
+
 ---
 
 ## Ongoing Status Propagation

@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { invoke } from "../lib/invoke";
 import type { SessionInfo } from "../types";
 import { useTauriEvent } from "./useTauriEvent";
+import { projectKey } from "../../shared/format";
+import { resolveForkRoot } from "../../shared/projectTree";
 
 interface PickerState {
   sessions: SessionInfo[];
@@ -109,10 +111,14 @@ export function usePicker(selectedProject: string | null = null) {
       )
     : state.sessions;
 
-  // Filter by selected project
+  // Filter by selected project. Resolved against the full (unfiltered) session list so a
+  // forked session — grouped under its fork parent's project in the sidebar tree, see
+  // shared/projectTree.ts — is included even when the parent itself was excluded above by
+  // the search query.
   if (selectedProject) {
-    filteredSessions = filteredSessions.filter((s) =>
-      s.path.replace(/\\/g, "/").includes(`/.claude/projects/${selectedProject}/`),
+    const sessionsById = new Map(state.sessions.map((s) => [s.session_id, s]));
+    filteredSessions = filteredSessions.filter(
+      (s) => projectKey(resolveForkRoot(s, sessionsById).path) === selectedProject,
     );
   }
 

@@ -150,6 +150,11 @@ class SessionInfo:
     git_branch: str = ""
     permission_mode: str = ""
     liveness: Liveness | None = None
+    # The parent session this session was forked from (`/fork`), or None if it wasn't
+    # forked. As of Claude Code v2.1.221, a forked session gets its own worktree — a new
+    # cwd/project directory from its very first entry — so this id is the only reliable
+    # signal for grouping it back under its parent's project (see #238).
+    forked_from_session_id: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -374,6 +379,7 @@ def session_info_from_dict(d: dict) -> SessionInfo:
         git_branch=d.get("git_branch", ""),
         permission_mode=d.get("permission_mode", ""),
         liveness=_liveness_from_dict(d.get("liveness")),
+        forked_from_session_id=d.get("forked_from_session_id"),
     )
 
 
