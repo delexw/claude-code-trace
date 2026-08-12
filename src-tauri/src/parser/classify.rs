@@ -3408,4 +3408,35 @@ mod tests {
             other => panic!("Expected Hook for DirectoryAdded attachment entry, got {other:?}"),
         }
     }
+
+    // --- Issue #237: v2.1.224+ cross-session SendMessage compat ---
+
+    #[test]
+    fn classify_unwraps_cross_session_message_with_sender_attribution() {
+        // v2.1.224+: an inbound cross-machine SendMessage is delivered as a type:"user"
+        // entry whose content is wrapped in <cross-session-message from="..."
+        // from-name="...">...</cross-session-message> (confirmed from the shipped
+        // v2.1.226 CLI binary — see issue #237). It must classify as a normal UserMsg with
+        // the wrapper stripped and the sender's display name preserved as a prefix, not
+        // leak the raw tag markup and not be dropped.
+        let e = Entry {
+            entry_type: "user".to_string(),
+            uuid: "cross-session-msg-uuid".to_string(),
+            timestamp: "2026-08-07T10:00:00Z".to_string(),
+            message: super::super::entry::EntryMessage {
+                role: "user".to_string(),
+                content: Some(json!(
+                    "<cross-session-message from=\"session-on-laptop-b\" from-name=\"laptop-b\">\nHey, can you check the build?\n</cross-session-message>"
+                )),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::User(u)) => {
+                assert_eq!(u.text, "[laptop-b]: Hey, can you check the build?");
+            }
+            other => panic!("expected User message for cross-session message, got {other:?}"),
+        }
+    }
 }

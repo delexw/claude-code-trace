@@ -89,6 +89,13 @@ pub fn sanitize_content(s: &str) -> String {
         }
     }
 
+    // v2.1.224+: inbound cross-session SendMessage is wrapped in <cross-session-message
+    // from="..." from-name="...">...</cross-session-message> (issue #237). Unwrap it here,
+    // before any other processing, so the raw tag never leaks into the displayed text.
+    if let Some(text) = extract_cross_session_message(s) {
+        return text;
+    }
+
     // Command messages: convert to "/name args" form.
     if s.starts_with("<command-name>") || s.starts_with("<command-message>") {
         if let Some(display) = extract_command_display(s) {
@@ -166,6 +173,24 @@ pub fn extract_bash_output(s: &str) -> String {
         }
     }
     String::new()
+}
+
+/// Unwraps a <cross-session-message from="..." from-name="...">...</cross-session-message>
+/// tag (v2.1.224+ cross-session SendMessage, issue #237), prefixing the inner text with the
+/// sender's display name so attribution is not lost. Returns None when `s` isn't wrapped in
+/// this tag.
+pub fn extract_cross_session_message(s: &str) -> Option<String> {
+    let caps = CROSS_SESSION_MESSAGE_RE.captures(s)?;
+    let inner = caps.get(1).map(|m| m.as_str().trim()).unwrap_or("");
+    let from_name = CROSS_SESSION_FROM_NAME_RE
+        .captures(s)
+        .and_then(|c| c.get(1))
+        .map(|m| m.as_str().trim())
+        .filter(|n| !n.is_empty());
+    Some(match from_name {
+        Some(name) => format!("[{name}]: {inner}"),
+        None => inner.to_string(),
+    })
 }
 
 /// Pulls the human-readable summary from a <task-notification> XML wrapper.
@@ -432,6 +457,42 @@ mod tests {
     fn sanitize_local_command_caveat_removed() {
         let s = "text<local-command-caveat>caveat</local-command-caveat>end";
         assert_eq!(sanitize_content(s), "textend");
+    }
+
+    // ---- Issue #237: v2.1.224+ cross-session SendMessage compat ----
+
+    #[test]
+    fn extract_cross_session_message_with_from_name() {
+        let s = "<cross-session-message from=\"session-on-laptop-b\" from-name=\"laptop-b\">\nHey, can you check the build?\n</cross-session-message>";
+        assert_eq!(
+            extract_cross_session_message(s),
+            Some("[laptop-b]: Hey, can you check the build?".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_cross_session_message_without_from_name() {
+        // from-name is expected to always be present in practice, but the extractor must
+        // not panic or lose content if it's ever missing.
+        let s = "<cross-session-message from=\"session-on-laptop-b\">\nStatus check\n</cross-session-message>";
+        assert_eq!(
+            extract_cross_session_message(s),
+            Some("Status check".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_cross_session_message_returns_none_for_unrelated_content() {
+        assert_eq!(extract_cross_session_message("just a normal message"), None);
+    }
+
+    #[test]
+    fn sanitize_cross_session_message_unwraps_tag_with_attribution() {
+        let s = "<cross-session-message from=\"session-abc\" from-name=\"desktop-a\">\nDeploy finished on my end.\n</cross-session-message>";
+        assert_eq!(
+            sanitize_content(s),
+            "[desktop-a]: Deploy finished on my end."
+        );
     }
 
     // ---- extract_bash_output tests ----
