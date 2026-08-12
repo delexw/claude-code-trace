@@ -15,20 +15,51 @@ export interface ProjectNode {
   hasOngoing: boolean;
 }
 
+/**
+ * Follows a session's fork chain (`forked_from_session_id`) back to the session it was
+ * ultimately forked from, so callers can group/label it by that ancestor's project
+ * instead of its own. A forked session's own `cwd` (and thus encoded project directory)
+ * shares no relation to its parent's — as of Claude Code v2.1.221, `/fork` gives the
+ * forked session its own worktree from its very first entry — so path-prefix matching
+ * can't reconnect them; the fork-pointer id is the only signal available. See #238.
+ *
+ * Stops at the first ancestor with no recorded parent, or one missing from `sessionsById`
+ * (e.g. its file was deleted or filtered out of the current listing) — that ancestor is
+ * then treated as the root. A `seen` guard prevents infinite loops on malformed/cyclic data.
+ */
+export function resolveForkRoot(
+  session: SessionInfo,
+  sessionsById: ReadonlyMap<string, SessionInfo>,
+): SessionInfo {
+  let current = session;
+  const seen = new Set<string>();
+  while (current.forked_from_session_id && !seen.has(current.session_id)) {
+    seen.add(current.session_id);
+    const parent = sessionsById.get(current.forked_from_session_id);
+    if (!parent) break;
+    current = parent;
+  }
+  return current;
+}
+
 export function buildProjectNodes(sessions: SessionInfo[]): ProjectNode[] {
+  const sessionsById = new Map(sessions.map((s) => [s.session_id, s]));
   const map = new Map<string, ProjectNode>();
   for (const s of sessions) {
-    const key = projectKey(s.path);
+    // A forked session groups under the project of the session it was forked from
+    // (transitively), not its own — see resolveForkRoot.
+    const anchor = resolveForkRoot(s, sessionsById);
+    const key = projectKey(anchor.path);
     const existing = map.get(key);
     if (existing) {
       existing.sessionCount++;
       if (s.is_ongoing) existing.hasOngoing = true;
     } else {
-      // Label the node by the session's ORIGIN directory (dirs[0]), not its
+      // Label the node by the anchor's ORIGIN directory (dirs[0]), not its
       // last-seen cwd. A session that `/cd`s across repos still lives under the
       // folder it started in, so the origin is the correct, stable home label;
       // using the last cwd would mislabel a roaming session under the wrong repo.
-      const origin = s.dirs?.[0] ?? s.cwd;
+      const origin = anchor.dirs?.[0] ?? anchor.cwd;
       map.set(key, {
         name: shortPath(origin) || projectDisplayName(key),
         key,

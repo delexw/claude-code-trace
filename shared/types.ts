@@ -114,6 +114,12 @@ export interface SessionInfo {
   dirs?: string[];
   git_branch: string;
   permission_mode: string;
+  /** The parent session this session was forked from (`/fork`), or `null` if it wasn't
+   *  forked. As of Claude Code v2.1.221, a forked session gets its own worktree — a new
+   *  `cwd`/project directory from its very first entry — so this id is the only reliable
+   *  signal for grouping it back under its parent's project. Optional for
+   *  backward-compatibility with older cached payloads. */
+  forked_from_session_id?: string | null;
 }
 
 export interface SessionMeta {

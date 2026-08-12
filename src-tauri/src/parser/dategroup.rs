@@ -99,6 +99,7 @@ mod tests {
             git_branch: "main".to_string(),
             permission_mode: "default".to_string(),
             is_ongoing: false,
+            forked_from_session_id: None,
         }
     }
 

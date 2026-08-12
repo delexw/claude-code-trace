@@ -8,6 +8,7 @@ import {
   detectWorktreeKind,
   worktreeLeafName,
   buildFlatItems,
+  resolveForkRoot,
   type FlatItem,
 } from "./projectTree";
 
@@ -114,6 +115,86 @@ describe("buildProjectNodes", () => {
     const nodes = buildProjectNodes(sessions);
     expect(nodes[0].name).toBe("alpha");
     expect(nodes[1].name).toBe("zebra");
+  });
+
+  // --- Issue #238: /fork's own worktree (v2.1.221+) — group forked sessions by fork parent ---
+
+  it("groups a forked session under its fork parent's project, not its own new worktree", () => {
+    const parent = makeSession({
+      path: "/home/user/.claude/projects/-Users-me-repos-my-app/parent.jsonl",
+      session_id: "parent",
+      dirs: ["/Users/me/repos/my-app"],
+      cwd: "/Users/me/repos/my-app",
+    });
+    const forked = makeSession({
+      path: "/home/user/.claude/projects/-Users-me-worktrees-abc123/forked.jsonl",
+      session_id: "forked",
+      dirs: ["/Users/me/worktrees/abc123"],
+      cwd: "/Users/me/worktrees/abc123",
+      forked_from_session_id: "parent",
+    });
+    const nodes = buildProjectNodes([parent, forked]);
+    expect(nodes).toHaveLength(1);
+    expect(nodes[0].name).toBe("my-app");
+    expect(nodes[0].sessionCount).toBe(2);
+  });
+
+  it("follows a multi-hop fork chain back to the ultimate ancestor", () => {
+    const grandparent = makeSession({
+      path: "/home/user/.claude/projects/-Users-me-repos-my-app/gp.jsonl",
+      session_id: "gp",
+      dirs: ["/Users/me/repos/my-app"],
+      cwd: "/Users/me/repos/my-app",
+    });
+    const parent = makeSession({
+      path: "/home/user/.claude/projects/-Users-me-worktrees-p/parent.jsonl",
+      session_id: "p",
+      dirs: ["/Users/me/worktrees/p"],
+      cwd: "/Users/me/worktrees/p",
+      forked_from_session_id: "gp",
+    });
+    const child = makeSession({
+      path: "/home/user/.claude/projects/-Users-me-worktrees-c/child.jsonl",
+      session_id: "c",
+      dirs: ["/Users/me/worktrees/c"],
+      cwd: "/Users/me/worktrees/c",
+      forked_from_session_id: "p",
+    });
+    const nodes = buildProjectNodes([grandparent, parent, child]);
+    expect(nodes).toHaveLength(1);
+    expect(nodes[0].name).toBe("my-app");
+    expect(nodes[0].sessionCount).toBe(3);
+  });
+
+  it("falls back to its own project when the fork parent isn't in the list", () => {
+    const forked = makeSession({
+      path: "/home/user/.claude/projects/-Users-me-worktrees-abc123/forked.jsonl",
+      session_id: "forked",
+      dirs: ["/Users/me/worktrees/abc123"],
+      cwd: "/Users/me/worktrees/abc123",
+      forked_from_session_id: "missing-parent",
+    });
+    const nodes = buildProjectNodes([forked]);
+    expect(nodes).toHaveLength(1);
+    expect(nodes[0].name).toBe("abc123");
+  });
+});
+
+describe("resolveForkRoot", () => {
+  it("returns the session itself when it wasn't forked", () => {
+    const s = makeSession({ session_id: "s1" });
+    expect(resolveForkRoot(s, new Map([["s1", s]]))).toBe(s);
+  });
+
+  it("guards against a cyclic fork chain instead of looping forever", () => {
+    const a = makeSession({ session_id: "a", forked_from_session_id: "b" });
+    const b = makeSession({ session_id: "b", forked_from_session_id: "a" });
+    const byId = new Map([
+      ["a", a],
+      ["b", b],
+    ]);
+    // Must terminate; exact landing session isn't load-bearing.
+    expect(["a", "b"]).toContain(resolveForkRoot(a, byId).session_id);
   });
 });
 

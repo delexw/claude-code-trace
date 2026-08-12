@@ -30,6 +30,7 @@ from data_types import (
     SessionTotals,
 )
 from format_utils import project_key as _project_key
+from project_tree import resolve_fork_root
 from resume_command import resume_command
 from sse import SSEClient
 from widgets.debug_viewer import DebugViewer
@@ -717,7 +718,15 @@ class CCTraceApp(App):
         if self.selected_project is None:
             return self.all_sessions
         key = self.selected_project
-        return [s for s in self.all_sessions if _project_key(s.path) == key]
+        # Resolve each session's fork chain against the full list so a forked session —
+        # grouped under its fork parent's project in the sidebar tree, see
+        # project_tree.build_project_nodes — is included too (#238).
+        sessions_by_id = {s.session_id: s for s in self.all_sessions}
+        return [
+            s
+            for s in self.all_sessions
+            if _project_key(resolve_fork_root(s, sessions_by_id).path) == key
+        ]
 
     # ----------------------------------------------------------------
     # Sync methods — push state into widgets

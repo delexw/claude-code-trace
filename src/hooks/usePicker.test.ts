@@ -123,6 +123,35 @@ describe("usePicker", () => {
     });
   });
 
+  it("selecting a project includes a forked session grouped under it", async () => {
+    // Issue #238: a forked session's own cwd is a brand-new, unrelated worktree, so
+    // selecting the parent's project must still surface it via forked_from_session_id.
+    const parent = {
+      ...session("/home/user/.claude/projects/-Users-me-repos-my-app/parent.jsonl", false),
+      session_id: "parent",
+    };
+    const forked = {
+      ...session("/home/user/.claude/projects/-Users-me-worktrees-abc123/forked.jsonl", false),
+      session_id: "forked",
+      forked_from_session_id: "parent",
+    };
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "discover_sessions") return Promise.resolve([parent, forked]);
+      return Promise.resolve();
+    });
+
+    const { result } = renderHook(() => usePicker("-Users-me-repos-my-app"));
+
+    await act(async () => {
+      await result.current.discoverSessions(["/projects"]);
+    });
+
+    expect(result.current.sessions.map((s) => s.session_id).toSorted()).toEqual([
+      "forked",
+      "parent",
+    ]);
+  });
+
   it("updateSessionOngoing skips update if value unchanged", async () => {
     const sessions = [session("/a.jsonl", true)];
     mockInvoke.mockImplementation((cmd: string) => {
