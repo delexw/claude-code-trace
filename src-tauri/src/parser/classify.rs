@@ -709,7 +709,7 @@ fn has_user_content(raw: &Option<Value>, str_content: &str) -> bool {
         Some(Value::String(_)) => !str_content.trim().is_empty(),
         Some(Value::Array(blocks)) => blocks.iter().any(|b| {
             let bt = b.get("type").and_then(|v| v.as_str()).unwrap_or("");
-            bt == "text" || bt == "image" || bt == "document"
+            bt == "text" || is_attachment_block_type(bt)
         }),
         _ => false,
     }
@@ -2435,6 +2435,37 @@ mod tests {
         }
     }
 
+    // --- Issue #235: unrecognized "diagnostics attachment" content block ---
+
+    #[test]
+    fn has_user_content_true_for_unrecognized_diagnostics_attachment_block() {
+        // v2.1.223 introduced a "diagnostics attachment" content block whose exact
+        // `type` string isn't documented. classify() must still produce a UserMsg
+        // (with a generic placeholder) instead of silently dropping the entry.
+        let content = Some(json!([{
+            "type": "diagnostics_attachment",
+            "diagnostics": {"code": "E1", "message": "session diagnostics"}
+        }]));
+        let e = make_entry("user", content);
+        match classify(e) {
+            Some(ClassifiedMsg::User(u)) => {
+                assert_eq!(u.text, "[Attachment: diagnostics_attachment]");
+            }
+            other => panic!("Expected UserMsg for diagnostics attachment block, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_malformed_diagnostics_attachment_does_not_panic() {
+        // A malformed diagnostics attachment -- non-object entries in the content
+        // array -- must not panic classify(); it should be treated as no content.
+        let content = Some(json!(["not-an-object", 42, null]));
+        let e = make_entry("user", content);
+        // Must not panic; whether it classifies as None or a message, either is fine
+        // as long as classify() returns normally.
+        let _ = classify(e);
+    }
+
     // --- compact_boundary / isCompactSummary classification ---
 
     #[test]
@@ -3375,6 +3406,37 @@ mod tests {
                 );
             }
             other => panic!("Expected Hook for DirectoryAdded attachment entry, got {other:?}"),
+        }
+    }
+
+    // --- Issue #237: v2.1.224+ cross-session SendMessage compat ---
+
+    #[test]
+    fn classify_unwraps_cross_session_message_with_sender_attribution() {
+        // v2.1.224+: an inbound cross-machine SendMessage is delivered as a type:"user"
+        // entry whose content is wrapped in <cross-session-message from="..."
+        // from-name="...">...</cross-session-message> (confirmed from the shipped
+        // v2.1.226 CLI binary — see issue #237). It must classify as a normal UserMsg with
+        // the wrapper stripped and the sender's display name preserved as a prefix, not
+        // leak the raw tag markup and not be dropped.
+        let e = Entry {
+            entry_type: "user".to_string(),
+            uuid: "cross-session-msg-uuid".to_string(),
+            timestamp: "2026-08-07T10:00:00Z".to_string(),
+            message: super::super::entry::EntryMessage {
+                role: "user".to_string(),
+                content: Some(json!(
+                    "<cross-session-message from=\"session-on-laptop-b\" from-name=\"laptop-b\">\nHey, can you check the build?\n</cross-session-message>"
+                )),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::User(u)) => {
+                assert_eq!(u.text, "[laptop-b]: Hey, can you check the build?");
+            }
+            other => panic!("expected User message for cross-session message, got {other:?}"),
         }
     }
 }

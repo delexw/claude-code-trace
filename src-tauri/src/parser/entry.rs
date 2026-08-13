@@ -2223,4 +2223,34 @@ mod tests {
         );
         assert_eq!(entry.heartbeat_seq, 0, "seq must default to 0 when absent");
     }
+
+    // --- Issue #237: v2.1.224+ cross-session SendMessage compat ---
+
+    #[test]
+    fn parse_entry_preserves_cross_session_message_wrapper_verbatim() {
+        // v2.1.224+: an inbound cross-machine SendMessage is delivered as a normal
+        // type:"user" entry whose message.content is wrapped in
+        // <cross-session-message from="..." from-name="...">...</cross-session-message>
+        // (confirmed from the shipped v2.1.226 CLI binary — see issue #237). Entry does
+        // no interpretation of message content, so parse_entry must capture the wrapper
+        // byte-for-byte; unwrapping happens later in sanitize::extract_cross_session_message.
+        let line = json!({
+            "type": "user",
+            "uuid": "cross-session-msg-uuid",
+            "timestamp": "2026-08-07T10:00:00Z",
+            "message": {
+                "role": "user",
+                "content": "<cross-session-message from=\"session-on-laptop-b\" from-name=\"laptop-b\">\nHey, can you check the build?\n</cross-session-message>"
+            }
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("must parse cross-session message entry");
+        assert_eq!(entry.entry_type, "user");
+        assert_eq!(
+            entry.message.content,
+            Some(json!(
+                "<cross-session-message from=\"session-on-laptop-b\" from-name=\"laptop-b\">\nHey, can you check the build?\n</cross-session-message>"
+            ))
+        );
+    }
 }
