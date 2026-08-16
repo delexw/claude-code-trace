@@ -114,12 +114,18 @@ class TeamBoard(Widget):
                 lines.append("  " + "".join(member_parts))
 
             # Tasks
-            for task in team.tasks:
-                icon = _status_icon(task.status)
-                clr = _status_color(task.status)
-                owner_str = f"  [{theme.TEXT_DIM}]{task.owner}[/]" if task.owner else ""
+            if team.tasks:
+                for task in team.tasks:
+                    icon = _status_icon(task.status)
+                    clr = _status_color(task.status)
+                    owner_str = f"  [{theme.TEXT_DIM}]{task.owner}[/]" if task.owner else ""
+                    lines.append(
+                        f"  [{theme.TEXT_DIM}]#{task.id}[/] [{clr}]{icon}[/] {task.subject}{owner_str}"
+                    )
+            else:
                 lines.append(
-                    f"  [{theme.TEXT_DIM}]#{task.id}[/] [{clr}]{icon}[/] {task.subject}{owner_str}"
+                    f"  [{theme.TEXT_DIM}]No tasks tracked in this session — task-tracking "
+                    f"tools may be disabled for this model[/]"
                 )
 
             lines.append("")

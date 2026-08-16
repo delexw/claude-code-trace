@@ -103,4 +103,11 @@ describe("TeamBoard", () => {
     expect(screen.getByText("pending")).toBeInTheDocument();
     expect(screen.getByText("Tasks (3)")).toBeInTheDocument();
   });
+
+  it("shows an empty-state note when a team has no tasks", () => {
+    const teams = [makeTeam({ tasks: [] })];
+    render(<TeamBoard teams={teams} />);
+    expect(screen.getByText("Tasks (0)")).toBeInTheDocument();
+    expect(screen.getByText(/No tasks tracked in this session/)).toBeInTheDocument();
+  });
 });

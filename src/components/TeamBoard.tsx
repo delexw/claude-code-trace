@@ -56,10 +56,15 @@ export function TeamBoard({ teams }: TeamBoardProps) {
             )}
 
             {/* Tasks */}
-            {team.tasks.length > 0 && (
-              <div className="team-board__section">
-                <div className="team-board__section-title">Tasks ({team.tasks.length})</div>
-                {team.tasks.map((task) => {
+            <div className="team-board__section">
+              <div className="team-board__section-title">Tasks ({team.tasks.length})</div>
+              {team.tasks.length === 0 ? (
+                <div className="team-board__section-empty">
+                  No tasks tracked in this session — task-tracking tools may be disabled for this
+                  model
+                </div>
+              ) : (
+                team.tasks.map((task) => {
                   const statusIcon = taskStatusIcons[task.status] ?? taskStatusIcons.pending;
                   const statusClass = task.status.replace(/\s+/g, "_");
 
@@ -85,9 +90,9 @@ export function TeamBoard({ teams }: TeamBoardProps) {
                       </span>
                     </div>
                   );
-                })}
-              </div>
-            )}
+                })
+              )}
+            </div>
           </div>
         </div>
       ))}
