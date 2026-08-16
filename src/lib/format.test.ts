@@ -723,4 +723,37 @@ describe("parseEditInput", () => {
   it("returns null when old_string or new_string is missing", () => {
     expect(parseEditInput(JSON.stringify({ file_path: "a.ts", old_string: "x" }))).toBeNull();
   });
+
+  // Issue #249: Claude Code v2.1.229 confirmed tool_use.input can carry a non-string
+  // value for fields documented as strings (glob/file_path/command). parseEditInput
+  // must not throw and must degrade to null so the caller falls back to raw JSON display.
+  it("returns null (does not throw) when file_path is an array", () => {
+    const input = JSON.stringify({
+      file_path: ["a.ts", "b.ts"],
+      old_string: "x",
+      new_string: "y",
+    });
+    expect(() => parseEditInput(input)).not.toThrow();
+    expect(parseEditInput(input)).toBeNull();
+  });
+
+  it("returns null (does not throw) when file_path is an object", () => {
+    const input = JSON.stringify({
+      file_path: { path: "a.ts" },
+      old_string: "x",
+      new_string: "y",
+    });
+    expect(() => parseEditInput(input)).not.toThrow();
+    expect(parseEditInput(input)).toBeNull();
+  });
+
+  it("returns null (does not throw) when old_string/new_string are non-string", () => {
+    const input = JSON.stringify({
+      file_path: "a.ts",
+      old_string: ["x"],
+      new_string: 42,
+    });
+    expect(() => parseEditInput(input)).not.toThrow();
+    expect(parseEditInput(input)).toBeNull();
+  });
 });

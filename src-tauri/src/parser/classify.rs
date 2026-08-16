@@ -1094,6 +1094,56 @@ mod tests {
         }
     }
 
+    // --- Issue #249: Claude Code v2.1.229 confirmed tool_use.input can carry a
+    // non-string value (array/object) for fields documented as strings, such as
+    // Bash's `command`, Read/Edit/Write's `file_path`, and Grep's `glob`. classify()
+    // must not panic on these, and must preserve the raw (non-string) input value
+    // for downstream consumers rather than dropping the tool_use block entirely. ---
+
+    #[test]
+    fn classify_tool_use_with_non_string_command_does_not_panic() {
+        let content = json!([
+            {"type": "tool_use", "id": "tool1", "name": "Bash", "input": {"command": ["ls", "-la"]}}
+        ]);
+        let mut e = make_entry("assistant", Some(content));
+        e.message.stop_reason = Some("tool_use".to_string());
+        match classify(e) {
+            Some(ClassifiedMsg::AI(ai)) => {
+                assert_eq!(ai.tool_calls.len(), 1);
+                assert_eq!(ai.tool_calls[0].name, "Bash");
+                let block = ai
+                    .blocks
+                    .iter()
+                    .find(|b| b.block_type == "tool_use")
+                    .expect("should have tool_use block");
+                assert_eq!(
+                    block.tool_input,
+                    Some(json!({"command": ["ls", "-la"]})),
+                    "non-string command must be preserved as-is, not coerced or dropped"
+                );
+            }
+            other => panic!("Expected AI, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_tool_use_with_non_string_file_path_and_glob_does_not_panic() {
+        let content = json!([
+            {"type": "tool_use", "id": "tool2", "name": "Read", "input": {"file_path": {"path": "a.rs"}}},
+            {"type": "tool_use", "id": "tool3", "name": "Grep", "input": {"pattern": "TODO", "glob": ["*.rs"]}}
+        ]);
+        let mut e = make_entry("assistant", Some(content));
+        e.message.stop_reason = Some("tool_use".to_string());
+        match classify(e) {
+            Some(ClassifiedMsg::AI(ai)) => {
+                assert_eq!(ai.tool_calls.len(), 2);
+                assert_eq!(ai.blocks.len(), 2);
+                assert!(ai.blocks.iter().all(|b| b.block_type == "tool_use"));
+            }
+            other => panic!("Expected AI, got {other:?}"),
+        }
+    }
+
     // --- Issue #157: v2.1.183+ thinking-only assistant entries and synthetic re-prompt user entries ---
 
     #[test]

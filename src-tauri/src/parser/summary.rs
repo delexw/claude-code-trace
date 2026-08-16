@@ -49,11 +49,11 @@ pub fn tool_summary(name: &str, input: &Option<Value>) -> String {
 }
 
 fn summary_read(f: &serde_json::Map<String, Value>) -> String {
-    let fp = get_str(f, "file_path");
+    let fp = get_display_str(f, "file_path");
     if fp.is_empty() {
         return "Read".to_string();
     }
-    let short = short_path(fp, 2);
+    let short = short_path(&fp, 2);
 
     let limit = get_num(f, "limit");
     if limit > 0 {
@@ -67,11 +67,11 @@ fn summary_read(f: &serde_json::Map<String, Value>) -> String {
 }
 
 fn summary_write(f: &serde_json::Map<String, Value>) -> String {
-    let fp = get_str(f, "file_path");
+    let fp = get_display_str(f, "file_path");
     if fp.is_empty() {
         return "Write".to_string();
     }
-    let short = short_path(fp, 2);
+    let short = short_path(&fp, 2);
 
     let content = get_str(f, "content");
     if !content.is_empty() {
@@ -82,11 +82,11 @@ fn summary_write(f: &serde_json::Map<String, Value>) -> String {
 }
 
 fn summary_edit(f: &serde_json::Map<String, Value>) -> String {
-    let fp = get_str(f, "file_path");
+    let fp = get_display_str(f, "file_path");
     if fp.is_empty() {
         return "Edit".to_string();
     }
-    let short = short_path(fp, 2);
+    let short = short_path(&fp, 2);
 
     let old_str = get_str(f, "old_string");
     let new_str = get_str(f, "new_string");
@@ -104,7 +104,7 @@ fn summary_edit(f: &serde_json::Map<String, Value>) -> String {
 
 fn summary_bash(f: &serde_json::Map<String, Value>) -> String {
     let desc = get_str(f, "description");
-    let cmd = get_str(f, "command");
+    let cmd = get_display_str(f, "command");
 
     if !desc.is_empty() && !cmd.is_empty() {
         return truncate(&format!("{desc}: {cmd}"), 60);
@@ -113,7 +113,7 @@ fn summary_bash(f: &serde_json::Map<String, Value>) -> String {
         return truncate(desc, 60);
     }
     if !cmd.is_empty() {
-        return truncate(cmd, 60);
+        return truncate(&cmd, 60);
     }
     "Bash".to_string()
 }
@@ -125,7 +125,7 @@ fn summary_grep(f: &serde_json::Map<String, Value>) -> String {
     }
     let pat_str = format!("\"{}\"", truncate(pattern, 30));
 
-    let glob = get_str(f, "glob");
+    let glob = get_display_str(f, "glob");
     if !glob.is_empty() {
         return format!("{pat_str} in {glob}");
     }
@@ -499,6 +499,19 @@ fn get_str<'a>(fields: &'a serde_json::Map<String, Value>, key: &str) -> &'a str
     fields.get(key).and_then(|v| v.as_str()).unwrap_or("")
 }
 
+/// Extracts a field for display, tolerating non-string JSON. Claude Code v2.1.229
+/// confirmed that tool inputs documented as strings (`glob`, `file_path`, `command`)
+/// can carry a non-string value (array/object/number). Rather than discarding the
+/// field like `get_str` does, this stringifies it so the summary still shows
+/// something useful. Returns "" when the field is absent or null.
+fn get_display_str(fields: &serde_json::Map<String, Value>, key: &str) -> String {
+    match fields.get(key) {
+        Some(Value::String(s)) => s.clone(),
+        Some(Value::Null) | None => String::new(),
+        Some(v) => v.to_string(),
+    }
+}
+
 /// Also for HashMap<String, Value> usage in other modules.
 pub fn get_string_from_map(fields: &std::collections::HashMap<String, Value>, key: &str) -> String {
     match fields.get(key) {
@@ -856,6 +869,67 @@ mod tests {
     fn summary_default_falls_back_to_first_string() {
         let input = Some(json!({"zzz_field": "hello"}));
         assert_eq!(tool_summary("SomeUnknown", &input), "hello");
+    }
+
+    // --- Issue #249: Claude Code v2.1.229 confirmed tool_use.input can carry a
+    // non-string value for fields documented as strings (glob/file_path/command).
+    // tool_summary must not panic and should still show something useful rather
+    // than silently discarding the field. ---
+
+    #[test]
+    fn summary_read_with_array_file_path_does_not_panic() {
+        let input = Some(json!({"file_path": ["a.rs", "b.rs"]}));
+        assert_eq!(tool_summary("Read", &input), "[\"a.rs\",\"b.rs\"]");
+    }
+
+    #[test]
+    fn summary_read_with_object_file_path_does_not_panic() {
+        let input = Some(json!({"file_path": {"path": "a.rs"}}));
+        assert_eq!(tool_summary("Read", &input), "{\"path\":\"a.rs\"}");
+    }
+
+    #[test]
+    fn summary_write_with_non_string_file_path_does_not_panic() {
+        let input = Some(json!({"file_path": 42}));
+        assert_eq!(tool_summary("Write", &input), "42");
+    }
+
+    #[test]
+    fn summary_edit_with_non_string_file_path_does_not_panic() {
+        let input = Some(json!({
+            "file_path": {"nested": true},
+            "old_string": "a",
+            "new_string": "b"
+        }));
+        assert_eq!(tool_summary("Edit", &input), "{\"nested\":true} - 1 line");
+    }
+
+    #[test]
+    fn summary_bash_with_array_command_does_not_panic() {
+        let input = Some(json!({"command": ["ls", "-la"]}));
+        assert_eq!(tool_summary("Bash", &input), "[\"ls\",\"-la\"]");
+    }
+
+    #[test]
+    fn summary_bash_with_object_command_does_not_panic() {
+        let input = Some(json!({"command": {"argv": ["ls"]}}));
+        assert_eq!(tool_summary("Bash", &input), "{\"argv\":[\"ls\"]}");
+    }
+
+    #[test]
+    fn summary_grep_with_non_string_glob_does_not_panic() {
+        let input = Some(json!({"pattern": "TODO", "glob": ["*.rs", "*.ts"]}));
+        assert_eq!(
+            tool_summary("Grep", &input),
+            "\"TODO\" in [\"*.rs\",\"*.ts\"]"
+        );
+    }
+
+    #[test]
+    fn summary_read_with_null_file_path_falls_back_to_tool_name() {
+        // null must still fall back cleanly, not display the literal "null".
+        let input = Some(json!({"file_path": null}));
+        assert_eq!(tool_summary("Read", &input), "Read");
     }
 
     // ---- short_path tests ----

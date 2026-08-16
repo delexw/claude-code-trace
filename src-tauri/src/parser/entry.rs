@@ -2253,4 +2253,69 @@ mod tests {
             ))
         );
     }
+
+    // --- Issue #249: Claude Code v2.1.229 confirmed tool_use.input can carry a
+    // non-string value (array/object) for fields the tool schema documents as
+    // strings — glob, file_path, command. Claude Code's own UI used to crash to
+    // its error screen on this, including on --resume of an affected session.
+    // parse_entry must never panic or reject the line, on first parse or re-parse. ---
+
+    #[test]
+    fn parse_entry_tool_use_with_array_command_does_not_panic() {
+        let line = json!({
+            "type": "assistant",
+            "uuid": "tool-use-array-command",
+            "timestamp": "2026-08-12T10:00:00Z",
+            "message": {
+                "role": "assistant",
+                "content": [
+                    {"type": "tool_use", "id": "toolu_1", "name": "Bash", "input": {"command": ["ls", "-la"]}}
+                ]
+            }
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("must parse tool_use entry with array command");
+        let content = entry.message.content.expect("content must be captured");
+        let block = content
+            .as_array()
+            .and_then(|arr| arr.first())
+            .expect("must have a content block");
+        assert_eq!(
+            block.get("input").and_then(|i| i.get("command")),
+            Some(&json!(["ls", "-la"])),
+            "non-string command must be preserved verbatim, not rejected or unwrapped"
+        );
+    }
+
+    #[test]
+    fn parse_entry_tool_use_with_object_file_path_and_glob_does_not_panic() {
+        let line = json!({
+            "type": "assistant",
+            "uuid": "tool-use-object-fields",
+            "timestamp": "2026-08-12T10:00:01Z",
+            "message": {
+                "role": "assistant",
+                "content": [
+                    {"type": "tool_use", "id": "toolu_2", "name": "Read", "input": {"file_path": {"path": "a.rs"}}},
+                    {"type": "tool_use", "id": "toolu_3", "name": "Grep", "input": {"pattern": "TODO", "glob": {"include": "*.rs"}}}
+                ]
+            }
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry =
+            parse_entry(&bytes).expect("must parse tool_use entries with object glob/file_path");
+        let content = entry.message.content.expect("content must be captured");
+        let arr = content.as_array().expect("content must be an array");
+        assert_eq!(arr.len(), 2, "both tool_use blocks must be preserved");
+    }
+
+    #[test]
+    fn parse_entry_reparse_of_historical_line_with_non_string_fields_does_not_panic() {
+        // Per the issue: this can happen on historical sessions too, so re-parsing an
+        // already-saved JSONL line (as on --resume) must be just as safe as first parse.
+        let raw = b"{\"type\":\"assistant\",\"uuid\":\"historical-1\",\"timestamp\":\"2026-08-12T10:00:02Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"toolu_4\",\"name\":\"Write\",\"input\":{\"file_path\":123}}]}}";
+        let first = parse_entry(raw).expect("first parse must succeed");
+        let second = parse_entry(raw).expect("re-parse must succeed identically");
+        assert_eq!(first.uuid, second.uuid);
+    }
 }
