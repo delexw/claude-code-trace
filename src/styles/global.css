@@ -2190,6 +2190,12 @@ body {
   margin-bottom: 8px;
 }
 
+.team-board__section-empty {
+  font-size: 12px;
+  color: var(--text-dim);
+  font-style: italic;
+}
+
 .team-task {
   display: flex;
   align-items: flex-start;
