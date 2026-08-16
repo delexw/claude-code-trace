@@ -322,6 +322,11 @@ pub fn discover_subagents(session_path: &str) -> Result<Vec<SubagentProcess>, St
             .to_string_lossy()
             .to_string();
         let subagent_type = read_agent_type(&meta_path);
+        let has_end_marker = session_data.has_end_marker;
+        let first_new_user_text = session_data.first_new_user_text.clone();
+        let new_start_time = session_data.new_start_time;
+        let new_end_time = session_data.new_end_time;
+        let forked_skill_name = read_forked_skill_name(&file_path);
 
         let mut proc = build_subagent_process(
             agent_id,
@@ -331,8 +336,20 @@ pub fn discover_subagents(session_path: &str) -> Result<Vec<SubagentProcess>, St
             subagent_type,
             session_data.team_summary,
             session_data.team_color,
+            first_new_user_text,
+            new_start_time,
+            new_end_time,
         );
-        proc.has_end_marker = session_data.has_end_marker;
+        proc.has_end_marker = has_end_marker;
+        // A `.forked-skill.json` sidecar names the skill responsible for the fork —
+        // set it as the default description so an orphaned forked-skill subagent
+        // (no parent Skill tool_use to attribute it, e.g. after /clear truncated the
+        // main JSONL) still gets a meaningful label instead of falling through to
+        // the raw-prompt heuristic. Later linking phases overwrite this with a
+        // richer description when the parent conversation is available.
+        if let Some(skill_name) = forked_skill_name {
+            proc.description = skill_name;
+        }
         procs.push(proc);
     }
 
@@ -351,6 +368,13 @@ fn first_user_text(chunks: &[Chunk]) -> String {
 }
 
 /// Build a SubagentProcess from parsed chunks and file metadata.
+///
+/// `first_new_user_text`/`new_start_time`/`new_end_time` come from the subagent's own
+/// (non-inherited) entries — see `SubagentSessionData` — so a `subagent_type:"fork"`
+/// subagent's replayed parent history (v2.1.232+) doesn't leak into the displayed prompt
+/// or inflate the reported start time / duration. They fall back to the full chunk-derived
+/// values when absent (the common, non-forked case, or a fork with no new activity yet).
+#[allow(clippy::too_many_arguments)]
 fn build_subagent_process(
     id: String,
     file_path: String,
@@ -359,15 +383,24 @@ fn build_subagent_process(
     subagent_type: String,
     team_summary: String,
     teammate_color: String,
+    first_new_user_text: Option<String>,
+    new_start_time: Option<DateTime<Utc>>,
+    new_end_time: Option<DateTime<Utc>>,
 ) -> SubagentProcess {
-    let (start_time, end_time, duration_ms) = chunk_timing(&chunks);
+    let (chunk_start, chunk_end, _) = chunk_timing(&chunks);
+    let start_time = new_start_time.unwrap_or(chunk_start);
+    let end_time = new_end_time.unwrap_or(chunk_end);
+    let duration_ms = end_time
+        .signed_duration_since(start_time)
+        .num_milliseconds()
+        .max(0);
     let usage = aggregate_usage(&chunks);
     let file_mod_time = metadata
         .modified()
         .ok()
         .map(DateTime::<Utc>::from)
         .unwrap_or_else(Utc::now);
-    let prompt = first_user_text(&chunks);
+    let prompt = first_new_user_text.unwrap_or_else(|| first_user_text(&chunks));
 
     SubagentProcess {
         id,
@@ -418,6 +451,35 @@ fn read_agent_type(meta_path: &str) -> String {
         .unwrap_or_default()
 }
 
+/// Typed representation of a `.forked-skill.json` sidecar. Claude Code writes this
+/// alongside a subagent's `.jsonl` when the subagent was spawned via a skill that
+/// forks the parent conversation (`subagent_type:"fork"`, on by default since
+/// Claude Code v2.1.232 — see issue #250). It names the skill responsible for the
+/// fork, which is a more robust attribution source than parsing the subagent's own
+/// first message for the "Base directory for this skill: …" convention.
+#[derive(Debug, Deserialize, Default)]
+struct ForkedSkillMeta {
+    #[serde(default, rename = "skillName")]
+    skill_name: String,
+    #[serde(default, rename = "attributionName")]
+    attribution_name: String,
+}
+
+/// Read the skill name from a `.forked-skill.json` sidecar next to a subagent
+/// `.jsonl`, if present. Returns `None` for ordinary (non-forked-skill) subagents.
+fn read_forked_skill_name(agent_jsonl_path: &str) -> Option<String> {
+    let sidecar_path = agent_jsonl_path.replace(".jsonl", ".forked-skill.json");
+    let meta: ForkedSkillMeta =
+        serde_json::from_str(&fs::read_to_string(sidecar_path).ok()?).ok()?;
+    if !meta.skill_name.is_empty() {
+        Some(meta.skill_name)
+    } else if !meta.attribution_name.is_empty() {
+        Some(meta.attribution_name)
+    } else {
+        None
+    }
+}
+
 fn is_warmup_agent(path: &str) -> bool {
     let f = match fs::File::open(path) {
         Ok(f) => f,
@@ -454,6 +516,27 @@ struct SubagentSessionData {
     team_color: String,
     /// True when the JSONL contains a `<synthetic>` assistant end marker.
     has_end_marker: bool,
+    /// Text of the subagent's own first user message, excluding any inherited parent
+    /// history (see below). `None` when the subagent has no non-inherited user message
+    /// yet (e.g. a fork that hasn't started its own work), so callers fall back to the
+    /// first user chunk across the whole file.
+    first_new_user_text: Option<String>,
+    /// Timestamp bounds computed from the subagent's own (non-inherited) entries only.
+    /// `None` when every entry in the file is inherited.
+    new_start_time: Option<DateTime<Utc>>,
+    new_end_time: Option<DateTime<Utc>>,
+}
+
+/// Returns the timestamp carried by any `ClassifiedMsg` variant.
+fn classified_timestamp(msg: &ClassifiedMsg) -> DateTime<Utc> {
+    match msg {
+        ClassifiedMsg::User(m) => m.timestamp,
+        ClassifiedMsg::AI(m) => m.timestamp,
+        ClassifiedMsg::System(m) => m.timestamp,
+        ClassifiedMsg::Teammate(m) => m.timestamp,
+        ClassifiedMsg::Compact(m) => m.timestamp,
+        ClassifiedMsg::Hook(m) => m.timestamp,
+    }
 }
 
 fn read_subagent_session(path: &str) -> Result<SubagentSessionData, String> {
@@ -467,6 +550,9 @@ fn read_subagent_session(path: &str) -> Result<SubagentSessionData, String> {
     let mut team_color = String::new();
     let mut extracted_team_meta = false;
     let mut has_end_marker = false;
+    let mut first_new_user_text: Option<String> = None;
+    let mut new_start_time: Option<DateTime<Utc>> = None;
+    let mut new_end_time: Option<DateTime<Utc>> = None;
 
     for line_result in reader.lines() {
         let line = match line_result {
@@ -478,6 +564,13 @@ fn read_subagent_session(path: &str) -> Result<SubagentSessionData, String> {
             Some(e) => e,
             None => continue,
         };
+
+        // v2.1.232+: a `subagent_type:"fork"` subagent inherits the full parent
+        // conversation and prompt cache. Claude Code marks each replayed entry with
+        // `forkedFrom` — the same field used for /fork session inheritance (issue #60) —
+        // so track it here and exclude inherited entries from the subagent's own prompt
+        // and timing, mirroring `scan_session_metadata`'s `is_inherited` handling.
+        let is_inherited = entry.forked_from.is_some();
 
         // Detect <synthetic> assistant end marker — signals the subagent
         // has definitively finished. classify() filters these out, so we
@@ -504,6 +597,22 @@ fn read_subagent_session(path: &str) -> Result<SubagentSessionData, String> {
         // Clear sidechain flag so classify doesn't filter.
         entry.is_sidechain = false;
         if let Some(msg) = classify(entry) {
+            if !is_inherited {
+                let ts = classified_timestamp(&msg);
+                if new_start_time.is_none() || ts < new_start_time.unwrap() {
+                    new_start_time = Some(ts);
+                }
+                if new_end_time.is_none() || ts > new_end_time.unwrap() {
+                    new_end_time = Some(ts);
+                }
+                if first_new_user_text.is_none() {
+                    if let ClassifiedMsg::User(u) = &msg {
+                        if !u.text.is_empty() {
+                            first_new_user_text = Some(u.text.clone());
+                        }
+                    }
+                }
+            }
             msgs.push(msg);
         }
     }
@@ -513,6 +622,9 @@ fn read_subagent_session(path: &str) -> Result<SubagentSessionData, String> {
         team_summary,
         team_color,
         has_end_marker,
+        first_new_user_text,
+        new_start_time,
+        new_end_time,
     })
 }
 
@@ -1017,6 +1129,11 @@ pub fn discover_team_sessions(
             continue;
         }
 
+        let has_end_marker = session_data.has_end_marker;
+        let first_new_user_text = session_data.first_new_user_text.clone();
+        let new_start_time = session_data.new_start_time;
+        let new_end_time = session_data.new_end_time;
+
         let mut proc = build_subagent_process(
             format!("{agent_name}@{team_name}"),
             file_path,
@@ -1025,8 +1142,11 @@ pub fn discover_team_sessions(
             String::new(),
             String::new(),
             session_data.team_color,
+            first_new_user_text,
+            new_start_time,
+            new_end_time,
         );
-        proc.has_end_marker = session_data.has_end_marker;
+        proc.has_end_marker = has_end_marker;
         procs.push(proc);
     }
 
@@ -1948,5 +2068,207 @@ mod tests {
     fn pricing_model_name_case_insensitive() {
         let p = pricing_for_model("Claude-Sonnet-5-20260701");
         assert_eq!(p.input, 2.0, "model name matching must be case-insensitive");
+    }
+
+    // --- Issue #250: v2.1.232+ subagent_type:"fork" inherits full parent conversation ---
+
+    /// Subagent file whose first entries are inherited (forkedFrom) from a parent
+    /// session, followed by the subagent's own new activity — the shape a
+    /// `subagent_type:"fork"` subagent writes in Claude Code v2.1.232+.
+    fn setup_forked_subagent_session() -> (tempfile::TempDir, String) {
+        let dir = tempfile::tempdir().unwrap();
+        let session_id = "test-session-fork";
+        let main_path = dir.path().join(format!("{session_id}.jsonl"));
+        std::fs::write(&main_path, "").unwrap();
+
+        let sub_dir = dir.path().join(format!("{session_id}/subagents"));
+        std::fs::create_dir_all(&sub_dir).unwrap();
+
+        std::fs::write(
+            sub_dir.join("agent-fork001.jsonl"),
+            concat!(
+                r#"{"type":"user","forkedFrom":{"sessionId":"parent-session","messageUuid":"pu1"},"message":{"role":"user","content":"Investigate the original bug report"},"uuid":"pu1","timestamp":"2026-08-01T09:00:00Z"}"#,
+                "\n",
+                r#"{"type":"assistant","forkedFrom":{"sessionId":"parent-session","messageUuid":"pa1"},"message":{"role":"assistant","content":[{"type":"text","text":"Looking into it"}],"stop_reason":"end_turn","usage":{"input_tokens":500,"output_tokens":200}},"requestId":"req-parent","uuid":"pa1","timestamp":"2026-08-01T09:05:00Z"}"#,
+                "\n",
+                r#"{"type":"user","message":{"role":"user","content":"Now double-check the fix against the regression suite"},"uuid":"fu1","timestamp":"2026-08-16T14:00:00Z"}"#,
+                "\n",
+                r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Done, all tests pass"}],"stop_reason":"end_turn","usage":{"input_tokens":50,"output_tokens":20}},"requestId":"req-fork","uuid":"fa1","timestamp":"2026-08-16T14:00:10Z"}"#,
+                "\n",
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            sub_dir.join("agent-fork001.meta.json"),
+            r#"{"agentType":"general-purpose"}"#,
+        )
+        .unwrap();
+
+        (dir, main_path.to_string_lossy().to_string())
+    }
+
+    #[test]
+    fn forked_subagent_prompt_excludes_inherited_parent_history() {
+        let (_dir, main_path) = setup_forked_subagent_session();
+        let procs = discover_subagents(&main_path).unwrap();
+        assert_eq!(procs.len(), 1);
+        assert!(
+            procs[0].prompt.contains("double-check the fix"),
+            "prompt must be the fork's own new task, got: {:?}",
+            procs[0].prompt
+        );
+        assert!(
+            !procs[0].prompt.contains("original bug report"),
+            "prompt must not be the inherited parent's original prompt, got: {:?}",
+            procs[0].prompt
+        );
+    }
+
+    #[test]
+    fn forked_subagent_duration_excludes_inherited_timestamps() {
+        let (_dir, main_path) = setup_forked_subagent_session();
+        let procs = discover_subagents(&main_path).unwrap();
+        assert_eq!(procs.len(), 1);
+        // New entries are 10s apart; inherited history is from 15 days earlier.
+        assert!(
+            procs[0].duration_ms <= 15_000,
+            "duration_ms must reflect only the fork's own activity, got {} ms",
+            procs[0].duration_ms
+        );
+        assert_eq!(
+            procs[0].start_time.to_rfc3339(),
+            "2026-08-16T14:00:00+00:00",
+            "start_time must be the fork's own first new entry, not the inherited one"
+        );
+    }
+
+    #[test]
+    fn non_forked_subagent_prompt_and_timing_unaffected() {
+        // Regression guard: an ordinary (non-forked) subagent has no forkedFrom
+        // entries at all, so the new tracking must reduce to exactly the
+        // full-chunk-derived values used before this fix.
+        let dir = tempfile::tempdir().unwrap();
+        let session_id = "test-session-plain";
+        let main_path = dir.path().join(format!("{session_id}.jsonl"));
+        std::fs::write(&main_path, "").unwrap();
+        let sub_dir = dir.path().join(format!("{session_id}/subagents"));
+        std::fs::create_dir_all(&sub_dir).unwrap();
+        std::fs::write(
+            sub_dir.join("agent-plain001.jsonl"),
+            concat!(
+                r#"{"type":"user","message":{"role":"user","content":"Plain task"},"uuid":"u1","timestamp":"2026-08-16T14:00:00Z"}"#,
+                "\n",
+                r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Done"}],"stop_reason":"end_turn","usage":{"input_tokens":10,"output_tokens":5}},"requestId":"req1","uuid":"a1","timestamp":"2026-08-16T14:00:05Z"}"#,
+                "\n",
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            sub_dir.join("agent-plain001.meta.json"),
+            r#"{"agentType":"general-purpose"}"#,
+        )
+        .unwrap();
+
+        let procs = discover_subagents(main_path.to_str().unwrap()).unwrap();
+        assert_eq!(procs.len(), 1);
+        assert_eq!(procs[0].prompt, "Plain task");
+        assert_eq!(procs[0].duration_ms, 5000);
+    }
+
+    // --- Issue #250: `.forked-skill.json` sidecar attribution (v2.1.228+, default-on v2.1.232+) ---
+
+    #[test]
+    fn forked_skill_sidecar_name_used_as_default_description() {
+        // Shape confirmed against a real captured session: a skill invoked via
+        // subagent_type:"fork" writes agent-<id>.forked-skill.json alongside the
+        // usual agent-<id>.jsonl / .meta.json, with no forkedFrom entries in the
+        // jsonl itself (the fork inherits context in-memory, not via replayed
+        // entries). Its own main-session file no longer exists (truncated/cleared),
+        // so there is no parent Skill tool_use to attribute it — the sidecar must
+        // still produce a meaningful description via the orphan path.
+        let dir = tempfile::tempdir().unwrap();
+        let session_id = "test-session-forked-skill";
+        let main_path = dir.path().join(format!("{session_id}.jsonl"));
+        std::fs::write(&main_path, "").unwrap();
+        let sub_dir = dir.path().join(format!("{session_id}/subagents"));
+        std::fs::create_dir_all(&sub_dir).unwrap();
+
+        std::fs::write(
+            sub_dir.join("agent-fork001.jsonl"),
+            concat!(
+                r#"{"type":"user","message":{"role":"user","content":"Base directory for this skill: /skills/slack-explorer\n\n# Slack Explorer"},"uuid":"u1","timestamp":"2026-08-13T00:06:25.015Z"}"#,
+                "\n",
+                r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Looking into it"}],"stop_reason":"end_turn","usage":{"input_tokens":2,"output_tokens":5}},"requestId":"req1","uuid":"a1","timestamp":"2026-08-13T00:06:35.995Z"}"#,
+                "\n",
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            sub_dir.join("agent-fork001.meta.json"),
+            r#"{"agentType":"general-purpose","name":"slack-explorer","spawnDepth":1}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            sub_dir.join("agent-fork001.forked-skill.json"),
+            r#"{"skillName":"slack-explorer","attributionName":"slack-explorer"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            sub_dir.join("agent-fork001.forked-skill.marker.json"),
+            r#"{"forkedSkill":true,"skillName":"slack-explorer"}"#,
+        )
+        .unwrap();
+
+        let procs = discover_subagents(main_path.to_str().unwrap()).unwrap();
+        assert_eq!(procs.len(), 1);
+        assert_eq!(
+            procs[0].description, "slack-explorer",
+            "description must be set from the forked-skill sidecar"
+        );
+    }
+
+    #[test]
+    fn missing_forked_skill_sidecar_leaves_description_empty() {
+        // Regression guard: an ordinary subagent with no .forked-skill.json sidecar
+        // must not have its description touched by this code path — it stays empty
+        // until a later linking phase (or the orphan fallback) fills it in.
+        let dir = tempfile::tempdir().unwrap();
+        let session_id = "test-session-no-forked-skill";
+        let main_path = dir.path().join(format!("{session_id}.jsonl"));
+        std::fs::write(&main_path, "").unwrap();
+        let sub_dir = dir.path().join(format!("{session_id}/subagents"));
+        std::fs::create_dir_all(&sub_dir).unwrap();
+        std::fs::write(
+            sub_dir.join("agent-plain001.jsonl"),
+            concat!(
+                r#"{"type":"user","message":{"role":"user","content":"Plain task"},"uuid":"u1","timestamp":"2026-08-16T14:00:00Z"}"#,
+                "\n",
+                r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Done"}],"stop_reason":"end_turn","usage":{"input_tokens":10,"output_tokens":5}},"requestId":"req1","uuid":"a1","timestamp":"2026-08-16T14:00:05Z"}"#,
+                "\n",
+            ),
+        )
+        .unwrap();
+
+        let procs = discover_subagents(main_path.to_str().unwrap()).unwrap();
+        assert_eq!(procs.len(), 1);
+        assert_eq!(procs[0].description, "");
+    }
+
+    #[test]
+    fn read_forked_skill_name_falls_back_to_attribution_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let sidecar = dir.path().join("agent-x.forked-skill.json");
+        std::fs::write(&sidecar, r#"{"attributionName":"pir"}"#).unwrap();
+        let jsonl_path = dir.path().join("agent-x.jsonl");
+
+        assert_eq!(
+            read_forked_skill_name(jsonl_path.to_str().unwrap()),
+            Some("pir".to_string())
+        );
+    }
+
+    #[test]
+    fn read_forked_skill_name_returns_none_when_sidecar_absent() {
+        assert_eq!(read_forked_skill_name("/tmp/does-not-exist.jsonl"), None);
     }
 }

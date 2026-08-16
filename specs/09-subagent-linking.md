@@ -107,6 +107,28 @@ in multi-agent sessions. Sessions recorded after this version may have teammates
 `agentName` set but `teamName` absent — this is the authoritative signal and such
 sessions are fully discoverable.
 
+### Forked Subagent Handling (v2.1.232+)
+
+Claude Code v2.1.232 made `subagent_type:"fork"` on by default: a forked subagent inherits
+the full parent conversation and prompt cache. `read_subagent_session()` tracks each entry's
+`forkedFrom` field (the same field Claude Code already uses for `/fork` session inheritance,
+see [01-parser-pipeline.md](01-parser-pipeline.md)) and excludes inherited entries from two
+computed values:
+
+- **Prompt**: the subagent's own first _new_ user message, not the parent's original prompt
+  replayed at the start of the file.
+- **Timing**: `start_time` / `end_time` / `duration_ms` reflect only the subagent's own
+  activity, not the replayed parent history.
+
+Non-forked subagents carry no `forkedFrom` entries, so this reduces to the pre-v2.1.232
+behavior exactly.
+
+Skills invoked via forking additionally get a `.forked-skill.json` sidecar next to their
+`agent-*.jsonl` (`{"skillName": "...", "attributionName": "..."}`). `discover_subagents()`
+reads it as a default `description` — used when no parent Skill tool call is available to
+attribute the subagent (e.g. the main session JSONL was truncated by `/clear`) — before
+falling back to `orphan_description_from_prompt()`.
+
 ---
 
 ## Four-Phase Linking Algorithm
