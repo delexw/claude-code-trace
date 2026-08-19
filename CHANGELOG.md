@@ -3,6 +3,116 @@
 All notable changes to claude-code-trace are documented here. Versions follow
 [semantic versioning](https://semver.org/).
 
+## [0.13.0] — 2026-08-20
+
+Claude Code moved fast between v2.1.208 and v2.1.233, and most of this release is about
+keeping up with it. Forked sessions got their own worktrees, cross-session messaging
+arrived, `Task`/`TodoWrite` went off-by-default on the newest models, and several tool
+inputs documented as strings turned out not to be. Sessions that previously rendered
+under the wrong project — or dropped messages entirely — now parse correctly. Opus 5
+also gets its real pricing, and a scrolling bug that pushed the toolbars off-screen with
+no way to get them back is fixed.
+
+### Added
+
+- **Correct pricing for `claude-opus-5`**
+  ([`ca065c0`](https://github.com/delexw/claude-code-trace/commit/ca065c0)). Claude Code
+  v2.1.219 made `claude-opus-5` the default Opus model. Because the name contains
+  "opus", it fell through to the old Opus 4.x rate and every session was costed at
+  $5/$25 per Mtok instead of $10/$50 — roughly half the real figure. Both the Rust and
+  TypeScript pricing tables now carry an explicit Opus 5 entry. This also fixed a latent
+  bug where the unknown-model fallback was a hardcoded array index, so adding any entry
+  silently repriced unrecognised models.
+
+### Fixed
+
+- **Non-Latin prompts no longer crash the parser**
+  ([`1e609e2`](https://github.com/delexw/claude-code-trace/commit/1e609e2), @SAY-5). An
+  orphan subagent's description was truncated by slicing at byte 80. For Chinese,
+  Japanese, Korean or emoji text that offset lands inside a character, and Rust panics
+  rather than splitting it — so the app died outright on any such prompt longer than 80
+  bytes. Truncation now counts characters.
+
+- **Forked subagents no longer inherit their parent's history**
+  ([`ca454a9`](https://github.com/delexw/claude-code-trace/commit/ca454a9)). In
+  v2.1.232+ a forked subagent's own transcript replays inherited parent-conversation
+  entries. Those were being read as the subagent's own, which corrupted its task
+  description and inflated its reported duration. They're now excluded, and the
+  `.forked-skill.json` sidecar is read so a forked skill still gets a sensible
+  description when its parent conversation is gone (after `/clear`, for example).
+
+- **Tool summaries survive non-string inputs**
+  ([`3e2e10f`](https://github.com/delexw/claude-code-trace/commit/3e2e10f)). As of
+  v2.1.229, fields documented as strings — Bash's `command`, Read/Edit/Write's
+  `file_path`, Grep's `glob` — can arrive as an array or object. Those were silently
+  dropped, leaving a bare tool name with no detail. Non-string values are now stringified
+  so the summary still tells you what the tool did.
+
+- **Empty Teams boards explain themselves**
+  ([`e17791e`](https://github.com/delexw/claude-code-trace/commit/e17791e)). v2.1.233
+  disables `Task`/`TodoWrite` by default on Opus 4.8, Sonnet 5, Fable 5 and Mythos 5+. The
+  Tasks section used to disappear when a team had no tasks, which was indistinguishable
+  from a parsing failure. It now always renders, with a note explaining why it's empty, on
+  both web and TUI.
+
+- **Cross-session messages render as messages**
+  ([`626b5ce`](https://github.com/delexw/claude-code-trace/commit/626b5ce)). v2.1.224
+  added SendMessage between sessions. A delivered inbound message arrives wrapped in a
+  `<cross-session-message>` tag, which showed up raw in the transcript. The tag is now
+  unwrapped and the text prefixed with the sender's name so you can still tell who it came
+  from.
+
+- **Messages that are only an attachment no longer vanish**
+  ([`b9d39dd`](https://github.com/delexw/claude-code-trace/commit/b9d39dd)). v2.1.223
+  added a diagnostics attachment block whose type discriminant isn't documented. A user
+  message containing nothing else produced no visible text, so the whole entry was
+  dropped from the transcript. Attachment-shaped blocks are now recognised generically
+  and render an `[Attachment: <type>]` placeholder instead of disappearing.
+
+- **Forked sessions nest under the repo they came from**
+  ([`6b83f64`](https://github.com/delexw/claude-code-trace/commit/6b83f64)). v2.1.221
+  gave `/fork` its own worktree, so a fork's working directory shares no path prefix with
+  its parent. The project tree groups by path, so forks showed up as unrelated top-level
+  projects. Forks now resolve back through the fork chain to their origin project, with a
+  cycle guard for multi-hop chains. Mirrored in the Python TUI.
+
+- **Roaming sessions are labelled by where they started**
+  ([`fd7528e`](https://github.com/delexw/claude-code-trace/commit/fd7528e)). A session
+  that changes directory across repos records a different `cwd` per entry, and only the
+  last one was kept. A session started in one repo that later worked in another was filed
+  under the second, even though its transcript lives with the first. Sessions now track
+  every directory in first-seen order, label the node by the origin, and show a "worked
+  in" line when a session spanned more than one.
+
+- **The toolbars stop scrolling off the top of the window**
+  ([`fd7528e`](https://github.com/delexw/claude-code-trace/commit/fd7528e)). Scrolling
+  the selected item into view used `scrollIntoView`, which scrolls every scrollable
+  ancestor. The app shell is `overflow: hidden` but still scrollable programmatically, so
+  entering a session or returning to the list could push the InfoBar and ViewToolbar out
+  of sight with no scrollbar to bring them back. Only the real list container is scrolled
+  now.
+
+- **Directories added mid-session are tracked**
+  ([`31ec584`](https://github.com/delexw/claude-code-trace/commit/31ec584)). v2.1.219
+  added the `DirectoryAdded` hook, fired by `/add-dir`. The new path lives in the hook's
+  data block rather than the entry's top-level `cwd`, so it never made it into the
+  session's directory list. It's now picked up and de-duplicated, leaving the primary
+  working directory unchanged.
+
+- **Assistant messages from v2.1.212+ parse again**
+  ([`af7e19d`](https://github.com/delexw/claude-code-trace/commit/af7e19d)). v2.1.212
+  started recording the reasoning effort level on every assistant message. The field was
+  only expected at the top level of an entry, so messages carrying it failed to parse.
+
+- **Long project paths fail loudly instead of guessing**
+  ([`b0dccac`](https://github.com/delexw/claude-code-trace/commit/b0dccac)). v2.1.224
+  changed how Claude Code disambiguates project directory names longer than 200
+  characters, and the scheme isn't documented. The helper that recomputes those names now
+  refuses rather than guessing, so it can't quietly resolve to another project's sessions
+  if it's wired up later.
+
+[0.13.0]: https://github.com/delexw/claude-code-trace/releases/tag/v0.13.0
+
 ## [0.12.0] — 2026-07-18
 
 This release closes a real privacy gap: the backend's CORS policy allowed any origin, so
