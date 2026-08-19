@@ -933,8 +933,8 @@ pub fn orphan_description_from_prompt(prompt: &str) -> String {
     }
     // Fallback: first line, capped at 80 chars.
     let first_line = prompt.lines().next().unwrap_or(prompt);
-    if first_line.len() > 80 {
-        format!("{}…", &first_line[..80])
+    if first_line.chars().count() > 80 {
+        format!("{}…", first_line.chars().take(80).collect::<String>())
     } else {
         first_line.to_string()
     }
@@ -1648,6 +1648,14 @@ mod tests {
         let desc = orphan_description_from_prompt(&prompt);
         assert!(desc.ends_with('…'));
         assert_eq!(desc.chars().count(), 81); // 80 chars + '…'
+    }
+
+    #[test]
+    fn orphan_description_truncates_multibyte_prompt() {
+        let prompt = "中".repeat(100);
+        let desc = orphan_description_from_prompt(&prompt);
+        assert!(desc.ends_with('…'));
+        assert_eq!(desc.chars().count(), 81);
     }
 
     #[test]
