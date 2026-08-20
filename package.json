@@ -25,7 +25,7 @@
     "@tauri-apps/plugin-fs": "^2",
     "@tauri-apps/plugin-opener": "2.5.4",
     "@testing-library/dom": "^10.4.1",
-    "@thesvg/react": "3.2.20",
+    "@thesvg/react": "3.3.1",
     "@types/marked-terminal": "^6.1.1",
     "marked": "15.0.12",
     "marked-terminal": "^7.3.0",
@@ -34,7 +34,7 @@
     "react-icons": "^5.7.0",
     "react-markdown": "^10.1.0",
     "react-syntax-highlighter": "^16.1.1",
-    "react-virtuoso": "^4.18.11",
+    "react-virtuoso": "^4.18.12",
     "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
