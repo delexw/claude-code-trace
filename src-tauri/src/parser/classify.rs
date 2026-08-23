@@ -184,6 +184,18 @@ const AUTO_MODE_DENIAL_DATA_TYPES: &[&str] = &[
 
 const HARD_NOISE_TAGS: &[&str] = &["<local-command-caveat>", "<system-reminder>"];
 
+/// Returns the inner content of a `<system-reminder>...</system-reminder>` wrapper when the
+/// entire trimmed string is exactly that wrapper. Returns the input unchanged otherwise.
+fn unwrap_system_reminder(trimmed: &str) -> &str {
+    const OPEN: &str = "<system-reminder>";
+    const CLOSE: &str = "</system-reminder>";
+    if trimmed.starts_with(OPEN) && trimmed.ends_with(CLOSE) {
+        trimmed[OPEN.len()..trimmed.len() - CLOSE.len()].trim()
+    } else {
+        trimmed
+    }
+}
+
 const EMPTY_STDOUT: &str = "<local-command-stdout></local-command-stdout>";
 const EMPTY_STDERR: &str = "<local-command-stderr></local-command-stderr>";
 
@@ -501,7 +513,11 @@ pub fn classify(e: Entry) -> Option<ClassifiedMsg> {
                 is_error: !stderr_content.is_empty(),
             }));
         }
-        if trimmed.starts_with(TASK_NOTIFICATION_TAG) {
+        // v2.1.234+: between-turn background-task notifications may arrive fully wrapped in
+        // <system-reminder>, matching mid-turn delivery (issue #262).
+        if trimmed.starts_with(TASK_NOTIFICATION_TAG)
+            || unwrap_system_reminder(trimmed).starts_with(TASK_NOTIFICATION_TAG)
+        {
             let status = RE_TASK_NOTIFY_STATUS
                 .captures(&content_str)
                 .and_then(|c| c.get(1))
@@ -677,6 +693,15 @@ fn is_user_noise(raw: &Option<Value>, content_str: &str) -> bool {
     for tag in HARD_NOISE_TAGS {
         let close_tag = tag.replace('<', "</");
         if trimmed.starts_with(tag) && trimmed.ends_with(&close_tag) {
+            // v2.1.234+: between-turn background-task notifications are now delivered fully
+            // wrapped in <system-reminder>, matching mid-turn delivery (issue #262). A wrapped
+            // <task-notification> still carries a real task completion/failure status and must
+            // surface as a System message, not be swallowed as reminder noise.
+            if *tag == "<system-reminder>"
+                && unwrap_system_reminder(trimmed).starts_with(TASK_NOTIFICATION_TAG)
+            {
+                continue;
+            }
             return true;
         }
     }
@@ -1405,6 +1430,48 @@ mod tests {
             }
             other => panic!("Expected System with is_error, got {other:?}"),
         }
+    }
+
+    // --- Issue #262: v2.1.234+ between-turn task notifications wrapped in <system-reminder> ---
+
+    #[test]
+    fn classify_task_notification_wrapped_in_system_reminder_is_system_msg() {
+        // v2.1.234+: between-turn background-task notifications are now delivered fully
+        // wrapped in <system-reminder>, matching mid-turn delivery. The wrapper must not
+        // cause the notification to be dropped as reminder noise.
+        let content = "<system-reminder><task-notification><summary>Task done</summary><status>completed</status></task-notification></system-reminder>";
+        let e = make_entry("user", Some(json!(content)));
+        match classify(e) {
+            Some(ClassifiedMsg::System(s)) => {
+                assert!(!s.is_error);
+                assert!(s.output.contains("Task done"), "got: {:?}", s.output);
+            }
+            other => panic!("Expected System for wrapped task-notification, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_task_notification_wrapped_in_system_reminder_failed_is_error() {
+        let content = "<system-reminder><task-notification><summary>Background command failed</summary><status>failed</status></task-notification></system-reminder>";
+        let e = make_entry("user", Some(json!(content)));
+        match classify(e) {
+            Some(ClassifiedMsg::System(s)) => {
+                assert!(
+                    s.is_error,
+                    "failed status should be an error even when wrapped"
+                );
+            }
+            other => panic!("Expected System with is_error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_returns_none_for_plain_system_reminder_still_dropped() {
+        // Regression guard: a genuine reminder (no task-notification inside) wrapped in
+        // <system-reminder> must still be dropped as noise, not surfaced as a System message.
+        let content = "<system-reminder>some reminder</system-reminder>";
+        let e = make_entry("user", Some(json!(content)));
+        assert!(classify(e).is_none());
     }
 
     // --- Hook event compat tests (v2.1.84+) ---
