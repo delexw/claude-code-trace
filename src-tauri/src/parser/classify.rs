@@ -1144,6 +1144,59 @@ mod tests {
         }
     }
 
+    // --- Issue #260: Claude Code v2.1.234 confirmed that, on the non-streaming fallback
+    // path (typically via third-party gateways), a `text` content block can arrive without
+    // its `text` field, or a `thinking` block without its `thinking` field. Claude Code
+    // itself used to crash on this and now handles it gracefully. classify() must not panic
+    // on these and must fall back to an empty string for the missing field. ---
+
+    #[test]
+    fn classify_text_block_missing_text_field_does_not_panic() {
+        let content = json!([
+            {"type": "text"},
+            {"type": "tool_use", "id": "tool1", "name": "Bash", "input": {"command": "ls"}}
+        ]);
+        let mut e = make_entry("assistant", Some(content));
+        e.message.stop_reason = Some("tool_use".to_string());
+        match classify(e) {
+            Some(ClassifiedMsg::AI(ai)) => {
+                assert_eq!(ai.tool_calls.len(), 1);
+                let block = ai
+                    .blocks
+                    .iter()
+                    .find(|b| b.block_type == "text")
+                    .expect("should have text block");
+                assert_eq!(
+                    block.text, "",
+                    "missing text field must default to empty string"
+                );
+            }
+            other => panic!("Expected AI, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_thinking_block_missing_thinking_field_does_not_panic() {
+        let content = json!([{"type": "thinking"}]);
+        let mut e = make_entry("assistant", Some(content));
+        e.message.stop_reason = Some("end_turn".to_string());
+        match classify(e) {
+            Some(ClassifiedMsg::AI(ai)) => {
+                assert_eq!(ai.thinking_count, 1, "thinking block must still be counted");
+                let block = ai
+                    .blocks
+                    .iter()
+                    .find(|b| b.block_type == "thinking")
+                    .expect("should have thinking block");
+                assert_eq!(
+                    block.text, "",
+                    "missing thinking field must default to empty string"
+                );
+            }
+            other => panic!("Expected AI, got {other:?}"),
+        }
+    }
+
     // --- Issue #157: v2.1.183+ thinking-only assistant entries and synthetic re-prompt user entries ---
 
     #[test]

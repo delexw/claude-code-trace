@@ -358,6 +358,26 @@ mod tests {
         assert_eq!(extract_text(&v), "only this");
     }
 
+    #[test]
+    fn extract_text_block_missing_text_field_does_not_panic() {
+        // Issue #260: Claude Code v2.1.234 confirmed that on the non-streaming fallback
+        // path (typically via third-party gateways), a text block can arrive without its
+        // text field. It must be skipped, not panic or produce a placeholder.
+        let v = Some(json!([{"type": "text"}]));
+        assert_eq!(extract_text(&v), "");
+    }
+
+    #[test]
+    fn extract_text_block_missing_text_field_alongside_real_text() {
+        // Issue #260: a fielded text block mixed with a malformed one must still surface
+        // the real text rather than dropping the whole entry.
+        let v = Some(json!([
+            {"type": "text"},
+            {"type": "text", "text": "still here"}
+        ]));
+        assert_eq!(extract_text(&v), "still here");
+    }
+
     // --- Issue #235: unrecognized "diagnostics attachment"-shaped content block ---
 
     #[test]
