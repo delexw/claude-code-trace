@@ -252,6 +252,7 @@ describe("MessageList", () => {
             hook_metadata: "",
             tool_result_json: "",
             is_orphan: false,
+            is_deferred: false,
             hook_source_agent_name: "",
             hook_requesting_agent_uuid: "",
             advisor_model: "",
