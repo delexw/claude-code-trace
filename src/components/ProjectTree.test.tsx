@@ -364,10 +364,12 @@ describe("ProjectTree", () => {
     expect(children.length).toBe(2);
   });
 
-  it("does not nest projects with similar prefix but no parent project", () => {
-    // -Users-me-backend and -Users-me-backend-v2 are both root projects
-    // because neither is a parent of the other unless both exist as project keys
-    // Here -Users-me-backend IS a project, so -Users-me-backend-v2 nests under it
+  it("keeps sibling directories as roots even though their keys share a prefix", () => {
+    // -Users-me-backend and -Users-me-backend-v2 share a key prefix, but their real
+    // cwds (/home/user/backend and /home/user/backend-v2) are sibling directories, not
+    // nested — backend-v2 is not a subdirectory of backend. Nesting must follow the real
+    // cwd relationship, not the encoded key, or two unrelated projects could be wrongly
+    // grouped together (see #259).
     const sessions = [
       makeSession({
         path: "/home/user/.claude/projects/-Users-me-backend/s1.jsonl",
@@ -386,9 +388,8 @@ describe("ProjectTree", () => {
         onRefresh={vi.fn()}
       />,
     );
-    // backend-v2 nests under backend since backend is a real project key prefix
     const children = container.querySelectorAll(".project-tree__item--child");
-    expect(children.length).toBe(1);
+    expect(children.length).toBe(0);
   });
 
   it("keeps projects as roots when no parent project key exists", () => {

@@ -226,6 +226,7 @@ classDiagram
     class ProjectNode {
         +key: string
         +label: string
+        +origin: string
         +sessions: SessionInfo[]
         +children: ProjectNode[]
         +is_ongoing: boolean
@@ -234,7 +235,10 @@ classDiagram
 ```
 
 `buildProjectTree(sessions)` partitions sessions by project key (derived from the JSONL file path)
-and nests worktree sessions under their parent project.
+and nests worktree sessions under their parent project. `origin` (the real cwd-derived path the
+node is anchored at, when known) is preferred over the key for that nesting decision, since a host
+can assign the `~/.claude/projects/<dir>` folder an arbitrary name unrelated to the real path via
+`CLAUDE_CODE_PROJECT_DIR_NAME` — see [11-project-tree.md](11-project-tree.md).
 
 ---
 

@@ -90,6 +90,17 @@ describe("buildProjectNodes", () => {
     expect(buildProjectNodes(sessions)[0].name).toBe("proj-a");
   });
 
+  it("records the origin dir on the node for downstream real-path nesting checks", () => {
+    const sessions = [
+      makeSession({
+        path: "/home/user/.claude/projects/session-abc/s1.jsonl",
+        cwd: "/srv/backend",
+      }),
+    ];
+    const nodes = buildProjectNodes(sessions);
+    expect(nodes[0].origin).toBe("/srv/backend");
+  });
+
   it("tracks ongoing status", () => {
     const sessions = [
       makeSession({
@@ -230,6 +241,71 @@ describe("buildTree", () => {
     ];
     const roots = buildTree(nodes);
     expect(roots).toHaveLength(2);
+  });
+
+  // --- Issue #259: CLAUDE_CODE_PROJECT_DIR_NAME lets hosts assign arbitrary,
+  // path-unrelated directory names, so nesting can no longer trust a key-prefix match alone.
+
+  it("nests via real cwd path even when host-assigned keys share no prefix", () => {
+    const nodes = [
+      {
+        name: "backend",
+        key: "session-abc",
+        origin: "/srv/backend",
+        sessionCount: 1,
+        hasOngoing: false,
+      },
+      {
+        name: "hotfix",
+        key: "session-xyz",
+        origin: "/srv/backend/.claude-worktrees/hotfix",
+        sessionCount: 1,
+        hasOngoing: false,
+      },
+    ];
+    const roots = buildTree(nodes);
+    expect(roots).toHaveLength(1);
+    expect(roots[0].node.key).toBe("session-abc");
+    expect(roots[0].children).toHaveLength(1);
+    expect(roots[0].children[0].node.key).toBe("session-xyz");
+  });
+
+  it("does not nest two unrelated projects whose host-assigned keys coincidentally share a prefix", () => {
+    const nodes = [
+      {
+        name: "backend",
+        key: "backend",
+        origin: "/srv/backend",
+        sessionCount: 1,
+        hasOngoing: false,
+      },
+      {
+        name: "backend-hotfix",
+        key: "backend-hotfix",
+        origin: "/tools/backend-hotfix",
+        sessionCount: 1,
+        hasOngoing: false,
+      },
+    ];
+    const roots = buildTree(nodes);
+    expect(roots).toHaveLength(2);
+  });
+
+  it("falls back to key-prefix matching when origin is unknown for either side", () => {
+    const nodes = [
+      {
+        name: "backend",
+        key: "-Users-me-backend",
+        origin: "/Users/me/backend",
+        sessionCount: 1,
+        hasOngoing: false,
+      },
+      { name: "tools", key: "-Users-me-backend-tools", sessionCount: 1, hasOngoing: false },
+    ];
+    const roots = buildTree(nodes);
+    expect(roots).toHaveLength(1);
+    expect(roots[0].children).toHaveLength(1);
+    expect(roots[0].children[0].node.key).toBe("-Users-me-backend-tools");
   });
 
   it("creates virtual intermediate node for -- segments between parent and worktree", () => {
