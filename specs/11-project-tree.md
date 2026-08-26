@@ -59,12 +59,16 @@ classDiagram
     class ProjectNode {
         +String key
         +String label
+        +String origin
         +SessionInfo[] sessions
         +ProjectNode[] children
         +bool is_ongoing
         +number total_sessions
     }
 ```
+
+`origin` is the real cwd-derived path the node is anchored at (when known) — see "Real
+path takes precedence over the key" above.
 
 `label` is the human-readable display name. It is derived from the session's **origin
 working directory** — `dirs[0]`, the first `cwd` seen in the JSONL, which is the directory
@@ -96,6 +100,24 @@ flowchart LR
     PARENT --> CHILD["nest under parent node\nas child"]
     CHILD --> LABEL["label: 'feature-branch'"]
 ```
+
+### Real path takes precedence over the key (issue #259)
+
+Claude Code v2.1.234 added `CLAUDE_CODE_PROJECT_DIR_NAME`, letting a host assign an
+arbitrary short name to a project's `~/.claude/projects/<dir>` folder instead of the
+usual path-derived encoding above. When that happens the project key carries no
+relation to the real path at all, so string-prefix matching on the key alone could
+wrongly nest two unrelated projects that happen to share a prefix, or fail to nest two
+genuinely related ones.
+
+Each `ProjectNode` also carries `origin` — the real cwd-derived path used for its label
+(see "ProjectNode Structure" below). `buildTree`'s parent search (`nestsUnder` in
+`shared/projectTree.ts`) checks this first: when both the candidate node and its
+prospective parent have a known `origin`, nesting requires the child's origin to be a
+real filesystem descendant of the parent's origin (`isRealDescendant`). The key-prefix
+check above is used only as a fallback, when `origin` is unavailable for either side
+(e.g. synthesized orphan-worktree nodes, which have no session of their own to derive a
+real path from — see below).
 
 ### Orphan worktrees (no anchor session)
 
