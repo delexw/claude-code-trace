@@ -11,6 +11,10 @@ import { projectKey, projectDisplayName, shortPath } from "./format.js";
 export interface ProjectNode {
   name: string;
   key: string;
+  /** Real filesystem path this node is anchored at (the anchor's origin dir, falling back
+   *  to its cwd), when known. Used to verify tree nesting against actual content instead
+   *  of the opaque `~/.claude/projects/<dir>` name — see `isRealDescendant`. */
+  origin?: string;
   sessionCount: number;
   hasOngoing: boolean;
 }
@@ -63,6 +67,7 @@ export function buildProjectNodes(sessions: SessionInfo[]): ProjectNode[] {
       map.set(key, {
         name: shortPath(origin) || projectDisplayName(key),
         key,
+        origin: origin || undefined,
         sessionCount: 1,
         hasOngoing: s.is_ongoing,
       });
@@ -97,6 +102,28 @@ function hasRealAncestor(key: string, keys: ReadonlySet<string>): boolean {
   return false;
 }
 
+/**
+ * True when `child` is a real filesystem descendant of `parent`. A host can rename a
+ * project's `~/.claude/projects/<dir>` transcript folder to an arbitrary short name via
+ * `CLAUDE_CODE_PROJECT_DIR_NAME` (Claude Code v2.1.234+), so the directory-name `key` is
+ * no longer guaranteed to encode the real path — two unrelated projects could coincidentally
+ * share a key prefix, or a genuinely nested project (real worktree) could have an unrelated
+ * key. See #259.
+ */
+function isRealDescendant(child: string | undefined, parent: string | undefined): boolean {
+  if (!child || !parent || child === parent) return false;
+  return child.startsWith(parent.replace(/\/+$/, "") + "/");
+}
+
+/** Whether `node` nests under `candidate` — prefers the real cwd-derived path relationship
+ *  over the opaque key when both are known, falling back to key-prefix matching otherwise. */
+function nestsUnder(node: ProjectNode, candidate: ProjectNode): boolean {
+  if (node.origin && candidate.origin) {
+    return isRealDescendant(node.origin, candidate.origin);
+  }
+  return node.key.startsWith(candidate.key + "-");
+}
+
 export function buildTree(nodes: ProjectNode[]): TreeNode[] {
   // A worktree session whose orchestrator never opens a session at the repo root (headless
   // / deterministic runs that only ever execute agent phases inside per-item worktrees) has
@@ -126,7 +153,7 @@ export function buildTree(nodes: ProjectNode[]): TreeNode[] {
     let parent: TreeNode | undefined;
     for (const candidate of all) {
       if (
-        node.key.startsWith(candidate.node.key + "-") &&
+        nestsUnder(node, candidate.node) &&
         (!parent || candidate.node.key.length > parent.node.key.length)
       ) {
         parent = candidate;
