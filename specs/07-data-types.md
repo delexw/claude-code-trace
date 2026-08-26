@@ -191,17 +191,18 @@ type TaskStatus = "pending" | "in_progress" | "completed" | "cancelled";
 
 ## `DisplayItem` Field Notes
 
-| Field               | Notes                                                                      |
-| ------------------- | -------------------------------------------------------------------------- |
-| `id`                | Unique within session — `tool_id` for tool calls, synthetic UUID otherwise |
-| `tool_input`        | JSON-serialised (string)                                                   |
-| `tool_result`       | Plain string representation                                                |
-| `tool_result_json`  | Pretty-printed JSON (set when result is object/array)                      |
-| `subagent_messages` | Recursively expanded child messages (empty when not a subagent)            |
-| `subagent_ongoing`  | `true` if the spawned agent is still running                               |
-| `is_orphan`         | `true` for tool calls from discarded/rewound timelines                     |
-| `hook_metadata`     | Pretty-printed JSON of all hook attachment key-value pairs                 |
-| `advisor_model`     | Set only for the `advisor` tool call — the model that produced the advice  |
+| Field               | Notes                                                                                                                                                                                                                 |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                | Unique within session — `tool_id` for tool calls, synthetic UUID otherwise                                                                                                                                            |
+| `tool_input`        | JSON-serialised (string)                                                                                                                                                                                              |
+| `tool_result`       | Plain string representation                                                                                                                                                                                           |
+| `tool_result_json`  | Pretty-printed JSON (set when result is object/array)                                                                                                                                                                 |
+| `subagent_messages` | Recursively expanded child messages (empty when not a subagent)                                                                                                                                                       |
+| `subagent_ongoing`  | `true` if the spawned agent is still running                                                                                                                                                                          |
+| `is_orphan`         | `true` for tool calls from discarded/rewound timelines                                                                                                                                                                |
+| `is_deferred`       | `true` for a tool call with no matching result at the point the session ended — a permission-defer suspension, or a SIGTERM'd print/SDK session (2.1.236+ writes no synthetic denial). Rendered as a "pending" badge. |
+| `hook_metadata`     | Pretty-printed JSON of all hook attachment key-value pairs                                                                                                                                                            |
+| `advisor_model`     | Set only for the `advisor` tool call — the model that produced the advice                                                                                                                                             |
 
 ---
 

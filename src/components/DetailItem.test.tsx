@@ -31,6 +31,7 @@ function makeItem(overrides: Partial<DisplayItem> = {}): DisplayItem {
     hook_metadata: "",
     tool_result_json: "",
     is_orphan: false,
+    is_deferred: false,
     hook_source_agent_name: "",
     hook_requesting_agent_uuid: "",
     advisor_model: "",
@@ -458,6 +459,38 @@ describe("DetailItem", () => {
       />,
     );
     expect(screen.getByText("orphan")).toBeInTheDocument();
+  });
+
+  it("shows pending badge when is_deferred is true", () => {
+    // A tool_use with no matching tool_result at the end of a session — e.g. a
+    // SIGTERM'd print/SDK session (Claude Code 2.1.236+ writes no synthetic denial).
+    render(
+      <DetailItem
+        item={makeItem({ is_deferred: true, tool_result: "" })}
+        index={0}
+        isSelected={false}
+        isExpanded={false}
+        onToggle={vi.fn()}
+        onToggleExpand={vi.fn()}
+        onSelect={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("pending")).toBeInTheDocument();
+  });
+
+  it("omits pending badge when is_deferred is false", () => {
+    render(
+      <DetailItem
+        item={makeItem({ is_deferred: false })}
+        index={0}
+        isSelected={false}
+        isExpanded={false}
+        onToggle={vi.fn()}
+        onToggleExpand={vi.fn()}
+        onSelect={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText("pending")).not.toBeInTheDocument();
   });
 
   it("calls onToggle when header is clicked", () => {

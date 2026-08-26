@@ -60,6 +60,10 @@ export interface DisplayItem {
   /** Tool result as pretty-printed JSON when the content is an object or array. */
   tool_result_json: string;
   is_orphan: boolean;
+  /** True when this tool_use has no matching tool_result and the session ended (or went
+   *  stale) before one arrived — e.g. a "defer" permission decision, or a SIGTERM'd
+   *  print/SDK session (Claude Code 2.1.236+ no longer writes a synthetic denial). */
+  is_deferred: boolean;
   /** v2.1.186+: name of the background subagent that triggered a cross-session permission prompt. */
   hook_source_agent_name: string;
   /** v2.1.186+: session UUID of the background subagent requesting permission. */

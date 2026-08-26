@@ -1964,6 +1964,20 @@ body {
   opacity: 0.85;
 }
 
+.detail-item__pending-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--text-muted);
+  color: var(--bg);
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  opacity: 0.85;
+}
+
 .detail-item__prompt-preview {
   padding: 2px 8px 2px 24px;
   font-size: 11px;
