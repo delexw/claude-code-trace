@@ -945,6 +945,12 @@ struct AgentLinkData {
     tool_id_to_color: HashMap<String, String>,
 }
 
+/// v2.1.247+: when a subagent's first-call model 404 survives the session's full
+/// fallback-model chain, `toolUseResult` instead carries a structured error object
+/// (`error_type`/`status`/`request_id`/`model`). `entry.tool_use_result_map()` parses
+/// any JSON object generically, so those entries are simply skipped below (no
+/// `agentId`/`color` keys to find) exactly like any other agentId-less result —
+/// no special-casing needed (issue #270).
 fn scan_agent_links(session_path: &str) -> AgentLinkData {
     let mut data = AgentLinkData {
         agent_to_tool_id: HashMap::new(),
@@ -2278,5 +2284,53 @@ mod tests {
     #[test]
     fn read_forked_skill_name_returns_none_when_sidecar_absent() {
         assert_eq!(read_forked_skill_name("/tmp/does-not-exist.jsonl"), None);
+    }
+
+    #[test]
+    fn scan_agent_links_finds_agent_id_and_color_from_tool_use_result() {
+        let dir = tempfile::tempdir().unwrap();
+        let session_path = dir.path().join("main.jsonl");
+        std::fs::write(
+            &session_path,
+            concat!(
+                r#"{"type":"user","sourceToolUseID":"toolu_task1","toolUseResult":{"agentId":"agent001","color":"blue"},"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_task1","content":"Done"}]},"uuid":"u1","timestamp":"2026-08-26T00:00:00Z"}"#,
+                "\n",
+            ),
+        )
+        .unwrap();
+
+        let links = scan_agent_links(session_path.to_str().unwrap());
+        assert_eq!(
+            links.agent_to_tool_id.get("agent001"),
+            Some(&"toolu_task1".to_string())
+        );
+        assert_eq!(
+            links.tool_id_to_color.get("toolu_task1"),
+            Some(&"blue".to_string())
+        );
+    }
+
+    #[test]
+    fn scan_agent_links_skips_v2_1_247_subagent_fallback_error_result() {
+        // v2.1.247: when a subagent's first-call model 404 survives the full
+        // fallback-model chain, toolUseResult carries a structured error object
+        // (error_type/status/request_id/model) instead of the usual agentId/color
+        // pair. scan_agent_links must not crash and must simply find no link,
+        // exactly as it already does for any other toolUseResult lacking agentId
+        // (issue #270).
+        let dir = tempfile::tempdir().unwrap();
+        let session_path = dir.path().join("main.jsonl");
+        std::fs::write(
+            &session_path,
+            concat!(
+                r#"{"type":"user","sourceToolUseID":"toolu_task1","toolUseResult":{"error_type":"not_found_error","status":404,"request_id":"req_01ABC","model":"claude-nonexistent-model"},"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_task1","is_error":true,"content":{"error_type":"not_found_error","status":404,"request_id":"req_01ABC","model":"claude-nonexistent-model"}}]},"uuid":"u1","timestamp":"2026-08-26T00:00:00Z"}"#,
+                "\n",
+            ),
+        )
+        .unwrap();
+
+        let links = scan_agent_links(session_path.to_str().unwrap());
+        assert!(links.agent_to_tool_id.is_empty());
+        assert!(links.tool_id_to_color.is_empty());
     }
 }

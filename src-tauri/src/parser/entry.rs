@@ -610,6 +610,44 @@ mod tests {
     }
 
     #[test]
+    fn tool_use_result_map_reads_v2_1_247_subagent_fallback_error_fields() {
+        // v2.1.247: when a subagent's first-call model 404 survives the full
+        // fallback-model chain, toolUseResult carries a structured error object
+        // (error_type/status/request_id/model) instead of the usual agentId/color
+        // pair. tool_use_result_map is a generic Value map, so it must expose the
+        // new fields without any deserialization failure (issue #270).
+        let e = Entry {
+            tool_use_result: Some(json!({
+                "error_type": "not_found_error",
+                "status": 404,
+                "request_id": "req_01ABC",
+                "model": "claude-nonexistent-model",
+            })),
+            ..Default::default()
+        };
+        let map = e
+            .tool_use_result_map()
+            .expect("object toolUseResult must parse");
+        assert_eq!(
+            map.get("error_type").and_then(|v| v.as_str()),
+            Some("not_found_error")
+        );
+        assert_eq!(map.get("status").and_then(|v| v.as_i64()), Some(404));
+        assert_eq!(
+            map.get("request_id").and_then(|v| v.as_str()),
+            Some("req_01ABC")
+        );
+        assert_eq!(
+            map.get("model").and_then(|v| v.as_str()),
+            Some("claude-nonexistent-model")
+        );
+        // No agentId/color present — callers relying on those keys must see None,
+        // not an error.
+        assert!(map.get("agentId").is_none());
+        assert!(map.get("color").is_none());
+    }
+
+    #[test]
     fn parse_entry_captures_content_field_for_away_summary() {
         // v2.1.108+: {type:"system",subtype:"away_summary",content:"<text>",uuid:"...",timestamp:"..."}
         let line = json!({

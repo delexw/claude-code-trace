@@ -3865,4 +3865,66 @@ mod tests {
             other => panic!("expected User message for cross-session message, got {other:?}"),
         }
     }
+
+    #[test]
+    fn classify_task_tool_result_with_structured_v2_1_247_fallback_error_content() {
+        // v2.1.247: when a subagent's first-call model 404 survives the full
+        // fallback-model chain, the Task tool's result content is a structured
+        // error object (error_type/status/request_id/model) instead of the usual
+        // string/array. It must still classify with is_error preserved and the
+        // raw object captured in content_json so it renders as legible
+        // pretty-printed JSON instead of collapsing to an unreadable dump
+        // (issue #270).
+        let content = json!([
+            {
+                "type": "tool_result",
+                "tool_use_id": "toolu_task1",
+                "is_error": true,
+                "content": {
+                    "error_type": "not_found_error",
+                    "status": 404,
+                    "request_id": "req_01ABC",
+                    "model": "claude-nonexistent-model"
+                }
+            }
+        ]);
+        let e = Entry {
+            entry_type: "user".to_string(),
+            uuid: "task-fallback-error".to_string(),
+            timestamp: "2026-08-26T00:00:00Z".to_string(),
+            message: super::super::entry::EntryMessage {
+                role: "user".to_string(),
+                content: Some(content),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::AI(ai)) => {
+                assert_eq!(ai.blocks.len(), 1);
+                let b = &ai.blocks[0];
+                assert_eq!(b.block_type, "tool_result");
+                assert_eq!(b.tool_id, "toolu_task1");
+                assert!(b.is_error);
+                let cj = b
+                    .content_json
+                    .as_ref()
+                    .expect("object content must be captured for pretty rendering");
+                assert_eq!(
+                    cj.get("error_type").and_then(|v| v.as_str()),
+                    Some("not_found_error")
+                );
+                assert_eq!(cj.get("status").and_then(|v| v.as_i64()), Some(404));
+                assert_eq!(
+                    cj.get("request_id").and_then(|v| v.as_str()),
+                    Some("req_01ABC")
+                );
+                assert_eq!(
+                    cj.get("model").and_then(|v| v.as_str()),
+                    Some("claude-nonexistent-model")
+                );
+            }
+            other => panic!("Expected AI message, got {other:?}"),
+        }
+    }
 }
