@@ -427,4 +427,94 @@ compaction allowed\n\
         assert_eq!(caps.get(2).unwrap().as_str(), "PreCompact");
         assert_eq!(caps.get(3).unwrap().as_str(), "blocked");
     }
+
+    // --- Issue #272: v2.1.251+ PreModelSwitch/PostModelSwitch hook event compat ---
+
+    #[test]
+    fn extract_hook_msgs_parses_pre_model_switch_hook_event() {
+        // v2.1.251: PreModelSwitch fires before Claude Code switches models mid-session. The
+        // debug log captures it with the same format as other hooks; the generic regex must
+        // match it without an explicit event-name arm.
+        let content = "\
+2026-08-28T10:00:00.000Z [DEBUG] Hook PreModelSwitch (PreModelSwitch) success:\n\
+model switch allowed\n\
+";
+        let f = write_debug_file(content);
+        let (entries, _) = read_debug_log(f.path().to_str().unwrap()).unwrap();
+
+        let caps = HOOK_MSG_RE.captures(&entries[0].message).unwrap();
+        assert_eq!(caps.get(2).unwrap().as_str(), "PreModelSwitch");
+
+        // Must not be excluded (only Stop is excluded).
+        let hook_event = caps.get(2).unwrap().as_str();
+        assert_ne!(hook_event, "Stop");
+    }
+
+    #[test]
+    fn extract_hook_msgs_parses_post_model_switch_hook_event() {
+        // v2.1.251: PostModelSwitch fires after the model switch completes.
+        let content =
+            "2026-08-28T10:00:05.000Z [DEBUG] Hook PostModelSwitch (PostModelSwitch) success:\n";
+        let f = write_debug_file(content);
+        let (entries, _) = read_debug_log(f.path().to_str().unwrap()).unwrap();
+
+        let caps = HOOK_MSG_RE.captures(&entries[0].message).unwrap();
+        assert_eq!(caps.get(2).unwrap().as_str(), "PostModelSwitch");
+    }
+
+    #[test]
+    fn extract_hook_msgs_includes_model_switch_hooks_in_classified_output() {
+        // v2.1.251: the same rescue logic extract_hook_msgs applies (regex match, Stop
+        // excluded) must surface PreModelSwitch/PostModelSwitch as ClassifiedMsg::Hook
+        // entries. Mirrors extract_hook_msgs_parses_pretooluse_and_posttooluse: reads via
+        // read_debug_log directly rather than extract_hook_msgs, since the latter resolves
+        // the debug log path against the real ~/.claude/debug/ directory.
+        let content = "\
+2026-08-28T10:00:00.000Z [DEBUG] Hook PreModelSwitch (PreModelSwitch) success:\n\
+model switch allowed\n\
+2026-08-28T10:00:05.000Z [DEBUG] Hook PostModelSwitch (PostModelSwitch) success:\n\
+model switch complete\n\
+2026-08-28T10:00:10.000Z [DEBUG] Hook Stop (Stop) success:\n\
+session ended\n\
+";
+        let f = write_debug_file(content);
+        let (entries, _) = read_debug_log(f.path().to_str().unwrap()).unwrap();
+
+        let hooks: Vec<ClassifiedMsg> = entries
+            .iter()
+            .filter_map(|e| {
+                let caps = HOOK_MSG_RE.captures(&e.message)?;
+                let hook_name_full = caps.get(1)?.as_str();
+                let hook_event = caps.get(2)?.as_str();
+                if hook_event == "Stop" {
+                    return None;
+                }
+                let hook_name = hook_name_full
+                    .find(':')
+                    .map(|i| &hook_name_full[i + 1..])
+                    .unwrap_or(hook_name_full)
+                    .to_string();
+                Some(ClassifiedMsg::Hook(crate::parser::classify::HookMsg {
+                    timestamp: e.timestamp,
+                    hook_event: hook_event.to_string(),
+                    hook_name,
+                    command: e.extra.clone(),
+                    metadata: None,
+                    source_agent_name: String::new(),
+                    requesting_agent_uuid: String::new(),
+                }))
+            })
+            .collect();
+
+        let events: Vec<&str> = hooks
+            .iter()
+            .map(|m| match m {
+                ClassifiedMsg::Hook(h) => h.hook_event.as_str(),
+                _ => "",
+            })
+            .collect();
+        assert!(events.contains(&"PreModelSwitch"));
+        assert!(events.contains(&"PostModelSwitch"));
+        assert!(!events.contains(&"Stop"), "Stop should be excluded");
+    }
 }

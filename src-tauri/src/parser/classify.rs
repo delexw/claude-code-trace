@@ -3579,6 +3579,134 @@ mod tests {
         }
     }
 
+    // --- Issue #272: v2.1.251+ PreModelSwitch/PostModelSwitch hook events + SessionStart
+    // staleness/re-cache-cost fields are handled by existing catch-alls ---
+
+    #[test]
+    fn classify_pre_model_switch_progress_entry_produces_hook_msg() {
+        // v2.1.251+: PreModelSwitch fires before Claude Code switches models mid-session,
+        // letting a hook block, confirm, or annotate the switch. It surfaces as a
+        // progress/hook_progress entry, rescued by the generic hookEvent presence check.
+        let e = Entry {
+            entry_type: "progress".to_string(),
+            uuid: "uuid-pre-model-switch-progress".to_string(),
+            timestamp: "2026-08-28T10:00:00Z".to_string(),
+            data: Some(json!({
+                "type": "hook_progress",
+                "hookEvent": "PreModelSwitch",
+                "hookName": "confirm-model-switch",
+                "fromModel": "claude-sonnet-5",
+                "toModel": "claude-opus-5"
+            })),
+            ..Default::default()
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::Hook(h)) => {
+                assert_eq!(h.hook_event, "PreModelSwitch");
+                assert_eq!(h.hook_name, "confirm-model-switch");
+            }
+            other => panic!("Expected Hook for PreModelSwitch progress entry, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_post_model_switch_system_hook_progress_entry_produces_hook_msg() {
+        // v2.1.251+: PostModelSwitch may also arrive as type:"system", subtype:"hook_progress"
+        // in verbose/stream-json mode. The hook_progress subtype rescue must handle it.
+        let e = Entry {
+            entry_type: "system".to_string(),
+            uuid: "uuid-post-model-switch-sys".to_string(),
+            timestamp: "2026-08-28T10:00:05Z".to_string(),
+            subtype: "hook_progress".to_string(),
+            hook_event: "PostModelSwitch".to_string(),
+            hook_name: "annotate-model-switch".to_string(),
+            ..Default::default()
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::Hook(h)) => {
+                assert_eq!(h.hook_event, "PostModelSwitch");
+                assert_eq!(h.hook_name, "annotate-model-switch");
+            }
+            other => {
+                panic!(
+                    "Expected Hook for system/hook_progress PostModelSwitch entry, got {other:?}"
+                )
+            }
+        }
+    }
+
+    #[test]
+    fn classify_pre_model_switch_attachment_entry_produces_hook_msg() {
+        // v2.1.251+: PreModelSwitch hook results surface as attachment entries, like every
+        // other non-Stop hook. The generic attachment hookEvent rescue must handle it without
+        // an explicit match arm.
+        let e = Entry {
+            entry_type: "attachment".to_string(),
+            uuid: "uuid-pre-model-switch-att".to_string(),
+            timestamp: "2026-08-28T10:00:10Z".to_string(),
+            attachment: Some(json!({
+                "type": "hook_success",
+                "hookEvent": "PreModelSwitch",
+                "hookName": "confirm-model-switch",
+                "fromModel": "claude-sonnet-5",
+                "toModel": "claude-opus-5"
+            })),
+            ..Default::default()
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::Hook(h)) => {
+                assert_eq!(h.hook_event, "PreModelSwitch");
+                assert_eq!(h.hook_name, "confirm-model-switch");
+                let meta = h
+                    .metadata
+                    .expect("metadata must be captured for attachment hooks");
+                assert_eq!(
+                    meta.get("toModel").and_then(|v| v.as_str()),
+                    Some("claude-opus-5")
+                );
+            }
+            other => panic!("Expected Hook for PreModelSwitch attachment entry, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_session_start_resume_hook_surfaces_staleness_and_recache_cost_in_metadata() {
+        // v2.1.251+: SessionStart resume hooks now receive session staleness and the
+        // estimated re-cache cost under hookSpecificOutput. metadata is captured as an
+        // arbitrary Value, so new fields flow through to the UI without a parser change.
+        let e = Entry {
+            entry_type: "system".to_string(),
+            uuid: "uuid-session-start-resume".to_string(),
+            timestamp: "2026-08-28T10:00:15Z".to_string(),
+            subtype: "hook_progress".to_string(),
+            hook_event: "SessionStart".to_string(),
+            hook_name: "on-resume".to_string(),
+            hook_specific_output: Some(json!({
+                "sessionStaleness": "stale",
+                "estimatedRecacheCostTokens": 12000
+            })),
+            ..Default::default()
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::Hook(h)) => {
+                assert_eq!(h.hook_event, "SessionStart");
+                let meta = h
+                    .metadata
+                    .expect("metadata must be captured for SessionStart hook_progress");
+                assert_eq!(
+                    meta.get("sessionStaleness").and_then(|v| v.as_str()),
+                    Some("stale")
+                );
+                assert_eq!(
+                    meta.get("estimatedRecacheCostTokens")
+                        .and_then(|v| v.as_i64()),
+                    Some(12000)
+                );
+            }
+            other => panic!("Expected Hook for SessionStart hook_progress entry, got {other:?}"),
+        }
+    }
+
     // --- Issue #237: v2.1.224+ cross-session SendMessage compat ---
 
     #[test]
