@@ -609,6 +609,41 @@ mod tests {
         assert!(e.tool_use_result_map().is_none());
     }
 
+    // --- Issue #270: v2.1.247 subagent model-404 fallback error shape ---
+
+    #[test]
+    fn tool_use_result_map_exposes_v2_1_247_structured_error_fields() {
+        // When a subagent's fallback model chain is exhausted, the Task tool's
+        // toolUseResult carries error_type/status/request_id/model instead of the
+        // usual agentId/content — Entry.tool_use_result being Option<Value> (not a
+        // rigid struct) must surface these new fields without a parse failure.
+        let e = Entry {
+            tool_use_result: Some(json!({
+                "error_type": "not_found_error",
+                "status": 404,
+                "request_id": "req_123",
+                "model": "claude-nonexistent-model"
+            })),
+            ..Default::default()
+        };
+        let map = e.tool_use_result_map().unwrap();
+        assert_eq!(
+            map.get("error_type").and_then(|v| v.as_str()),
+            Some("not_found_error")
+        );
+        assert_eq!(map.get("status").and_then(|v| v.as_i64()), Some(404));
+        assert_eq!(
+            map.get("request_id").and_then(|v| v.as_str()),
+            Some("req_123")
+        );
+        assert_eq!(
+            map.get("model").and_then(|v| v.as_str()),
+            Some("claude-nonexistent-model")
+        );
+        // No agentId on a fully-failed subagent — callers must treat this as absent.
+        assert!(map.get("agentId").is_none());
+    }
+
     #[test]
     fn tool_use_result_map_reads_v2_1_247_subagent_fallback_error_fields() {
         // v2.1.247: when a subagent's first-call model 404 survives the full

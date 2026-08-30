@@ -1574,6 +1574,66 @@ mod tests {
         );
     }
 
+    // --- Issue #270: v2.1.247 subagent model-404 fallback error shape ---
+
+    #[test]
+    fn task_call_with_v2_1_247_structured_error_does_not_crash_linking() {
+        // The subagent exhausted its fallback model chain on the first call and never
+        // wrote an agent-*.jsonl file (it died before establishing an agentId). The
+        // parent's Task tool_result now carries a structured error object instead of
+        // the plain string/agentId shape scan_agent_links expects — this must not
+        // panic, and must not be mistaken for a successful agent link.
+        let dir = tempfile::tempdir().unwrap();
+        let main_path = dir.path().join("test-session.jsonl");
+
+        std::fs::write(
+            &main_path,
+            concat!(
+                r#"{"type":"user","message":{"role":"user","content":"run the researcher"},"uuid":"u1","timestamp":"2026-03-12T21:20:00Z"}"#,
+                "\n",
+                r#"{"type":"assistant","parentUuid":"u1","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_task1","name":"Task","input":{"description":"research","prompt":"look into X"}}],"stop_reason":"tool_use","usage":{"input_tokens":100,"output_tokens":30}},"requestId":"req1","uuid":"u2","timestamp":"2026-03-12T21:20:01Z"}"#,
+                "\n",
+                concat!(
+                    r#"{"type":"user","parentUuid":"u2","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_task1","content":"Model not found: claude-nonexistent-model","is_error":true}]},"#,
+                    r#""toolUseResult":{"error_type":"not_found_error","status":404,"request_id":"req_abc","model":"claude-nonexistent-model"},"#,
+                    r#""uuid":"u3","timestamp":"2026-03-12T21:20:02Z"}"#,
+                ),
+                "\n",
+            ),
+        )
+        .unwrap();
+
+        let (classified, _, _) =
+            crate::parser::session::read_session_incremental(&main_path.to_string_lossy(), 0)
+                .unwrap();
+        let mut chunks = crate::parser::chunk::build_chunks(&classified);
+        let (mut procs, color_map) = discover_and_link_all(&main_path.to_string_lossy(), &chunks);
+        assert!(
+            procs.is_empty(),
+            "no agent-*.jsonl file exists, so no SubagentProcess should be discovered"
+        );
+        inject_orphan_subagents(&mut chunks, &mut procs);
+
+        let messages = crate::convert::chunks_to_messages(&chunks, &procs, &color_map);
+        let task_item = messages
+            .iter()
+            .flat_map(|m| &m.items)
+            .find(|it| it.tool_name == "Task")
+            .expect("Task item should exist");
+
+        assert!(
+            task_item.tool_error,
+            "structured error result must still be flagged as an error"
+        );
+        assert!(
+            task_item.tool_result_json.contains("error_type")
+                || task_item.tool_result.contains("Model not found"),
+            "error content must be captured for display, got tool_result={:?} tool_result_json={:?}",
+            task_item.tool_result,
+            task_item.tool_result_json
+        );
+    }
+
     #[test]
     fn orphan_subagents_appended_after_existing_items() {
         use chrono::TimeZone;
