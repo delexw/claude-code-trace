@@ -3651,6 +3651,84 @@ mod tests {
         std::fs::remove_dir_all(&tmp).ok();
     }
 
+    // --- Issue #273: pre-v2.1.251 stream-json merged tool_use blocks with lost results ---
+
+    #[test]
+    fn merged_tool_use_blocks_under_one_message_id_pair_independently() {
+        // Before Claude Code v2.1.251, client-injected assistant tool calls sent without a
+        // message id over --input-format stream-json were merged into the first assistant
+        // message, and the tool_result for one of the merged calls could be lost entirely.
+        // The on-disk symptom is a single assistant entry (one uuid) whose message.content
+        // array holds multiple tool_use blocks, with only some of them later paired to a
+        // tool_result. The parser must pair each tool_use by its own id — independent of the
+        // shared message uuid — and render the one with no result as "no result" (orphan),
+        // not as a parse error.
+        let tmp = env::temp_dir().join("tail-test-issue273-merged-tool-use");
+        std::fs::create_dir_all(&tmp).unwrap();
+        let path = tmp.join("session.jsonl");
+
+        // Single assistant entry with three tool_use blocks merged under one message id.
+        let merged_asst = "{\"type\":\"assistant\",\"uuid\":\"a1\",\"parentUuid\":\"u0\",\"timestamp\":\"2026-08-28T10:00:00Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"toolu_1\",\"name\":\"Bash\",\"input\":{\"command\":\"ls\"}},{\"type\":\"tool_use\",\"id\":\"toolu_2\",\"name\":\"Read\",\"input\":{\"file_path\":\"/tmp/a\"}},{\"type\":\"tool_use\",\"id\":\"toolu_3\",\"name\":\"Write\",\"input\":{\"file_path\":\"/tmp/b\"}}],\"model\":\"claude-sonnet-4-6\",\"stop_reason\":\"tool_use\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0}}}\n";
+        // Only toolu_1 and toolu_3 get results back — toolu_2's result was lost by the bug.
+        let results = "{\"type\":\"user\",\"uuid\":\"u1\",\"parentUuid\":\"a1\",\"timestamp\":\"2026-08-28T10:00:01Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"toolu_1\",\"content\":\"ok1\"},{\"type\":\"tool_result\",\"tool_use_id\":\"toolu_3\",\"content\":\"ok3\"}]}}\n";
+        // A genuine new user turn — the conversation continued past the merged tool call, so
+        // toolu_2's still-pending id is a lost result, not a still-running tool.
+        let next_user = "{\"type\":\"user\",\"uuid\":\"u2\",\"parentUuid\":\"u1\",\"timestamp\":\"2026-08-28T10:00:02Z\",\"message\":{\"role\":\"user\",\"content\":\"what else?\"}}\n";
+        let final_asst = "{\"type\":\"assistant\",\"uuid\":\"a2\",\"parentUuid\":\"u2\",\"timestamp\":\"2026-08-28T10:00:03Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Done\"}],\"model\":\"claude-sonnet-4-6\",\"stop_reason\":\"end_turn\",\"usage\":{\"input_tokens\":20,\"output_tokens\":3,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0}}}\n";
+
+        std::fs::write(
+            &path,
+            format!("{merged_asst}{results}{next_user}{final_asst}"),
+        )
+        .unwrap();
+
+        let chunks = read_session(path.to_str().unwrap()).expect("read_session must succeed");
+        let ai_chunk = chunks
+            .iter()
+            .find(|c| matches!(c.chunk_type, crate::parser::chunk::ChunkType::AI))
+            .expect("must have at least one AI chunk");
+
+        assert_eq!(
+            ai_chunk.items.len(),
+            3,
+            "all three merged tool_use blocks must be surfaced as distinct items, not merged into one"
+        );
+
+        let bash = ai_chunk
+            .items
+            .iter()
+            .find(|it| it.tool_name == "Bash")
+            .expect("Bash tool_use must appear");
+        assert_eq!(bash.tool_result, "ok1");
+        assert!(!bash.is_orphan && !bash.is_deferred);
+
+        let write = ai_chunk
+            .items
+            .iter()
+            .find(|it| it.tool_name == "Write")
+            .expect("Write tool_use must appear");
+        assert_eq!(write.tool_result, "ok3");
+        assert!(!write.is_orphan && !write.is_deferred);
+
+        let read = ai_chunk
+            .items
+            .iter()
+            .find(|it| it.tool_name == "Read")
+            .expect("Read tool_use must appear even though its result was lost");
+        assert!(
+            read.tool_result.is_empty(),
+            "tool_use with a lost result must render with no result, not a stale/wrong one"
+        );
+        assert!(
+            read.is_orphan,
+            "tool_use whose result was lost (conversation continued past it) must be marked \
+             is_orphan, not treated as a parse error"
+        );
+        assert!(!read.is_deferred);
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
     // --- Issue #78: duplicate summary entries from pre-v2.1.128 sessions ---
 
     #[test]
