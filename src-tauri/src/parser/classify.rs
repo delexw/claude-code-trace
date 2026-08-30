@@ -795,7 +795,7 @@ fn extract_assistant_details(
     let mut calls = Vec::new();
     let mut content_blocks = Vec::new();
 
-    for b in blocks {
+    for (i, b) in blocks.iter().enumerate() {
         let bt = b.get("type").and_then(|v| v.as_str()).unwrap_or("");
         match bt {
             "thinking" => {
@@ -825,17 +825,23 @@ fn extract_assistant_details(
             // Anthropic's server-managed equivalent (currently only used by the `advisor`
             // tool locally) — same shape, so it's extracted identically.
             "tool_use" | "server_tool_use" => {
+                // v2.1.246: third-party ANTHROPIC_BASE_URL proxies can stream a tool_use
+                // block without an `id` (Anthropic's own API always sets one). Synthesize
+                // a placeholder scoped to this block's position so the call still renders
+                // and pairing with a same-index tool_result degrades gracefully instead of
+                // colliding with every other id-less tool_use in the same message.
                 let id = b
                     .get("id")
                     .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| format!("missing-tool-id-{i}"));
                 let name = b
                     .get("name")
                     .and_then(|v| v.as_str())
                     .unwrap_or("")
                     .to_string();
-                if !id.is_empty() && !name.is_empty() {
+                if !name.is_empty() {
                     calls.push(ToolCall {
                         id: id.clone(),
                         name: name.clone(),
@@ -1217,6 +1223,96 @@ mod tests {
                     block.text, "",
                     "missing thinking field must default to empty string"
                 );
+            }
+            other => panic!("Expected AI, got {other:?}"),
+        }
+    }
+
+    // --- Issue #269: Claude Code v2.1.246 confirmed that a third-party ANTHROPIC_BASE_URL
+    // proxy can stream a `tool_use` block without an `id` field. classify() must not drop
+    // the call or collide it with another id-less tool_use in the same message — each gets
+    // a distinct synthesized placeholder id so it still renders and pairs harmlessly. ---
+
+    #[test]
+    fn classify_tool_use_missing_id_synthesizes_placeholder() {
+        let content = json!([
+            {"type": "tool_use", "name": "Bash", "input": {"command": "ls"}}
+        ]);
+        let mut e = make_entry("assistant", Some(content));
+        e.message.stop_reason = Some("tool_use".to_string());
+        match classify(e) {
+            Some(ClassifiedMsg::AI(ai)) => {
+                assert_eq!(ai.tool_calls.len(), 1, "call must still be counted");
+                assert!(
+                    !ai.tool_calls[0].id.is_empty(),
+                    "a placeholder id must be synthesized"
+                );
+                let block = ai
+                    .blocks
+                    .iter()
+                    .find(|b| b.block_type == "tool_use")
+                    .expect("should have tool_use block");
+                assert!(
+                    !block.tool_id.is_empty(),
+                    "the rendered block must carry the synthesized id, not an empty string"
+                );
+            }
+            other => panic!("Expected AI, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_tool_use_missing_id_empty_string_synthesizes_placeholder() {
+        let content = json!([
+            {"type": "tool_use", "id": "", "name": "Bash", "input": {"command": "ls"}}
+        ]);
+        let mut e = make_entry("assistant", Some(content));
+        e.message.stop_reason = Some("tool_use".to_string());
+        match classify(e) {
+            Some(ClassifiedMsg::AI(ai)) => {
+                assert!(!ai.tool_calls[0].id.is_empty());
+            }
+            other => panic!("Expected AI, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_multiple_tool_use_missing_id_do_not_collide() {
+        let content = json!([
+            {"type": "tool_use", "name": "Bash", "input": {"command": "ls"}},
+            {"type": "tool_use", "name": "Read", "input": {"file_path": "a.rs"}}
+        ]);
+        let mut e = make_entry("assistant", Some(content));
+        e.message.stop_reason = Some("tool_use".to_string());
+        match classify(e) {
+            Some(ClassifiedMsg::AI(ai)) => {
+                assert_eq!(ai.tool_calls.len(), 2, "both calls must be counted");
+                assert_ne!(
+                    ai.tool_calls[0].id, ai.tool_calls[1].id,
+                    "each id-less tool_use must get a distinct synthesized id"
+                );
+                assert_eq!(ai.blocks.len(), 2);
+                assert_ne!(
+                    ai.blocks[0].tool_id, ai.blocks[1].tool_id,
+                    "rendered blocks must not share the same synthesized id"
+                );
+            }
+            other => panic!("Expected AI, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_tool_use_with_id_is_unaffected() {
+        // Regression guard: a normal, well-formed tool_use block must keep using its own id.
+        let content = json!([
+            {"type": "tool_use", "id": "toolu_real", "name": "Bash", "input": {"command": "ls"}}
+        ]);
+        let mut e = make_entry("assistant", Some(content));
+        e.message.stop_reason = Some("tool_use".to_string());
+        match classify(e) {
+            Some(ClassifiedMsg::AI(ai)) => {
+                assert_eq!(ai.tool_calls[0].id, "toolu_real");
+                assert_eq!(ai.blocks[0].tool_id, "toolu_real");
             }
             other => panic!("Expected AI, got {other:?}"),
         }
