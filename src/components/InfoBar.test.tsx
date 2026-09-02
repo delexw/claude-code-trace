@@ -277,6 +277,59 @@ describe("InfoBar", () => {
     expect(screen.queryByText(/active/)).not.toBeInTheDocument();
   });
 
+  describe("integrity warning (possible transcript splice, see #274)", () => {
+    it("shows the warning when sessionInfo.integrity_warning is set", () => {
+      render(
+        <InfoBar
+          meta={makeMeta()}
+          gitInfo={null}
+          contextTokens={0}
+          sessionTotals={makeTotals()}
+          sessionPath=""
+          ongoing={false}
+          canFocus={false}
+          sessionInfo={{
+            ...baseSessionInfo,
+            integrity_warning: "possible spliced transcript: entry a2 has an unknown parent",
+          }}
+        />,
+      );
+      expect(screen.getByText(/possibly spliced/i)).toBeInTheDocument();
+    });
+
+    it("hides the warning when integrity_warning is null", () => {
+      render(
+        <InfoBar
+          meta={makeMeta()}
+          gitInfo={null}
+          contextTokens={0}
+          sessionTotals={makeTotals()}
+          sessionPath=""
+          ongoing={false}
+          canFocus={false}
+          sessionInfo={{ ...baseSessionInfo, integrity_warning: null }}
+        />,
+      );
+      expect(screen.queryByText(/possibly spliced/i)).not.toBeInTheDocument();
+    });
+
+    it("hides the warning when sessionInfo is not yet known", () => {
+      render(
+        <InfoBar
+          meta={makeMeta()}
+          gitInfo={null}
+          contextTokens={0}
+          sessionTotals={makeTotals()}
+          sessionPath=""
+          ongoing={false}
+          canFocus={false}
+          sessionInfo={null}
+        />,
+      );
+      expect(screen.queryByText(/possibly spliced/i)).not.toBeInTheDocument();
+    });
+  });
+
   describe("liveness badge supersedes the transcript 'active' indicator", () => {
     it("shows the liveness badge when sessionInfo.liveness is present", () => {
       render(

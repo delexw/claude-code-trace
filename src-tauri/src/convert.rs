@@ -636,6 +636,35 @@ mod tests {
         assert_eq!(TEAM_COLOR_POOL.len(), 8);
     }
 
+    // ---- pretty_json tests ----
+
+    #[test]
+    fn pretty_json_v2_1_247_subagent_fallback_error_is_multiline_not_raw_dump() {
+        // v2.1.247: a subagent that survives the full fallback-model chain and still
+        // fails delivers a structured error object (error_type/status/request_id/model)
+        // as the Task tool's result content. FrontendDisplayItem.tool_result_json must be
+        // indented/multi-line so the UI renders it legibly instead of a single-line raw
+        // JSON dump (issue #270).
+        let val = serde_json::json!({
+            "error_type": "not_found_error",
+            "status": 404,
+            "request_id": "req_01ABC",
+            "model": "claude-nonexistent-model"
+        });
+        let out = pretty_json(&Some(val));
+        assert!(
+            out.contains('\n'),
+            "pretty_json must produce multi-line output, got: {out}"
+        );
+        assert!(out.contains("error_type"));
+        assert!(out.contains("404"));
+    }
+
+    #[test]
+    fn pretty_json_none_is_empty_string() {
+        assert_eq!(pretty_json(&None), "");
+    }
+
     // ---- subagent_prompt propagation test ----
 
     #[test]

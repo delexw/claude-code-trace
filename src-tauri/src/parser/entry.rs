@@ -609,6 +609,79 @@ mod tests {
         assert!(e.tool_use_result_map().is_none());
     }
 
+    // --- Issue #270: v2.1.247 subagent model-404 fallback error shape ---
+
+    #[test]
+    fn tool_use_result_map_exposes_v2_1_247_structured_error_fields() {
+        // When a subagent's fallback model chain is exhausted, the Task tool's
+        // toolUseResult carries error_type/status/request_id/model instead of the
+        // usual agentId/content — Entry.tool_use_result being Option<Value> (not a
+        // rigid struct) must surface these new fields without a parse failure.
+        let e = Entry {
+            tool_use_result: Some(json!({
+                "error_type": "not_found_error",
+                "status": 404,
+                "request_id": "req_123",
+                "model": "claude-nonexistent-model"
+            })),
+            ..Default::default()
+        };
+        let map = e.tool_use_result_map().unwrap();
+        assert_eq!(
+            map.get("error_type").and_then(|v| v.as_str()),
+            Some("not_found_error")
+        );
+        assert_eq!(map.get("status").and_then(|v| v.as_i64()), Some(404));
+        assert_eq!(
+            map.get("request_id").and_then(|v| v.as_str()),
+            Some("req_123")
+        );
+        assert_eq!(
+            map.get("model").and_then(|v| v.as_str()),
+            Some("claude-nonexistent-model")
+        );
+        // No agentId on a fully-failed subagent — callers must treat this as absent.
+        assert!(map.get("agentId").is_none());
+    }
+
+    #[test]
+    fn tool_use_result_map_reads_v2_1_247_subagent_fallback_error_fields() {
+        // v2.1.247: when a subagent's first-call model 404 survives the full
+        // fallback-model chain, toolUseResult carries a structured error object
+        // (error_type/status/request_id/model) instead of the usual agentId/color
+        // pair. tool_use_result_map is a generic Value map, so it must expose the
+        // new fields without any deserialization failure (issue #270).
+        let e = Entry {
+            tool_use_result: Some(json!({
+                "error_type": "not_found_error",
+                "status": 404,
+                "request_id": "req_01ABC",
+                "model": "claude-nonexistent-model",
+            })),
+            ..Default::default()
+        };
+        let map = e
+            .tool_use_result_map()
+            .expect("object toolUseResult must parse");
+        assert_eq!(
+            map.get("error_type").and_then(|v| v.as_str()),
+            Some("not_found_error")
+        );
+        assert_eq!(map.get("status").and_then(|v| v.as_i64()), Some(404));
+        assert_eq!(
+            map.get("request_id").and_then(|v| v.as_str()),
+            Some("req_01ABC")
+        );
+        assert_eq!(
+            map.get("model").and_then(|v| v.as_str()),
+            Some("claude-nonexistent-model")
+        );
+        // No agentId/color present — callers relying on those keys must see None,
+        // not an error.
+        assert!(map.get("agentId").is_none());
+        assert!(map.get("color").is_none());
+    }
+
     #[test]
     fn parse_entry_captures_content_field_for_away_summary() {
         // v2.1.108+: {type:"system",subtype:"away_summary",content:"<text>",uuid:"...",timestamp:"..."}
@@ -1393,6 +1466,106 @@ mod tests {
         assert_eq!(
             att.get("hookEvent").and_then(|v| v.as_str()),
             Some("MessageDisplay")
+        );
+    }
+
+    // --- Issue #272: v2.1.251+ PreModelSwitch/PostModelSwitch hook events + SessionStart
+    // staleness/re-cache-cost fields ---
+
+    #[test]
+    fn parse_entry_captures_pre_model_switch_hook_event_as_string() {
+        // v2.1.251+: PreModelSwitch fires before Claude Code switches models mid-session
+        // (lets a hook block, confirm, or annotate the switch). hook_event is stored as a
+        // plain String so this new value is captured without rejection.
+        let line = json!({
+            "type": "system",
+            "subtype": "hook_progress",
+            "uuid": "pre-model-switch-uuid",
+            "timestamp": "2026-08-28T10:00:00Z",
+            "hookEvent": "PreModelSwitch",
+            "hookName": "confirm-model-switch"
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("must parse PreModelSwitch hook entry");
+        assert_eq!(entry.hook_event, "PreModelSwitch");
+        assert_eq!(entry.hook_name, "confirm-model-switch");
+    }
+
+    #[test]
+    fn parse_entry_captures_post_model_switch_hook_event_as_string() {
+        // v2.1.251+: PostModelSwitch fires after the model switch completes.
+        let line = json!({
+            "type": "system",
+            "subtype": "hook_progress",
+            "uuid": "post-model-switch-uuid",
+            "timestamp": "2026-08-28T10:00:05Z",
+            "hookEvent": "PostModelSwitch",
+            "hookName": "annotate-model-switch"
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("must parse PostModelSwitch hook entry");
+        assert_eq!(entry.hook_event, "PostModelSwitch");
+        assert_eq!(entry.hook_name, "annotate-model-switch");
+    }
+
+    #[test]
+    fn parse_entry_model_switch_as_attachment_is_captured() {
+        // PreModelSwitch/PostModelSwitch hook results can also surface as attachment entries,
+        // like every other non-Stop hook.
+        let line = json!({
+            "type": "attachment",
+            "uuid": "model-switch-att-uuid",
+            "timestamp": "2026-08-28T10:00:10Z",
+            "attachment": {
+                "type": "hook_success",
+                "hookEvent": "PreModelSwitch",
+                "hookName": "confirm-model-switch",
+                "fromModel": "claude-sonnet-5",
+                "toModel": "claude-opus-5"
+            }
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("must parse PreModelSwitch attachment entry");
+        let att = entry.attachment.expect("attachment must be captured");
+        assert_eq!(
+            att.get("hookEvent").and_then(|v| v.as_str()),
+            Some("PreModelSwitch")
+        );
+    }
+
+    #[test]
+    fn parse_entry_session_start_resume_hook_captures_staleness_and_recache_cost_fields() {
+        // v2.1.251+: SessionStart resume hooks now receive session staleness and the
+        // estimated re-cache cost under hookSpecificOutput. hookSpecificOutput is stored as
+        // an arbitrary serde_json::Value (not a fixed-field struct), so any new field Claude
+        // Code adds here is captured without requiring a parser change.
+        let line = json!({
+            "type": "system",
+            "subtype": "hook_progress",
+            "uuid": "session-start-resume-uuid",
+            "timestamp": "2026-08-28T10:00:15Z",
+            "hookEvent": "SessionStart",
+            "hookName": "on-resume",
+            "hookSpecificOutput": {
+                "sessionStaleness": "stale",
+                "estimatedRecacheCostTokens": 12000
+            }
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes)
+            .expect("must parse SessionStart resume hook_progress with new fields");
+        assert_eq!(entry.hook_event, "SessionStart");
+        let hso = entry
+            .hook_specific_output
+            .expect("hookSpecificOutput must be captured for SessionStart hook_progress");
+        assert_eq!(
+            hso.get("sessionStaleness").and_then(|v| v.as_str()),
+            Some("stale")
+        );
+        assert_eq!(
+            hso.get("estimatedRecacheCostTokens")
+                .and_then(|v| v.as_i64()),
+            Some(12000)
         );
     }
 
@@ -2317,5 +2490,36 @@ mod tests {
         let first = parse_entry(raw).expect("first parse must succeed");
         let second = parse_entry(raw).expect("re-parse must succeed identically");
         assert_eq!(first.uuid, second.uuid);
+    }
+
+    // --- Issue #269: Claude Code v2.1.246 confirmed that a third-party ANTHROPIC_BASE_URL
+    // proxy can stream a `tool_use` block without an `id` field. parse_entry must not reject
+    // or discard the entry — content blocks are stored as raw JSON here, so the missing `id`
+    // is preserved verbatim for classify.rs to handle. ---
+
+    #[test]
+    fn parse_entry_tool_use_missing_id_does_not_panic() {
+        let line = json!({
+            "type": "assistant",
+            "uuid": "tool-use-missing-id",
+            "timestamp": "2026-08-25T10:00:00Z",
+            "message": {
+                "role": "assistant",
+                "content": [
+                    {"type": "tool_use", "name": "Bash", "input": {"command": "ls"}}
+                ]
+            }
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("must parse tool_use entry with missing id");
+        let content = entry.message.content.expect("content must be captured");
+        let block = content
+            .as_array()
+            .and_then(|arr| arr.first())
+            .expect("must have a content block");
+        assert!(
+            block.get("id").is_none(),
+            "missing id must be preserved as absent, not synthesized at this layer"
+        );
     }
 }

@@ -86,6 +86,12 @@ export function InfoBar({
         <span className={`info-bar__pill ${pillClass}`}>{shortMode(mode)}</span>
       )}
 
+      {sessionInfo?.integrity_warning && (
+        <span className="info-bar__integrity-warning" title={sessionInfo.integrity_warning}>
+          ⚠ possibly spliced
+        </span>
+      )}
+
       {ctxPct >= 0 && (
         <div className="info-bar__context">
           <span>ctx {ctxPct}%</span>

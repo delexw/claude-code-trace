@@ -2,7 +2,12 @@ import { useEffect, useRef } from "react";
 
 export function useKeyboard(keyMap: Record<string, () => void>) {
   const keyMapRef = useRef(keyMap);
-  keyMapRef.current = keyMap;
+  // Refresh after commit rather than during render — writing a ref while rendering is
+  // unsafe under concurrent rendering, and the map is only read from the keydown
+  // listener, which cannot fire before the commit anyway.
+  useEffect(() => {
+    keyMapRef.current = keyMap;
+  });
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {

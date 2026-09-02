@@ -100,6 +100,7 @@ mod tests {
             permission_mode: "default".to_string(),
             is_ongoing: false,
             forked_from_session_id: None,
+            integrity_warning: None,
         }
     }
 

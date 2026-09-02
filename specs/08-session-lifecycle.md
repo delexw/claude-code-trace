@@ -344,6 +344,11 @@ flowchart LR
         FR["FS read fails\n(permissions, deleted)"]
         FR --> STOP["Skip emit\nLog error\nContinue watching"]
     end
+
+    subgraph Spliced_Transcript
+        ST["Broken parent chain\n+ cwd/branch/timestamp jump"]
+        ST --> WARN["Set SessionInfo.integrity_warning\nRender anyway (picker + info bar)"]
+    end
 ```
 
 ---
