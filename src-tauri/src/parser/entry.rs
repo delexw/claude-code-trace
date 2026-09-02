@@ -2418,4 +2418,35 @@ mod tests {
         let second = parse_entry(raw).expect("re-parse must succeed identically");
         assert_eq!(first.uuid, second.uuid);
     }
+
+    // --- Issue #269: Claude Code v2.1.246 confirmed that a third-party ANTHROPIC_BASE_URL
+    // proxy can stream a `tool_use` block without an `id` field. parse_entry must not reject
+    // or discard the entry — content blocks are stored as raw JSON here, so the missing `id`
+    // is preserved verbatim for classify.rs to handle. ---
+
+    #[test]
+    fn parse_entry_tool_use_missing_id_does_not_panic() {
+        let line = json!({
+            "type": "assistant",
+            "uuid": "tool-use-missing-id",
+            "timestamp": "2026-08-25T10:00:00Z",
+            "message": {
+                "role": "assistant",
+                "content": [
+                    {"type": "tool_use", "name": "Bash", "input": {"command": "ls"}}
+                ]
+            }
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("must parse tool_use entry with missing id");
+        let content = entry.message.content.expect("content must be captured");
+        let block = content
+            .as_array()
+            .and_then(|arr| arr.first())
+            .expect("must have a content block");
+        assert!(
+            block.get("id").is_none(),
+            "missing id must be preserved as absent, not synthesized at this layer"
+        );
+    }
 }
