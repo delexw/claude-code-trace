@@ -137,6 +137,11 @@ export function MessageDetail({
   // Only updates state when something meaningful changed to avoid extra re-renders.
   useEffect(() => {
     if (panelStack.length === 0) return;
+    // Synchronizing with an external system (the session watcher, which rebuilds the message
+    // tree out-of-band) — the panel stack is also user-mutated via push/pop, so it cannot be
+    // derived during render. The updater below returns `prev` unless something actually
+    // changed, so this only re-renders when fresh data genuinely arrived.
+    // oxlint-disable-next-line react/set-state-in-effect
     setPanelStack((prev) => {
       let changed = false;
       const next = prev.map((entry) => {
@@ -578,15 +583,21 @@ function AgentListColumn({
     expandAll: () => expandAllMsgs(messages.map((_, i) => i)),
     collapseAll: () => clearMsgs(),
   });
-  navRef.current.moveUp = () => setSelectedMsg((i) => Math.max(i - 1, 0));
-  navRef.current.moveDown = () => setSelectedMsg((i) => Math.min(i + 1, messages.length - 1));
-  navRef.current.toggle = () => toggleMsg(selectedMsg);
-  navRef.current.enter = () => {
-    if (messages[selectedMsg]) onOpenDetail(messages[selectedMsg]);
-  };
-  navRef.current.itemCount = () => messages.length;
-  navRef.current.expandAll = () => expandAllMsgs(messages.map((_, i) => i));
-  navRef.current.collapseAll = () => clearMsgs();
+  // Refresh the registered nav callbacks after commit rather than during render —
+  // writing a ref while rendering is unsafe under concurrent rendering. The object
+  // identity stays stable, so the parent's registration is unaffected, and the
+  // callbacks are only invoked from keyboard handlers after the commit.
+  useEffect(() => {
+    navRef.current.moveUp = () => setSelectedMsg((i) => Math.max(i - 1, 0));
+    navRef.current.moveDown = () => setSelectedMsg((i) => Math.min(i + 1, messages.length - 1));
+    navRef.current.toggle = () => toggleMsg(selectedMsg);
+    navRef.current.enter = () => {
+      if (messages[selectedMsg]) onOpenDetail(messages[selectedMsg]);
+    };
+    navRef.current.itemCount = () => messages.length;
+    navRef.current.expandAll = () => expandAllMsgs(messages.map((_, i) => i));
+    navRef.current.collapseAll = () => clearMsgs();
+  });
 
   // Register/unregister nav on mount/unmount
   useLayoutEffect(() => {
@@ -703,23 +714,27 @@ function AgentDetailColumn({
     expandAll: () => expandAllDetailItems(msg.items.map((_, i) => i)),
     collapseAll: () => clearDetailItems(),
   });
-  navRef.current.moveUp = () => setSelectedItem((i) => Math.max(i - 1, 0));
-  navRef.current.moveDown = () => setSelectedItem((i) => Math.min(i + 1, msg.items.length - 1));
-  navRef.current.toggle = () => {
-    const it = msg.items[selectedItem];
-    if (it) handleItemClick(selectedItem, it);
-  };
-  navRef.current.enter = () => {
-    const it = msg.items[selectedItem];
-    if (it && it.subagent_messages.length > 0) {
-      onOpenSubagent(it);
-    } else if (it) {
-      toggleItem(selectedItem);
-    }
-  };
-  navRef.current.itemCount = () => msg.items.length;
-  navRef.current.expandAll = () => expandAllDetailItems(msg.items.map((_, i) => i));
-  navRef.current.collapseAll = () => clearDetailItems();
+  // Refresh the registered nav callbacks after commit rather than during render — see
+  // the matching note in MessageList above.
+  useEffect(() => {
+    navRef.current.moveUp = () => setSelectedItem((i) => Math.max(i - 1, 0));
+    navRef.current.moveDown = () => setSelectedItem((i) => Math.min(i + 1, msg.items.length - 1));
+    navRef.current.toggle = () => {
+      const it = msg.items[selectedItem];
+      if (it) handleItemClick(selectedItem, it);
+    };
+    navRef.current.enter = () => {
+      const it = msg.items[selectedItem];
+      if (it && it.subagent_messages.length > 0) {
+        onOpenSubagent(it);
+      } else if (it) {
+        toggleItem(selectedItem);
+      }
+    };
+    navRef.current.itemCount = () => msg.items.length;
+    navRef.current.expandAll = () => expandAllDetailItems(msg.items.map((_, i) => i));
+    navRef.current.collapseAll = () => clearDetailItems();
+  });
 
   useLayoutEffect(() => {
     onRegisterNav(navRef.current);
