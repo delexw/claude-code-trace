@@ -108,7 +108,10 @@ export function MessageDetail({
   const [focusedColumn, setFocusedColumn] = useState(0); // 0 = main, 1+ = panel index + 1
   const bodyRef = useRef<HTMLDivElement>(null);
   useAutoScroll(msg.items.length, bodyRef);
-  const savedScroll = useRef<number | null>(null);
+  /** Main-body scroll position captured just before a panel is toggled from the
+   * main column, tagged with the stack depth at that moment so the restore
+   * below only fires once the columns have actually been re-laid out. */
+  const savedScroll = useRef<{ top: number; depth: number } | null>(null);
   const panelRefs = useRef<Map<number, ColumnNav>>(new Map());
 
   const detailExpandAll = useCallback(() => {
@@ -170,8 +173,9 @@ export function MessageDetail({
   }, [msg.items, panelStack.length]);
 
   useLayoutEffect(() => {
-    if (savedScroll.current != null && bodyRef.current) {
-      bodyRef.current.scrollTop = savedScroll.current;
+    const saved = savedScroll.current;
+    if (saved && saved.depth !== panelStack.length && bodyRef.current) {
+      bodyRef.current.scrollTop = saved.top;
       savedScroll.current = null;
     }
   }, [panelStack.length]);
@@ -192,25 +196,28 @@ export function MessageDetail({
   const showDebugHint = hasToolCalls && !hasHookEvents;
 
   // Stack manipulation
-  const openSubagentFromMain = useCallback((item: DisplayItem) => {
-    if (bodyRef.current) {
-      savedScroll.current = bodyRef.current.scrollTop;
-    }
-    let closed = false;
-    setPanelStack((prev) => {
-      if (
-        prev.length === 1 &&
-        prev[0].kind === "agent-list" &&
-        prev[0].item.agent_id === item.agent_id
-      ) {
-        closed = true;
-        return [];
+  const openSubagentFromMain = useCallback(
+    (item: DisplayItem) => {
+      if (bodyRef.current) {
+        savedScroll.current = { top: bodyRef.current.scrollTop, depth: panelStack.length };
       }
-      return [{ kind: "agent-list", item, key: item.agent_id || `panel-0` }];
-    });
-    setColumnWidths((prev) => [prev[0]]);
-    setFocusedColumn(closed ? 0 : 1);
-  }, []);
+      let closed = false;
+      setPanelStack((prev) => {
+        if (
+          prev.length === 1 &&
+          prev[0].kind === "agent-list" &&
+          prev[0].item.agent_id === item.agent_id
+        ) {
+          closed = true;
+          return [];
+        }
+        return [{ kind: "agent-list", item, key: item.agent_id || `panel-0` }];
+      });
+      setColumnWidths((prev) => [prev[0]]);
+      setFocusedColumn(closed ? 0 : 1);
+    },
+    [panelStack.length],
+  );
 
   const openSubagentAt = useCallback((depth: number, item: DisplayItem) => {
     setPanelStack((prev) => {

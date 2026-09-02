@@ -162,4 +162,31 @@ describe("useScrollToSelected", () => {
     });
     expect(() => rerender({ dep: 1 })).not.toThrow();
   });
+
+  it("scrolls again when the selection changes, but not on a re-render with the same selection", () => {
+    const { container, el } = mount({
+      containerRect: rect(0, 100),
+      clientHeight: 100,
+      scrollTop: 0,
+      elRect: rect(150, 170),
+      offsetHeight: 20,
+    });
+    const { result, rerender } = renderHook(({ selected }) => useScrollToSelected(selected), {
+      initialProps: { selected: 0 },
+    });
+    // Attach the ref to the (below-the-fold) element and re-render with the
+    // same selection: the effect does not re-run, so nothing scrolls yet.
+    result.current.current = el;
+    rerender({ selected: 0 });
+    expect(container.scrollTop).toBe(0);
+
+    // A new selection is the signal that the ref points at a new element.
+    rerender({ selected: 1 });
+    expect(container.scrollTop).toBe(70);
+
+    // Re-rendering with the same selection again leaves the container alone.
+    container.scrollTop = 0;
+    rerender({ selected: 1 });
+    expect(container.scrollTop).toBe(0);
+  });
 });
