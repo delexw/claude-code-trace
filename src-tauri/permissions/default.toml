@@ -17,6 +17,7 @@ permissions = [
   "allow-list-wsl-distros",
   "allow-set-wsl-distros",
   "allow-set-allowed-origins",
+  "allow-regenerate-api-token",
   "allow-switch-to-browser",
   "allow-focus-session-window",
 ]
@@ -100,6 +101,11 @@ commands.allow = ["set_wsl_distros"]
 identifier = "allow-set-allowed-origins"
 description = "Allow setting extra CORS allowed origins"
 commands.allow = ["set_allowed_origins"]
+
+[[permission]]
+identifier = "allow-regenerate-api-token"
+description = "Allow rotating the shared HTTP API client token"
+commands.allow = ["regenerate_api_token"]
 
 [[permission]]
 identifier = "allow-switch-to-browser"

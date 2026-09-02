@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+mod auth;
 mod commands;
 mod convert;
 mod http_api;
@@ -51,7 +52,7 @@ pub fn run() {
 /// usage in Docker containers.
 fn run_headless() {
     eprintln!("Headless mode: HTTP API on http://127.0.0.1:11423");
-    let app_state = Arc::new(state::AppState::new());
+    let app_state = Arc::new(state::AppState::new(auth::resolve_api_auth()));
     let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
     rt.block_on(http_api::start_http_server_headless(app_state));
 }
@@ -64,7 +65,7 @@ fn run_desktop(args: &[String]) {
     let no_open = args.iter().any(|a| a == "--no-open");
     let desktop = !web_only;
 
-    let app_state = Arc::new(state::AppState::new());
+    let app_state = Arc::new(state::AppState::new(auth::resolve_api_auth()));
 
     let mut builder = tauri::Builder::default();
 
@@ -105,6 +106,7 @@ fn run_desktop(args: &[String]) {
             commands::wsl::list_wsl_distros,
             commands::wsl::set_wsl_distros,
             commands::cors::set_allowed_origins,
+            commands::api_token::regenerate_api_token,
             commands::terminal::focus_session_window,
             switch_to_browser,
         ])

@@ -3,6 +3,27 @@
 All notable changes to claude-code-trace are documented here. Versions follow
 [semantic versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **The local HTTP API now only answers accepted clients.** Every `/api/*` route requires a
+  shared secret token. Until now the only gate was a CORS allowlist, which protects browsers and
+  nothing else: any local process — or any LAN host, when the Docker image binds `0.0.0.0` —
+  could read session transcripts, rewrite `settings.json`, add CORS origins, or trigger the
+  `git`/`osascript` side effects of `/api/git-info` and `/api/focus`. The token is generated once
+  into `<config dir>/claude-code-trace/api-token` (mode `0600`) and read by the bundled clients
+  automatically: the web UI gets it from a Vite plugin in dev mode and from an `HttpOnly`
+  same-origin cookie in Docker, the TUI reads the file. `CCTRACE_API_TOKEN` pins a token;
+  `CCTRACE_API_AUTH=off` disables the check. A new **API access** section in Settings shows the
+  token (masked) with Copy and a two-click Regenerate. The desktop webview is unaffected (IPC).
+
+  **Behaviour change:** scripts calling the API must now send `X-CCTrace-Token` (or
+  `Authorization: Bearer`) or set `CCTRACE_API_AUTH=off`. Docker users reaching the UI via a LAN
+  IP or reverse-proxy hostname must add that origin to `CCTRACE_ALLOWED_ORIGINS` for the cookie to
+  be issued — the cookie is only handed to allowlisted `Host`s so a DNS-rebinding page can't
+  collect it.
+
 ## [0.13.0] — 2026-08-20
 
 Claude Code moved fast between v2.1.208 and v2.1.233, and most of this release is about

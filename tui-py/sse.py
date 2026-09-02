@@ -2,7 +2,7 @@
 
 Streams from GET /api/events and fires callbacks for named events.
 Usage:
-    client = SSEClient("http://127.0.0.1:11423/api/events")
+    client = SSEClient("http://127.0.0.1:11423/api/events", headers=auth.auth_headers)
     client.on("picker-refresh", my_handler)
     client.on("session-update", my_handler)
     await client.connect()   # runs until cancelled
@@ -14,7 +14,7 @@ import asyncio
 import contextlib
 import json
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
 import httpx
@@ -22,11 +22,16 @@ import httpx
 log = logging.getLogger(__name__)
 
 Handler = Callable[[Any], Awaitable[None] | None]
+Headers = Mapping[str, str] | Callable[[], Mapping[str, str]]
 
 
 class SSEClient:
-    def __init__(self, url: str) -> None:
+    def __init__(self, url: str, headers: Headers | None = None) -> None:
+        """`headers` may be a mapping or a zero-arg callable evaluated on every
+        (re)connect — pass `auth.auth_headers` so a rotated API token is picked
+        up when the stream reconnects."""
         self._url = url
+        self._headers = headers
         self._handlers: dict[str, list[Handler]] = {}
         self._task: asyncio.Task | None = None
         self._stop = asyncio.Event()
@@ -62,10 +67,14 @@ class SSEClient:
                 if not self._stop.is_set():
                     await asyncio.sleep(2)
 
+    def _current_headers(self) -> dict[str, str]:
+        headers = self._headers() if callable(self._headers) else self._headers
+        return dict(headers or {})
+
     async def _stream(self) -> None:
         async with (
             httpx.AsyncClient(timeout=httpx.Timeout(None)) as client,
-            client.stream("GET", self._url) as resp,
+            client.stream("GET", self._url, headers=self._current_headers()) as resp,
         ):
             resp.raise_for_status()
             event_name = ""

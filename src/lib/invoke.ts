@@ -7,6 +7,7 @@
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { isTauri } from "./isTauri";
 import { API_BASE } from "./config";
+import { authHeaders } from "./apiToken";
 
 // ---------------------------------------------------------------------------
 // Route map — add new commands here without touching invoke logic (OCP).
@@ -37,6 +38,7 @@ const routes: Record<string, Route> = {
     path: "/api/settings/origins",
     body: (a) => ({ origins: (a.origins as string[]) ?? [] }),
   },
+  regenerate_api_token: { method: "POST", path: "/api/settings/token/regenerate" },
   get_project_dirs: { path: "/api/project-dirs" },
   discover_sessions: {
     method: "POST",
@@ -91,14 +93,28 @@ const routes: Record<string, Route> = {
 // HTTP transport (SRP — only handles fetch, not routing).
 // ---------------------------------------------------------------------------
 
+/** The backend rejected the call because this client did not present the
+ * shared API token (HTTP 401). Surfaced by `App` as a top-level banner since
+ * every other call — including opening Settings — would fail the same way. */
+export class ApiAuthError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ApiAuthError";
+  }
+}
+
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     ...init,
-    headers: { "Content-Type": "application/json", ...init?.headers },
+    // The token header is what makes this an "accepted client" to the backend
+    // (see lib/apiToken.ts). In Docker it is empty and the cookie does the job.
+    headers: { "Content-Type": "application/json", ...authHeaders(), ...init?.headers },
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(body.error ?? res.statusText);
+    const message = body.error ?? res.statusText;
+    if (res.status === 401) throw new ApiAuthError(message);
+    throw new Error(message);
   }
   const text = await res.text();
   return text ? (JSON.parse(text) as T) : (undefined as T);

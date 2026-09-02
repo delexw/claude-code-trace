@@ -6,6 +6,10 @@ const mockInvoke = vi.fn();
 vi.mock("../lib/invoke", () => ({
   invoke: (...args: unknown[]) => mockInvoke(...args),
 }));
+const mockReconnectSse = vi.fn();
+vi.mock("../lib/listen", () => ({
+  reconnectSse: () => mockReconnectSse(),
+}));
 
 const DEFAULT_DIR = "/Users/x/.claude/projects";
 
@@ -384,5 +388,117 @@ describe("SettingsModal", () => {
     );
     fireEvent.click(screen.getByRole("switch", { name: /recap preview/i }));
     expect(onChange).toHaveBeenCalledWith(false);
+  });
+
+  // --- API access (shared client token) -------------------------------------
+
+  const withToken = (source: "file" | "env" | "disabled", token: string | null) => ({
+    ...makeSettings(null),
+    api_auth_enabled: source !== "disabled",
+    api_token_source: source,
+    api_token: token,
+  });
+
+  const renderModal = () =>
+    render(
+      <SettingsModal
+        onClose={onClose}
+        onSaved={onSaved}
+        fontScale={1}
+        onFontScaleChange={onFontScaleChange}
+        recapPreview={true}
+        onRecapPreviewChange={onRecapPreviewChange}
+      />,
+    );
+
+  const useSettings = (settings: object) => {
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "list_wsl_distros") return Promise.resolve([]);
+      if (cmd === "regenerate_api_token") return Promise.resolve(withToken("file", "new-token"));
+      return Promise.resolve(settings);
+    });
+  };
+
+  it("shows the API token masked and reveals it with Show", async () => {
+    useSettings(withToken("file", "abc123"));
+    renderModal();
+    const input = (await screen.findByLabelText("API token")) as HTMLInputElement;
+    await waitFor(() => expect(input.value).toBe("abc123"));
+    expect(input.type).toBe("password");
+    expect(input.readOnly).toBe(true);
+
+    fireEvent.click(screen.getByText("Show"));
+    expect(input.type).toBe("text");
+    expect(screen.getByText("Hide")).toBeInTheDocument();
+  });
+
+  it("copies the token to the clipboard", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    useSettings(withToken("file", "abc123"));
+    renderModal();
+    await waitFor(() =>
+      expect((screen.getByLabelText("API token") as HTMLInputElement).value).toBe("abc123"),
+    );
+
+    fireEvent.click(screen.getByText("Copy"));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("abc123"));
+    expect(screen.getByText("Token copied to clipboard.")).toBeInTheDocument();
+  });
+
+  it("regenerates only after a confirmation click, then shows the new token and reconnects SSE", async () => {
+    useSettings(withToken("file", "old-token"));
+    renderModal();
+    await waitFor(() =>
+      expect((screen.getByLabelText("API token") as HTMLInputElement).value).toBe("old-token"),
+    );
+
+    fireEvent.click(screen.getByText("Regenerate"));
+    expect(screen.getByText("Confirm regenerate?")).toBeInTheDocument();
+    expect(mockInvoke).not.toHaveBeenCalledWith("regenerate_api_token");
+
+    fireEvent.click(screen.getByText("Confirm regenerate?"));
+    await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("regenerate_api_token"));
+    await waitFor(() =>
+      expect((screen.getByLabelText("API token") as HTMLInputElement).value).toBe("new-token"),
+    );
+    expect(mockReconnectSse).toHaveBeenCalled();
+    expect(screen.getByText(/Token regenerated/)).toBeInTheDocument();
+    expect(screen.getByText("Regenerate")).toBeInTheDocument();
+    // Regeneration is independent of Save — the modal stays open.
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("shows the backend error when regeneration fails", async () => {
+    useSettings(withToken("file", "old-token"));
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "list_wsl_distros") return Promise.resolve([]);
+      if (cmd === "regenerate_api_token") return Promise.reject(new Error("rotation failed"));
+      return Promise.resolve(withToken("file", "old-token"));
+    });
+    renderModal();
+    await screen.findByLabelText("API token");
+    fireEvent.click(screen.getByText("Regenerate"));
+    fireEvent.click(screen.getByText("Confirm regenerate?"));
+    await waitFor(() => expect(screen.getByText(/rotation failed/)).toBeInTheDocument());
+    expect(mockReconnectSse).not.toHaveBeenCalled();
+  });
+
+  it("disables Regenerate when the token comes from CCTRACE_API_TOKEN", async () => {
+    useSettings(withToken("env", "env-token"));
+    renderModal();
+    await waitFor(() =>
+      expect((screen.getByLabelText("API token") as HTMLInputElement).value).toBe("env-token"),
+    );
+    expect((screen.getByText("Regenerate") as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText(/cannot be regenerated here/)).toBeInTheDocument();
+  });
+
+  it("shows only a hint when client verification is disabled", async () => {
+    useSettings(withToken("disabled", null));
+    renderModal();
+    await waitFor(() => expect(screen.getByText(/CCTRACE_API_AUTH=off/)).toBeInTheDocument());
+    expect(screen.queryByLabelText("API token")).toBeNull();
+    expect(screen.queryByText("Regenerate")).toBeNull();
   });
 });

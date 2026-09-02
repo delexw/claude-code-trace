@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { invoke } from "./lib/invoke";
+import { invoke, ApiAuthError } from "./lib/invoke";
 import type { ViewState, SessionInfo, DisplayMessage } from "./types";
 import { useSession } from "./hooks/useSession";
 import { usePicker } from "./hooks/usePicker";
@@ -103,6 +103,11 @@ export function App() {
   // API) — gates the Focus action instead of `isTauri`.
   const [canFocus, setCanFocus] = useState(false);
 
+  // Set when the backend rejects this browser as an unaccepted client (HTTP
+  // 401, see lib/apiToken.ts). Every API call would fail the same way — the
+  // Settings modal included — so a banner replaces the usual bootstrap path.
+  const [authError, setAuthError] = useState<string | null>(null);
+
   // Auto-discover sessions on mount; show settings if no path configured
   const discoveredRef = useRef(false);
   useEffect(() => {
@@ -118,7 +123,11 @@ export function App() {
         }>("get_settings");
         dirExists = settings.effective_dir_exists;
         setCanFocus(settings.can_focus);
-      } catch {
+      } catch (err) {
+        if (err instanceof ApiAuthError) {
+          setAuthError(err.message);
+          return;
+        }
         // no settings file yet
       }
       if (!dirExists) {
@@ -477,6 +486,14 @@ export function App() {
 
   return (
     <div className="app">
+      {authError && (
+        <div className="app-auth-banner" role="alert">
+          <strong>Not an accepted client.</strong> This browser did not present the API token, so
+          the backend refused the connection. In dev/web mode restart <code>cctrace --web</code>; in
+          Docker open the UI via localhost or an allowed origin.
+          <span className="app-auth-banner__detail">{authError}</span>
+        </div>
+      )}
       {/* Info bar — only show when we have a loaded session */}
       {session.sessionPath && view !== "picker" && (
         <InfoBar

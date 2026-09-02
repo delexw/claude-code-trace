@@ -7,6 +7,7 @@ import urllib.parse
 
 import httpx
 
+import auth
 from data_types import (
     DebugEntry,
     DisplayMessage,
@@ -22,20 +23,37 @@ API_BASE = "http://127.0.0.1:11423"
 _TIMEOUT = httpx.Timeout(30.0)
 
 
+class ApiAuthError(httpx.HTTPStatusError):
+    """The backend rejected the call because this TUI did not present the shared
+    API token (HTTP 401). See ``auth.py`` for where the token comes from."""
+
+
+def _raise_for_status(resp: httpx.Response) -> None:
+    if resp.status_code == 401:
+        raise ApiAuthError(
+            "Backend rejected the API token. The TUI reads it from "
+            f"{auth.token_path()} (or {auth.ENV_TOKEN}); run the TUI as the same user "
+            "as the backend, or copy the token from Settings > API access.",
+            request=resp.request,
+            response=resp,
+        )
+    resp.raise_for_status()
+
+
 async def _get(path: str) -> object:
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-        resp = await client.get(f"{API_BASE}{path}")
-        resp.raise_for_status()
+        resp = await client.get(f"{API_BASE}{path}", headers=auth.auth_headers())
+        _raise_for_status(resp)
         return resp.json()
 
 
 async def _post(path: str, body: object = None) -> object:
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-        kwargs: dict = {"url": f"{API_BASE}{path}"}
+        kwargs: dict = {"url": f"{API_BASE}{path}", "headers": auth.auth_headers()}
         if body is not None:
             kwargs["json"] = body
         resp = await client.post(**kwargs)
-        resp.raise_for_status()
+        _raise_for_status(resp)
         text = resp.text.strip()
         if text:
             return resp.json()

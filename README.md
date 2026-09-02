@@ -149,6 +149,21 @@ If you installed the pre-built `.dmg`, `.deb`, or `.msi`, you can also launch th
 /Applications/Claude\ Code\ Trace.app/Contents/MacOS/Claude\ Code\ Trace --web
 ```
 
+### API access
+
+The local HTTP API (port 11423) only answers **accepted clients**: callers that present a shared
+token. The desktop app, `cctrace --web`, the TUI and the Docker image handle this for you — the
+token is generated once and stored in `~/.config/claude-code-trace/api-token` (macOS:
+`~/Library/Application Support/claude-code-trace/api-token`, Windows: `%APPDATA%\claude-code-trace\api-token`).
+Settings → **API access** shows it and lets you regenerate it. For your own scripts:
+
+```bash
+curl -H "X-CCTrace-Token: $(cat ~/.config/claude-code-trace/api-token)" \
+  http://127.0.0.1:11423/api/settings
+```
+
+Set `CCTRACE_API_TOKEN` to pin a token, or `CCTRACE_API_AUTH=off` to disable the check.
+
 > **Note:** The TUI is functional but has a few UX rough edges. Contributions are welcome.
 
 ## MCP tool call support

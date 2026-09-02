@@ -348,6 +348,15 @@ Renders a single `DisplayItem` with expandable body:
 `src/lib/invoke.ts` and `src/lib/listen.ts` provide a unified API that switches
 between Tauri IPC and HTTP fetch/EventSource at runtime.
 
+In HTTP mode every call must prove the browser is an accepted client (see
+[04-http-api.md — Authentication](04-http-api.md#authentication)). `src/lib/apiToken.ts` holds
+the shared token: in `cctrace --web` the Vite plugin in `vite.config.ts` injects it as
+`import.meta.env.VITE_API_TOKEN` (serve-time only); `invoke.ts` sends it as `X-CCTrace-Token` and
+`listen.ts` appends `?token=` to the `EventSource` URL. In Docker the value is empty and the
+server's same-origin cookie does the job. A 401 rejects with `ApiAuthError`, which `App` shows as
+a top-level banner instead of opening Settings. Settings → API access → Regenerate calls
+`setApiToken()` and `reconnectSse()` so the current tab keeps working after a rotation.
+
 ```mermaid
 flowchart LR
     CODE["Component / Hook"]

@@ -14,7 +14,7 @@ functionality as the Tauri desktop frontend. The server runs on port **11423** b
 graph TB
     subgraph Rust["Rust Backend (Axum)"]
         ROUTER["Axum Router\n/api/*"]
-        MW["Middleware\nCORS (allowlisted origins)\nJSON responses"]
+        MW["Middleware\nAPI token check (accepted clients only)\nCORS (allowlisted origins)\nJSON responses"]
         STATE["Arc&lt;AppState&gt;"]
     end
 
@@ -32,6 +32,7 @@ graph TB
         GET_GIT["GET /api/git-info"]
         GET_DEBUG["GET /api/debug-log"]
         GET_SETTINGS_W["POST /api/settings/set"]
+        POST_TOKEN["POST /api/settings/token/regenerate"]
         GET_SSE["GET /api/events\n(SSE stream)"]
         STATIC["GET /*\n(optional static assets)"]
     end
@@ -50,6 +51,7 @@ graph TB
     ROUTER --> GET_GIT
     ROUTER --> GET_DEBUG
     ROUTER --> GET_SETTINGS_W
+    ROUTER --> POST_TOKEN
     ROUTER --> GET_SSE
     ROUTER --> STATIC
 ```
@@ -60,16 +62,23 @@ graph TB
 
 ### `GET /api/settings`
 
-Returns current settings and the platform default projects directory.
+Returns current settings, the platform default projects directory, and the API client token
+state (see [Authentication](#authentication)).
 
 **Response**
 
 ```json
 {
   "projects_dir": "/Users/you/.claude/projects",
-  "default_dir": "/Users/you/.claude/projects"
+  "default_dir": "/Users/you/.claude/projects",
+  "api_auth_enabled": true,
+  "api_token_source": "file",
+  "api_token": "3f9a…(64 hex chars)"
 }
 ```
+
+`api_token_source` is `"file"` (rotatable from Settings), `"env"` (`CCTRACE_API_TOKEN`, read-only)
+or `"disabled"` (`CCTRACE_API_AUTH=off`, `api_token` is `null`).
 
 ---
 
@@ -244,6 +253,18 @@ Updates the projects directory setting.
 
 ---
 
+### `POST /api/settings/token/regenerate`
+
+Rotates the shared API client token (see [Authentication](#authentication)): writes a fresh
+64-hex token to the token file, swaps the live value the middleware checks, and returns the
+same `SettingsResponse` as `GET /api/settings` with the new `api_token`. The response also
+carries a `Set-Cookie: cctrace_token=<new>` so a same-origin (Docker) browser tab keeps
+working without a reload.
+
+Like every `/api/*` route it requires the _current_ token, so only an already-accepted client
+can rotate it. Returns `400 {"error": ...}` when the token is not rotatable: it came from
+`CCTRACE_API_TOKEN` (env tokens are read-only) or verification is disabled.
+
 ### `GET /api/events` — SSE Stream
 
 The SSE endpoint streams real-time events to connected clients.
@@ -304,12 +325,14 @@ the way the web frontend does.
 
 ## Configuration
 
-| Env var                   | Default                  | Description                                                 |
-| ------------------------- | ------------------------ | ----------------------------------------------------------- |
-| `CCTRACE_HTTP_HOST`       | `127.0.0.1`              | Bind address                                                |
-| `CCTRACE_HTTP_PORT`       | `11423` (Docker: `1421`) | Listen port                                                 |
-| `CCTRACE_STATIC_DIR`      | (unset)                  | Directory to serve as static files at `/`                   |
-| `CCTRACE_ALLOWED_ORIGINS` | (unset)                  | Extra CORS origins, comma-separated (see CORS Policy below) |
+| Env var                   | Default                  | Description                                                           |
+| ------------------------- | ------------------------ | --------------------------------------------------------------------- |
+| `CCTRACE_HTTP_HOST`       | `127.0.0.1`              | Bind address                                                          |
+| `CCTRACE_HTTP_PORT`       | `11423` (Docker: `1421`) | Listen port                                                           |
+| `CCTRACE_STATIC_DIR`      | (unset)                  | Directory to serve as static files at `/`                             |
+| `CCTRACE_ALLOWED_ORIGINS` | (unset)                  | Extra CORS origins, comma-separated (see CORS Policy below)           |
+| `CCTRACE_API_TOKEN`       | (unset)                  | Fixed API client token; overrides the token file (see Authentication) |
+| `CCTRACE_API_AUTH`        | (unset)                  | `off` disables the API token check entirely (loud stderr warning)     |
 
 The default port for native binaries is `11423` (defined in `http_api.rs:38` as
 `DEFAULT_HTTP_PORT`). The Docker image overrides this to `1421` via `CCTRACE_HTTP_PORT=1421` so
@@ -353,6 +376,84 @@ flowchart LR
     H_WATCH --> STATE
     H_PICK --> STATE
 ```
+
+---
+
+## Authentication
+
+**Location**: `src-tauri/src/auth.rs`
+
+Every `/api/*` route is gated by a shared secret token so that only _accepted clients_ — the
+bundled web UI, the Python TUI, and any tool the user has handed the token to — can reach the
+backend. Without it, any local process (or, when Docker binds `0.0.0.0`, any LAN host) could read
+session transcripts, rewrite `settings.json`, add CORS origins, or trigger the `git` / `osascript`
+side effects of `/api/git-info` and `/api/focus`. The Tauri desktop webview is unaffected: it talks
+over IPC, never HTTP.
+
+### Token resolution (`auth::resolve_api_auth`, once at startup)
+
+1. `CCTRACE_API_AUTH=off` → verification **disabled**; a warning is printed to stderr.
+2. `CCTRACE_API_TOKEN=<token>` → that token, verbatim. Not rotatable at runtime.
+3. Otherwise the token file `<config dir>/claude-code-trace/api-token` (sibling of
+   `settings.json`) is read, or created with a fresh 64-hex token if missing. On unix the file is
+   mode `0600`. Config dir per OS: `$XDG_CONFIG_HOME` or `~/.config` (Linux),
+   `~/Library/Application Support` (macOS), `%APPDATA%` (Windows).
+
+Creation uses `O_EXCL`: in `cctrace --web`, Tauri starts Vite _before_ the Rust binary, and the
+Vite plugin (`bin/api-token.mjs`) may create the file first. Whichever side loses the race re-reads
+the winner's token, so both converge. If the file cannot be read or created the server fails
+**closed** — it runs with an unpersisted random token, never unauthenticated.
+
+`AppState.api_auth: RwLock<ApiAuth>` holds the live value; the middleware reads it on every request
+so a rotation takes effect immediately.
+
+### Accepted carriers (`auth::require_api_token`)
+
+Checked in this order with a constant-time comparison; any match passes:
+
+| Carrier                         | Used by                                                     |
+| ------------------------------- | ----------------------------------------------------------- |
+| `X-CCTrace-Token: <token>`      | Web UI `fetch` (`src/lib/invoke.ts`), TUI (`tui-py/api.py`) |
+| `Authorization: Bearer <token>` | curl / external tools                                       |
+| `?token=<token>` query          | Browser `EventSource` on `/api/events` (cannot set headers) |
+| `cctrace_token` cookie          | Docker same-origin UI (set by the server, see below)        |
+
+A request with no valid token gets `401 {"error": "missing or invalid API token — ..."}`. `OPTIONS`
+always passes so CORS preflights are never blocked, and CORS runs outermost so the 401 carries CORS
+headers and the browser can read the error body. The middleware is applied with `route_layer`, so
+it covers only the registered API routes: the static UI fallback stays public and unknown paths
+still 404 rather than 401.
+
+### How each client gets the token
+
+- **Web/dev mode** (`cctrace --web`, Vite on 1420 → API on 11423): the `cctrace-api-token` Vite
+  plugin in `vite.config.ts` reads the token file at _serve_ time and injects it as
+  `import.meta.env.VITE_API_TOKEN` (never into a production build). `src/lib/apiToken.ts` holds it;
+  `invoke.ts` sends the header and `listen.ts` appends `?token=`. The plugin watches the file and
+  restarts the dev server when it changes.
+- **Docker / same-origin** (`CCTRACE_STATIC_DIR` set): `auth::attach_token_cookie` wraps the static
+  fallback and adds `Set-Cookie: cctrace_token=<token>; Path=/; HttpOnly; SameSite=Strict` to
+  `text/html` responses — but **only when the request `Host` is allowlisted**: `localhost`,
+  `127.0.0.1`, `::1`, or the host part of any allowed CORS origin (defaults, `CCTRACE_ALLOWED_ORIGINS`,
+  Settings UI). Without that gate a DNS-rebinding page pointed at the `0.0.0.0`-bound port would be
+  issued the cookie and become a fully authenticated client. Reaching a container via a LAN IP or
+  reverse-proxy hostname therefore requires adding it to `CCTRACE_ALLOWED_ORIGINS` (or passing the
+  token explicitly).
+- **TUI**: `tui-py/auth.py` mirrors the resolution (env → file, never creates) and
+  `auth_headers()` is re-evaluated per request, so a rotated token is picked up without a restart.
+- **Other tools**: copy the token from Settings → API access, or read the file:
+  `curl -H "X-CCTrace-Token: $(cat ~/.config/claude-code-trace/api-token)" http://127.0.0.1:11423/api/settings`.
+
+### Settings UI
+
+`GET /api/settings` reports `api_auth_enabled`, `api_token_source` (`"file" | "env" | "disabled"`)
+and `api_token`. The Settings modal's **API access** section shows the token masked with Show /
+Copy / Regenerate; Regenerate is a two-click confirm and is disabled for `env` tokens.
+`POST /api/settings/token/regenerate` (or the `regenerate_api_token` Tauri command) performs the
+rotation.
+
+Note: in dev mode the SSE token travels in the URL. The server keeps no access log today; if one is
+added, the `token` query parameter must be redacted.
 
 ---
 

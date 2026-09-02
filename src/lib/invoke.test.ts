@@ -151,3 +151,86 @@ describe("invoke (web/HTTP mode)", () => {
     await expect(invoke("nonexistent_cmd")).rejects.toThrow('Unknown command "nonexistent_cmd"');
   });
 });
+
+describe("invoke (web/HTTP mode) — API client token", () => {
+  beforeEach(async () => {
+    vi.restoreAllMocks();
+    const { setApiToken } = await import("./apiToken");
+    setApiToken(null);
+  });
+
+  it("sends no token header when none is configured", async () => {
+    const fetchFn = mockFetch({});
+    const { invoke } = await import("./invoke");
+    await invoke("get_settings");
+    const init = fetchFn.mock.calls[0][1] as RequestInit;
+    expect(init.headers).not.toHaveProperty("X-CCTrace-Token");
+  });
+
+  it("sends X-CCTrace-Token once a token is set", async () => {
+    const fetchFn = mockFetch({});
+    const { setApiToken } = await import("./apiToken");
+    const { invoke } = await import("./invoke");
+    setApiToken("secret-token");
+    await invoke("get_project_dirs");
+    expect(fetchFn).toHaveBeenCalledWith(
+      `${API_BASE}/api/project-dirs`,
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "Content-Type": "application/json",
+          "X-CCTrace-Token": "secret-token",
+        }),
+      }),
+    );
+  });
+
+  it("setApiToken takes effect for subsequent calls without a reload", async () => {
+    const fetchFn = mockFetch({});
+    const { setApiToken } = await import("./apiToken");
+    const { invoke } = await import("./invoke");
+    setApiToken("old");
+    await invoke("get_settings");
+    setApiToken("new");
+    await invoke("get_settings");
+    const headersOf = (i: number) => (fetchFn.mock.calls[i][1] as RequestInit).headers;
+    expect(headersOf(0)).toMatchObject({ "X-CCTrace-Token": "old" });
+    expect(headersOf(1)).toMatchObject({ "X-CCTrace-Token": "new" });
+  });
+
+  it("rejects with ApiAuthError on HTTP 401", async () => {
+    const body = { error: "missing or invalid API token" };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 401,
+        statusText: "Unauthorized",
+        text: () => Promise.resolve(JSON.stringify(body)),
+        json: () => Promise.resolve(body),
+      }),
+    );
+    const { invoke, ApiAuthError } = await import("./invoke");
+    const err = await invoke("get_settings").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiAuthError);
+    expect((err as Error).message).toBe("missing or invalid API token");
+  });
+
+  it("other HTTP errors stay plain Errors", async () => {
+    mockFetch({ error: "bad request" }, false);
+    const { invoke, ApiAuthError } = await import("./invoke");
+    const err = await invoke("get_settings").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(ApiAuthError);
+  });
+
+  it("regenerate_api_token posts to /api/settings/token/regenerate", async () => {
+    const fetchFn = mockFetch({ api_token: "fresh" });
+    const { invoke } = await import("./invoke");
+    const res = await invoke<{ api_token: string }>("regenerate_api_token");
+    expect(res.api_token).toBe("fresh");
+    expect(fetchFn).toHaveBeenCalledWith(
+      `${API_BASE}/api/settings/token/regenerate`,
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+});

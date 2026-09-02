@@ -2868,6 +2868,20 @@ body {
   border-color: var(--accent);
 }
 
+/* Settings → API access: token field with Show / Copy / Regenerate. */
+.settings-modal__token-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.settings-modal__token-row .settings-modal__input--token {
+  flex: 1;
+  min-width: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
 .settings-modal__hint {
   margin: 0;
   font-size: 11px;
@@ -2922,4 +2936,25 @@ body {
 
 .settings-modal__btn--primary:hover:not(:disabled) {
   background: #4a9aee;
+}
+
+/* Shown instead of the app when the backend rejected this browser as an
+   unaccepted client (HTTP 401 on the very first API call). */
+.app-auth-banner {
+  padding: 8px 12px;
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--error);
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.app-auth-banner code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.app-auth-banner__detail {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-dim);
 }

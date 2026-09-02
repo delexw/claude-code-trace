@@ -1,9 +1,11 @@
-use std::sync::Mutex;
+use std::path::Path;
+use std::sync::{Mutex, RwLock};
 use std::time::{Duration, Instant};
 use tokio::sync::broadcast;
 
 use std::collections::HashMap;
 
+use crate::auth::ApiAuth;
 use crate::convert::{DisplayMessage, LoadResult};
 use crate::parser::cache::SessionCache;
 use crate::parser::session::{Liveness, LivenessCache, SessionInfo, SessionNamesCache};
@@ -61,6 +63,9 @@ pub struct AppState {
     pub picker_watcher: Mutex<Option<WatcherHandle>>,
     pub session_cache: Mutex<SessionCache>,
     pub settings: Mutex<Settings>,
+    /// Live API client-verification mode (see `crate::auth`). Read on every
+    /// HTTP request by the auth middleware; swapped by Settings → Regenerate.
+    pub api_auth: RwLock<ApiAuth>,
     /// Ongoing status reported by the session watcher for the currently viewed session.
     /// (session_path, is_ongoing) — kept in sync by the session watcher loop.
     pub watched_session_ongoing: Mutex<Option<(String, bool)>>,
@@ -84,19 +89,60 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new() -> Self {
+    /// `api_auth` is injected rather than resolved here so tests never touch
+    /// the developer's real token file — see `crate::auth::resolve_api_auth`.
+    pub fn new(api_auth: ApiAuth) -> Self {
         let (event_tx, _) = broadcast::channel(64);
         Self {
             session_watcher: Mutex::new(None),
             picker_watcher: Mutex::new(None),
             session_cache: Mutex::new(SessionCache::new()),
             settings: Mutex::new(crate::settings::load_settings()),
+            api_auth: RwLock::new(api_auth),
             watched_session_ongoing: Mutex::new(None),
             event_tx,
             sessions_cache: Mutex::new(None),
             session_names_cache: Mutex::new(SessionNamesCache::new()),
             liveness_cache: Mutex::new(LivenessCache::new()),
             session_light_cache: Mutex::new(None),
+        }
+    }
+
+    /// Clone of the live auth mode, for building `SettingsResponse`.
+    pub fn api_auth_snapshot(&self) -> ApiAuth {
+        self.api_auth
+            .read()
+            .map(|g| g.clone())
+            .unwrap_or_else(|poisoned| poisoned.into_inner().clone())
+    }
+
+    /// Rotate the token file and swap the live token (Settings → Regenerate).
+    pub fn regenerate_api_token(&self) -> Result<String, String> {
+        self.regenerate_api_token_at(crate::auth::token_file_path().as_deref())
+    }
+
+    /// Testable core of [`regenerate_api_token`](Self::regenerate_api_token):
+    /// only a file-sourced token can be rotated; env-provided and disabled
+    /// modes are rejected with a message the Settings UI can show.
+    pub fn regenerate_api_token_at(&self, path: Option<&Path>) -> Result<String, String> {
+        let mut guard = self.api_auth.write().map_err(|e| e.to_string())?;
+        match &*guard {
+            ApiAuth::Disabled => Err(
+                "API client verification is disabled (CCTRACE_API_AUTH=off); there is no \
+                 token to regenerate"
+                    .to_string(),
+            ),
+            ApiAuth::Env(_) => Err(
+                "the API token is set by CCTRACE_API_TOKEN; unset it to manage the token from \
+                 Settings"
+                    .to_string(),
+            ),
+            ApiAuth::File(_) => {
+                let path = path.ok_or("no config directory available for the api-token file")?;
+                let token = crate::auth::rotate_token_file(path)?;
+                *guard = ApiAuth::File(token.clone());
+                Ok(token)
+            }
         }
     }
 
@@ -352,7 +398,7 @@ mod tests {
     fn load_session_windowed_returns_window_with_total_count() {
         let dir = tempfile::tempdir().unwrap();
         let path = write_session(dir.path());
-        let state = AppState::new();
+        let state = AppState::new(ApiAuth::Disabled);
 
         let full = state
             .load_session_windowed(&path, LoadOptions::full())
@@ -379,7 +425,7 @@ mod tests {
     fn light_cache_serves_repeated_windows_and_clears() {
         let dir = tempfile::tempdir().unwrap();
         let path = write_session(dir.path());
-        let state = AppState::new();
+        let state = AppState::new(ApiAuth::Disabled);
 
         // First call builds and caches; second (same path+size) hits the cache
         // and must return identical content.
@@ -408,7 +454,7 @@ mod tests {
     fn full_message_at_works_without_a_warm_light_cache() {
         let dir = tempfile::tempdir().unwrap();
         let path = write_session(dir.path());
-        let state = AppState::new();
+        let state = AppState::new(ApiAuth::Disabled);
 
         // No list load has happened yet — full_message_at must not depend on
         // the light cache being populated first.
@@ -422,7 +468,7 @@ mod tests {
     fn full_message_at_never_populates_the_light_cache() {
         let dir = tempfile::tempdir().unwrap();
         let path = write_session(dir.path());
-        let state = AppState::new();
+        let state = AppState::new(ApiAuth::Disabled);
 
         state.full_message_at(&path, 0).unwrap();
         state.full_message_at(&path, 1).unwrap();
@@ -435,8 +481,46 @@ mod tests {
     fn full_message_at_out_of_range_returns_none() {
         let dir = tempfile::tempdir().unwrap();
         let path = write_session(dir.path());
-        let state = AppState::new();
+        let state = AppState::new(ApiAuth::Disabled);
 
         assert!(state.full_message_at(&path, 9999).unwrap().is_none());
+    }
+
+    // -- api token regeneration ---------------------------------------------
+
+    #[test]
+    fn regenerate_rotates_file_token_and_swaps_live_value() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("api-token");
+        std::fs::write(&path, "old-token\n").unwrap();
+        let state = AppState::new(ApiAuth::File("old-token".into()));
+
+        let new_token = state.regenerate_api_token_at(Some(&path)).unwrap();
+        assert_ne!(new_token, "old-token");
+        assert_eq!(state.api_auth_snapshot(), ApiAuth::File(new_token.clone()));
+        assert_eq!(std::fs::read_to_string(&path).unwrap().trim(), new_token);
+    }
+
+    #[test]
+    fn regenerate_is_rejected_for_env_token() {
+        let state = AppState::new(ApiAuth::Env("fixed".into()));
+        let err = state.regenerate_api_token_at(None).unwrap_err();
+        assert!(err.contains("CCTRACE_API_TOKEN"), "{err}");
+        assert_eq!(state.api_auth_snapshot(), ApiAuth::Env("fixed".into()));
+    }
+
+    #[test]
+    fn regenerate_is_rejected_when_disabled() {
+        let state = AppState::new(ApiAuth::Disabled);
+        let err = state.regenerate_api_token_at(None).unwrap_err();
+        assert!(err.contains("disabled"), "{err}");
+    }
+
+    #[test]
+    fn regenerate_without_config_dir_is_an_error() {
+        let state = AppState::new(ApiAuth::File("t".into()));
+        assert!(state.regenerate_api_token_at(None).is_err());
+        // The live token is untouched when rotation fails.
+        assert_eq!(state.api_auth_snapshot(), ApiAuth::File("t".into()));
     }
 }
