@@ -721,6 +721,56 @@ mod tests {
     }
 
     #[test]
+    fn tool_uses_with_synthesized_ids_do_not_collide_across_entries() {
+        // The `pending` map spans the whole AI buffer, so uuid-scoped placeholders (not just
+        // index-scoped) are what keep two id-less calls in *different* assistant entries
+        // apart. With an index-only placeholder both would be "missing-tool-id-0" and the
+        // Read call would steal the Bash call's result.
+        let msgs = vec![
+            ClassifiedMsg::AI(make_ai_msg(
+                vec![tool_use_block("missing-tool-id-entry-one-0", "Bash")],
+                false,
+            )),
+            ClassifiedMsg::AI(make_ai_msg(
+                vec![tool_result_block(
+                    "missing-tool-id-entry-one-0",
+                    "bash output",
+                )],
+                true,
+            )),
+            ClassifiedMsg::AI(make_ai_msg(
+                vec![tool_use_block("missing-tool-id-entry-two-0", "Read")],
+                false,
+            )),
+            ClassifiedMsg::AI(make_ai_msg(
+                vec![tool_result_block(
+                    "missing-tool-id-entry-two-0",
+                    "read output",
+                )],
+                true,
+            )),
+        ];
+        let chunks = build_chunks(&msgs);
+        let items = &chunks[0].items;
+        let bash = items
+            .iter()
+            .find(|i| i.tool_name == "Bash")
+            .expect("Bash call must render");
+        let read = items
+            .iter()
+            .find(|i| i.tool_name == "Read")
+            .expect("Read call must render");
+        assert_eq!(
+            bash.tool_result, "bash output",
+            "each call must keep its own result"
+        );
+        assert_eq!(
+            read.tool_result, "read output",
+            "each call must keep its own result"
+        );
+    }
+
+    #[test]
     fn deferred_subagent_tool_use_is_marked_deferred() {
         // A Task/Agent tool_use block without a matching result is also deferred.
         let tool_id = "toolu_agent_deferred";

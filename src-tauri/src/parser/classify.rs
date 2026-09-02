@@ -592,7 +592,7 @@ pub fn classify(e: Entry) -> Option<ClassifiedMsg> {
         }
         let advisor_model = e.message.usage.advisor_model().unwrap_or_default();
         let (thinking, tool_calls, blocks) =
-            extract_assistant_details(&e.message.content, &advisor_model);
+            extract_assistant_details(&e.message.content, &advisor_model, &e.uuid);
         let stop_reason = e.message.stop_reason.clone().unwrap_or_default();
         return Some(ClassifiedMsg::AI(AIMsg {
             timestamp: ts,
@@ -785,6 +785,7 @@ fn normalize_tool_input(input: Value) -> Value {
 fn extract_assistant_details(
     content: &Option<Value>,
     advisor_model: &str,
+    entry_uuid: &str,
 ) -> (usize, Vec<ToolCall>, Vec<ContentBlock>) {
     let blocks = match content {
         Some(Value::Array(arr)) => arr,
@@ -827,15 +828,20 @@ fn extract_assistant_details(
             "tool_use" | "server_tool_use" => {
                 // v2.1.246: third-party ANTHROPIC_BASE_URL proxies can stream a tool_use
                 // block without an `id` (Anthropic's own API always sets one). Synthesize
-                // a placeholder scoped to this block's position so the call still renders
-                // and pairing with a same-index tool_result degrades gracefully instead of
-                // colliding with every other id-less tool_use in the same message.
+                // a placeholder so the call still renders instead of sharing the empty-string
+                // key with every other id-less tool_use. The placeholder is scoped to the
+                // entry uuid *and* the block's position: `merge_ai_buffer`'s `pending` map
+                // spans the whole AI buffer (many assistant entries), so an index-only
+                // placeholder would still collide across entries — two id-less calls each at
+                // index 0 of their own entry would share `missing-tool-id-0`, and the second
+                // would clobber the first's pending entry, misattributing the first call's
+                // tool_result to the second call.
                 let id = b
                     .get("id")
                     .and_then(|v| v.as_str())
                     .filter(|s| !s.is_empty())
                     .map(|s| s.to_string())
-                    .unwrap_or_else(|| format!("missing-tool-id-{i}"));
+                    .unwrap_or_else(|| format!("missing-tool-id-{entry_uuid}-{i}"));
                 let name = b
                     .get("name")
                     .and_then(|v| v.as_str())
@@ -1299,6 +1305,32 @@ mod tests {
             }
             other => panic!("Expected AI, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn classify_tool_use_missing_id_placeholders_differ_across_entries() {
+        // merge_ai_buffer's `pending` map spans the whole AI buffer, not one entry, so a
+        // placeholder scoped only to the block index would collide across entries: two
+        // id-less calls each at index 0 of their own entry would share the same key and the
+        // second would clobber the first, misattributing the first's tool_result. Scoping to
+        // the entry uuid keeps them distinct.
+        let content = json!([{"type": "tool_use", "name": "Bash", "input": {"command": "ls"}}]);
+        let mut first = make_entry("assistant", Some(content.clone()));
+        first.uuid = "entry-one".to_string();
+        first.message.stop_reason = Some("tool_use".to_string());
+        let mut second = make_entry("assistant", Some(content));
+        second.uuid = "entry-two".to_string();
+        second.message.stop_reason = Some("tool_use".to_string());
+
+        let id_of = |e| match classify(e) {
+            Some(ClassifiedMsg::AI(ai)) => ai.tool_calls[0].id.clone(),
+            other => panic!("Expected AI, got {other:?}"),
+        };
+        assert_ne!(
+            id_of(first),
+            id_of(second),
+            "id-less tool_use blocks in different entries must not share a placeholder id"
+        );
     }
 
     #[test]
