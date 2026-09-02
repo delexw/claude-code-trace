@@ -311,6 +311,11 @@ def _item_body_widgets(item: DisplayItem) -> list[Widget]:
             widgets.append(Static(_json_text(item.hook_metadata), classes="diff-block"))
         return widgets
 
+    if item.item_type == "Subagent":
+        widgets = [Markdown(_render_item_body(item))]
+        widgets.extend(_tool_result_widgets(item))
+        return widgets
+
     return [Markdown(_render_item_body(item))]
 
 

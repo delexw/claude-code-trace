@@ -30,10 +30,21 @@ export function useVisibleSessions(
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handlerRef = useRef(onChange);
-  handlerRef.current = onChange;
   const debounceMsRef = useRef(debounceMs);
-  debounceMsRef.current = debounceMs;
+  // Refresh after commit rather than during render — writing a ref while rendering is
+  // unsafe under concurrent rendering. Both are only read from the IntersectionObserver
+  // callback and its debounce timer, neither of which can run before the commit.
+  useEffect(() => {
+    handlerRef.current = onChange;
+    debounceMsRef.current = debounceMs;
+  });
 
+  // The initializer runs during render, but it only *closes over* the refs below; every
+  // read happens inside the IntersectionObserver callback and its debounce timer, neither
+  // of which can fire before the commit. The observer has to be built here rather than in
+  // an effect so it exists when card refs first attach (see the note above the hook), so
+  // the ref capture is deliberate rather than an oversight.
+  // oxlint-disable-next-line react/refs
   const [observer] = useState<IntersectionObserver | null>(() => {
     if (typeof IntersectionObserver === "undefined") return null;
     return new IntersectionObserver((entries) => {

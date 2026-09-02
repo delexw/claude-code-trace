@@ -185,6 +185,12 @@ export function SessionPicker({
                       {session.dirs.map(shortPath).join(", ")}
                     </div>
                   )}
+                  {session.integrity_warning && (
+                    <div className="picker__session-warning" title={session.integrity_warning}>
+                      <span className="picker__session-warning-label">⚠ Possibly spliced:</span>{" "}
+                      this transcript may combine two unrelated sessions
+                    </div>
+                  )}
                   <div className="picker__session-meta">
                     <span className="picker__session-model" style={{ color: modelClr }}>
                       {model}

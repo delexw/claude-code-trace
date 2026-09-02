@@ -61,6 +61,14 @@ pub struct SessionInfo {
     /// first entry, so this id is the only reliable signal for grouping it back under its
     /// parent's project — see #238.
     pub forked_from_session_id: Option<String>,
+    /// Set when the scan finds a conversation-chain break (an entry whose parent
+    /// is unknown, or a fresh-conversation root appearing after the first entry)
+    /// landing at the same point the file's cwd/branch or timestamp order jumps.
+    /// This is the signature of two unrelated sessions briefly colliding on the
+    /// same filename (Claude Code < v2.1.251 directory-change session-id
+    /// collision — see delexw/claude-code-trace#274) and getting spliced into one
+    /// file. `None` when the file looks internally consistent.
+    pub integrity_warning: Option<String>,
 }
 
 /// Liveness of a running session, derived from the `~/.claude/sessions/*.json`
@@ -561,6 +569,7 @@ pub fn discover_project_sessions(project_dir: &str) -> Result<Vec<SessionInfo>, 
             git_branch: meta.git_branch,
             permission_mode: meta.permission_mode,
             forked_from_session_id: meta.forked_from_session_id,
+            integrity_warning: meta.integrity_warning,
         });
     }
 
@@ -883,6 +892,7 @@ pub fn session_info_from_metadata(
         git_branch: meta.git_branch,
         permission_mode: meta.permission_mode,
         forked_from_session_id: meta.forked_from_session_id,
+        integrity_warning: meta.integrity_warning,
     }
 }
 
@@ -946,6 +956,8 @@ pub(crate) struct SessionMetadata {
     pub(crate) recap: Option<String>,
     /// See `SessionInfo::forked_from_session_id`.
     pub(crate) forked_from_session_id: Option<String>,
+    /// See `SessionInfo::integrity_warning`.
+    pub(crate) integrity_warning: Option<String>,
 }
 
 impl Default for SessionMetadata {
@@ -968,6 +980,7 @@ impl Default for SessionMetadata {
             permission_mode: String::new(),
             recap: None,
             forked_from_session_id: None,
+            integrity_warning: None,
         }
     }
 }
@@ -1008,6 +1021,10 @@ pub(crate) fn scan_session_metadata(path: &str) -> SessionMetadata {
     let mut first_ts: Option<DateTime<Utc>> = None;
     let mut last_ts: Option<DateTime<Utc>> = None;
 
+    // Splice-discontinuity detection (see the per-entry check below): uuids of
+    // main-chain entries seen so far, in file order.
+    let mut seen_uuids: HashSet<String> = HashSet::new();
+
     for line_result in reader.lines() {
         let line = match line_result {
             Ok(l) => l,
@@ -1025,6 +1042,13 @@ pub(crate) fn scan_session_metadata(path: &str) -> SessionMetadata {
         // Entries with `forkedFrom` were inherited from a parent session (v2.1.118+).
         // Detect early so the flag is available for all per-entry decisions below.
         let is_inherited = raw.get("forkedFrom").is_some();
+
+        // Snapshot state as of *before* this entry, for the splice-discontinuity
+        // check below (which needs to compare this entry's own values against
+        // what came before it, not against itself after the update blocks run).
+        let prev_cwd = meta.cwd.clone();
+        let prev_git_branch = meta.git_branch.clone();
+        let prev_last_ts = last_ts;
 
         // Track timestamps for duration. Skip inherited entries so the fork's duration
         // reflects only its own activity, not the parent conversation's timeline.
@@ -1131,6 +1155,76 @@ pub(crate) fn scan_session_metadata(path: &str) -> SessionMetadata {
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
         let is_meta_flag = raw.get("isMeta").and_then(|v| v.as_bool()).unwrap_or(false);
+
+        // Track every main-chain entry's uuid — regardless of type — so the
+        // splice-discontinuity check below doesn't mistake a normal intermediate
+        // entry (e.g. "attachment", which commonly sits between a user entry and
+        // the assistant reply that answers it) for an unknown parent. Only
+        // sidechain/inherited uuids are excluded, matching the chain the
+        // conversation's own uuid/parentUuid links traverse.
+        if !is_inherited && !is_sidechain {
+            seen_uuids.insert(uuid.to_string());
+        }
+
+        // --- Splice-discontinuity detection (delexw/claude-code-trace#274) ---
+        // Claude Code versions before v2.1.251 could, on a mid-session directory
+        // change, relocate a session's transcript onto a filename that collided
+        // with an unrelated session sharing the same session id, silently
+        // overwriting or splicing the two together. Detect that signature: a
+        // main-chain entry that either references a parent this file has never
+        // seen, or looks like a fresh conversation root despite not being the
+        // file's first entry, landing at the same point the cwd/branch or
+        // timestamp order jumps. A broken parent chain alone is not enough on its
+        // own — Claude Code can omit a hook-hidden assistant message from the
+        // JSONL, which also breaks the chain for a legitimate reason (see
+        // `resolve_live_chain_uuids`) — so this only fires when the chain anomaly
+        // coincides with a context jump.
+        if !is_inherited && !is_sidechain && (entry_type == "user" || entry_type == "assistant") {
+            let parent_uuid = raw.get("parentUuid").and_then(|v| v.as_str()).unwrap_or("");
+            let chain_anomaly = !seen_uuids.is_empty()
+                && (parent_uuid.is_empty() || !seen_uuids.contains(parent_uuid));
+
+            if meta.integrity_warning.is_none() && chain_anomaly {
+                let cur_cwd = raw.get("cwd").and_then(|v| v.as_str()).unwrap_or("");
+                let cur_branch = raw.get("gitBranch").and_then(|v| v.as_str()).unwrap_or("");
+                // "HEAD" is git's `--abbrev-ref` sentinel for a detached-HEAD state
+                // (see `commands/git.rs`), not a real branch name — a worktree can
+                // pass through it mid-operation (rebase, checkout elsewhere) with no
+                // relation to session identity, so a transition into/out of "HEAD"
+                // is not evidence of a context jump on its own.
+                let branch_changed = !cur_branch.is_empty()
+                    && !prev_git_branch.is_empty()
+                    && cur_branch != "HEAD"
+                    && prev_git_branch != "HEAD"
+                    && cur_branch != prev_git_branch;
+                let context_jumped =
+                    (!cur_cwd.is_empty() && !prev_cwd.is_empty() && cur_cwd != prev_cwd)
+                        || branch_changed;
+
+                let ts_regressed =
+                    match (prev_last_ts, raw.get("timestamp").and_then(|v| v.as_str())) {
+                        (Some(prev), Some(ts_str)) => {
+                            prev.signed_duration_since(parse_timestamp(ts_str))
+                                > chrono::Duration::seconds(60)
+                        }
+                        _ => false,
+                    };
+
+                if context_jumped || ts_regressed {
+                    let parent_desc = if parent_uuid.is_empty() {
+                        "no parent (starts a fresh conversation root)".to_string()
+                    } else {
+                        format!("an unknown parent ({parent_uuid})")
+                    };
+                    meta.integrity_warning = Some(format!(
+                        "possible spliced transcript: entry {uuid} has {parent_desc} right where \
+                         the working directory/branch or timestamp order jumps — this file may \
+                         combine two unrelated sessions that briefly collided on the same filename \
+                         (Claude Code < v2.1.251, see delexw/claude-code-trace#274)"
+                    ));
+                }
+            }
+        }
 
         // --- Turn counting (matches isParsedUserChunkMessage + AI pairing) ---
         // Skip inherited entries so the turn count reflects the fork's own activity.
@@ -1882,7 +1976,38 @@ mod tests {
             git_branch: String::new(),
             permission_mode: String::new(),
             forked_from_session_id: None,
+            integrity_warning: None,
         }
+    }
+
+    /// Claude Code v2.1.248 introduced `desktopSessionCleanupPeriodDays`, making
+    /// upstream transcript retention vary per-session (Desktop/Cowork sessions can
+    /// outlive CLI ones) instead of one uniform window. Session discovery must not
+    /// bake in any assumed lifespan of its own — it has to treat whatever files are
+    /// actually present on disk as the full truth, however old their mtime is.
+    #[test]
+    fn discover_project_sessions_does_not_filter_by_file_age() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("old-session.jsonl");
+        std::fs::write(
+            &path,
+            "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"hi\"}}\n",
+        )
+        .unwrap();
+
+        // Back-date the file far past any plausible cleanup window (e.g. the old
+        // uniform 30-day rule, or any org-configured `desktopSessionCleanupPeriodDays`).
+        let ancient = std::time::SystemTime::now() - std::time::Duration::from_secs(400 * 86400);
+        filetime::set_file_mtime(&path, filetime::FileTime::from_system_time(ancient)).unwrap();
+
+        let sessions = discover_project_sessions(dir.path().to_str().unwrap()).unwrap();
+        assert_eq!(
+            sessions.len(),
+            1,
+            "a session file must be discovered purely from its presence on disk, \
+             regardless of how old its mtime is"
+        );
+        assert_eq!(sessions[0].session_id, "old-session");
     }
 
     #[test]
@@ -3651,6 +3776,84 @@ mod tests {
         std::fs::remove_dir_all(&tmp).ok();
     }
 
+    // --- Issue #273: pre-v2.1.251 stream-json merged tool_use blocks with lost results ---
+
+    #[test]
+    fn merged_tool_use_blocks_under_one_message_id_pair_independently() {
+        // Before Claude Code v2.1.251, client-injected assistant tool calls sent without a
+        // message id over --input-format stream-json were merged into the first assistant
+        // message, and the tool_result for one of the merged calls could be lost entirely.
+        // The on-disk symptom is a single assistant entry (one uuid) whose message.content
+        // array holds multiple tool_use blocks, with only some of them later paired to a
+        // tool_result. The parser must pair each tool_use by its own id — independent of the
+        // shared message uuid — and render the one with no result as "no result" (orphan),
+        // not as a parse error.
+        let tmp = env::temp_dir().join("tail-test-issue273-merged-tool-use");
+        std::fs::create_dir_all(&tmp).unwrap();
+        let path = tmp.join("session.jsonl");
+
+        // Single assistant entry with three tool_use blocks merged under one message id.
+        let merged_asst = "{\"type\":\"assistant\",\"uuid\":\"a1\",\"parentUuid\":\"u0\",\"timestamp\":\"2026-08-28T10:00:00Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"toolu_1\",\"name\":\"Bash\",\"input\":{\"command\":\"ls\"}},{\"type\":\"tool_use\",\"id\":\"toolu_2\",\"name\":\"Read\",\"input\":{\"file_path\":\"/tmp/a\"}},{\"type\":\"tool_use\",\"id\":\"toolu_3\",\"name\":\"Write\",\"input\":{\"file_path\":\"/tmp/b\"}}],\"model\":\"claude-sonnet-4-6\",\"stop_reason\":\"tool_use\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0}}}\n";
+        // Only toolu_1 and toolu_3 get results back — toolu_2's result was lost by the bug.
+        let results = "{\"type\":\"user\",\"uuid\":\"u1\",\"parentUuid\":\"a1\",\"timestamp\":\"2026-08-28T10:00:01Z\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"toolu_1\",\"content\":\"ok1\"},{\"type\":\"tool_result\",\"tool_use_id\":\"toolu_3\",\"content\":\"ok3\"}]}}\n";
+        // A genuine new user turn — the conversation continued past the merged tool call, so
+        // toolu_2's still-pending id is a lost result, not a still-running tool.
+        let next_user = "{\"type\":\"user\",\"uuid\":\"u2\",\"parentUuid\":\"u1\",\"timestamp\":\"2026-08-28T10:00:02Z\",\"message\":{\"role\":\"user\",\"content\":\"what else?\"}}\n";
+        let final_asst = "{\"type\":\"assistant\",\"uuid\":\"a2\",\"parentUuid\":\"u2\",\"timestamp\":\"2026-08-28T10:00:03Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Done\"}],\"model\":\"claude-sonnet-4-6\",\"stop_reason\":\"end_turn\",\"usage\":{\"input_tokens\":20,\"output_tokens\":3,\"cache_read_input_tokens\":0,\"cache_creation_input_tokens\":0}}}\n";
+
+        std::fs::write(
+            &path,
+            format!("{merged_asst}{results}{next_user}{final_asst}"),
+        )
+        .unwrap();
+
+        let chunks = read_session(path.to_str().unwrap()).expect("read_session must succeed");
+        let ai_chunk = chunks
+            .iter()
+            .find(|c| matches!(c.chunk_type, crate::parser::chunk::ChunkType::AI))
+            .expect("must have at least one AI chunk");
+
+        assert_eq!(
+            ai_chunk.items.len(),
+            3,
+            "all three merged tool_use blocks must be surfaced as distinct items, not merged into one"
+        );
+
+        let bash = ai_chunk
+            .items
+            .iter()
+            .find(|it| it.tool_name == "Bash")
+            .expect("Bash tool_use must appear");
+        assert_eq!(bash.tool_result, "ok1");
+        assert!(!bash.is_orphan && !bash.is_deferred);
+
+        let write = ai_chunk
+            .items
+            .iter()
+            .find(|it| it.tool_name == "Write")
+            .expect("Write tool_use must appear");
+        assert_eq!(write.tool_result, "ok3");
+        assert!(!write.is_orphan && !write.is_deferred);
+
+        let read = ai_chunk
+            .items
+            .iter()
+            .find(|it| it.tool_name == "Read")
+            .expect("Read tool_use must appear even though its result was lost");
+        assert!(
+            read.tool_result.is_empty(),
+            "tool_use with a lost result must render with no result, not a stale/wrong one"
+        );
+        assert!(
+            read.is_orphan,
+            "tool_use whose result was lost (conversation continued past it) must be marked \
+             is_orphan, not treated as a parse error"
+        );
+        assert!(!read.is_deferred);
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
     // --- Issue #78: duplicate summary entries from pre-v2.1.128 sessions ---
 
     #[test]
@@ -3983,6 +4186,184 @@ mod tests {
             vec!["/home/user/primary-repo".to_string()],
             "dirs must not duplicate a path already present; got {:?}",
             meta.dirs
+        );
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    // --- splice-discontinuity detection (delexw/claude-code-trace#274) ---
+
+    #[test]
+    fn scan_session_metadata_flags_broken_chain_plus_directory_jump_as_spliced() {
+        // A parent that no earlier entry in the file introduced, landing at the same
+        // point the cwd/branch changes and the timestamp jumps backward, is the
+        // signature of two unrelated sessions colliding on the same filename
+        // pre-v2.1.251.
+        let tmp = env::temp_dir().join("tail-test-splice-chain-and-dir");
+        std::fs::create_dir_all(&tmp).unwrap();
+        let path = tmp.join("session.jsonl");
+
+        let entry1 = "{\"type\":\"user\",\"uuid\":\"u1\",\"parentUuid\":null,\"isSidechain\":false,\"timestamp\":\"2026-07-01T10:00:00Z\",\"cwd\":\"/repo/A\",\"gitBranch\":\"main\",\"message\":{\"role\":\"user\",\"content\":\"start\"}}\n";
+        let entry2 = "{\"type\":\"assistant\",\"uuid\":\"a1\",\"parentUuid\":\"u1\",\"isSidechain\":false,\"timestamp\":\"2026-07-01T10:00:01Z\",\"cwd\":\"/repo/A\",\"gitBranch\":\"main\",\"message\":{\"role\":\"assistant\",\"model\":\"claude-sonnet-4-20250514\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}}\n";
+        // Splice point: unknown parent, unrelated repo/branch, timestamp far earlier.
+        let entry3 = "{\"type\":\"user\",\"uuid\":\"u2\",\"parentUuid\":\"orphan-parent-from-other-session\",\"isSidechain\":false,\"timestamp\":\"2026-06-01T09:00:00Z\",\"cwd\":\"/repo/B\",\"gitBranch\":\"feature-x\",\"message\":{\"role\":\"user\",\"content\":\"unrelated\"}}\n";
+
+        std::fs::write(&path, format!("{entry1}{entry2}{entry3}")).unwrap();
+
+        let meta = scan_session_metadata(path.to_str().unwrap());
+        let warning = meta
+            .integrity_warning
+            .as_deref()
+            .expect("chain break + directory/timestamp jump must be flagged");
+        assert!(
+            warning.contains("u2"),
+            "warning must name the entry: {warning}"
+        );
+        assert!(
+            warning.contains("orphan-parent-from-other-session"),
+            "warning must name the unknown parent: {warning}"
+        );
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn scan_session_metadata_does_not_flag_normal_cd_with_intact_chain() {
+        // A legitimate `/cd` changes cwd mid-session, but the parent chain stays
+        // intact — this must never be flagged.
+        let tmp = env::temp_dir().join("tail-test-splice-normal-cd");
+        std::fs::create_dir_all(&tmp).unwrap();
+        let path = tmp.join("session.jsonl");
+
+        let entry1 = "{\"type\":\"user\",\"uuid\":\"u1\",\"parentUuid\":null,\"isSidechain\":false,\"timestamp\":\"2026-07-01T10:00:00Z\",\"cwd\":\"/repo/A\",\"gitBranch\":\"main\",\"message\":{\"role\":\"user\",\"content\":\"start\"}}\n";
+        let entry2 = "{\"type\":\"assistant\",\"uuid\":\"a1\",\"parentUuid\":\"u1\",\"isSidechain\":false,\"timestamp\":\"2026-07-01T10:00:01Z\",\"cwd\":\"/repo/A\",\"gitBranch\":\"main\",\"message\":{\"role\":\"assistant\",\"model\":\"claude-sonnet-4-20250514\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}}\n";
+        let entry3 = "{\"type\":\"user\",\"uuid\":\"u2\",\"parentUuid\":\"a1\",\"isSidechain\":false,\"timestamp\":\"2026-07-01T10:00:02Z\",\"cwd\":\"/repo/B\",\"gitBranch\":\"main\",\"message\":{\"role\":\"user\",\"content\":\"cd'd elsewhere\"}}\n";
+
+        std::fs::write(&path, format!("{entry1}{entry2}{entry3}")).unwrap();
+
+        let meta = scan_session_metadata(path.to_str().unwrap());
+        assert_eq!(
+            meta.integrity_warning, None,
+            "a directory change with an intact parent chain must not be flagged"
+        );
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn scan_session_metadata_does_not_flag_broken_chain_without_context_jump() {
+        // A broken parent chain alone is not enough — Claude Code can legitimately
+        // omit a hook-hidden assistant message from the JSONL, which also breaks
+        // the chain (see `resolve_live_chain_uuids`). Without an accompanying
+        // cwd/branch or timestamp jump, this must not be flagged as a splice.
+        let tmp = env::temp_dir().join("tail-test-splice-no-context-jump");
+        std::fs::create_dir_all(&tmp).unwrap();
+        let path = tmp.join("session.jsonl");
+
+        let entry1 = "{\"type\":\"user\",\"uuid\":\"u1\",\"parentUuid\":null,\"isSidechain\":false,\"timestamp\":\"2026-07-01T10:00:00Z\",\"cwd\":\"/repo/A\",\"gitBranch\":\"main\",\"message\":{\"role\":\"user\",\"content\":\"start\"}}\n";
+        // Parent references a hidden entry never written to the file; same cwd/branch, timestamp only 1s later.
+        let entry2 = "{\"type\":\"user\",\"uuid\":\"u2\",\"parentUuid\":\"hidden-assistant\",\"isSidechain\":false,\"timestamp\":\"2026-07-01T10:00:01Z\",\"cwd\":\"/repo/A\",\"gitBranch\":\"main\",\"message\":{\"role\":\"user\",\"content\":\"continuing\"}}\n";
+
+        std::fs::write(&path, format!("{entry1}{entry2}")).unwrap();
+
+        let meta = scan_session_metadata(path.to_str().unwrap());
+        assert_eq!(
+            meta.integrity_warning, None,
+            "a chain break without a context jump must not be flagged (hook-hidden gaps are legitimate)"
+        );
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn scan_session_metadata_flags_broken_chain_plus_timestamp_regression_same_dir() {
+        // The context jump can also be a large timestamp regression alone, even
+        // when cwd/branch are unchanged (e.g. two sessions in the same repo that
+        // collided on the same filename).
+        let tmp = env::temp_dir().join("tail-test-splice-ts-regression");
+        std::fs::create_dir_all(&tmp).unwrap();
+        let path = tmp.join("session.jsonl");
+
+        let entry1 = "{\"type\":\"user\",\"uuid\":\"u1\",\"parentUuid\":null,\"isSidechain\":false,\"timestamp\":\"2026-07-01T10:00:00Z\",\"cwd\":\"/repo/A\",\"gitBranch\":\"main\",\"message\":{\"role\":\"user\",\"content\":\"start\"}}\n";
+        let entry2 = "{\"type\":\"user\",\"uuid\":\"u2\",\"parentUuid\":\"orphan-from-other-session\",\"isSidechain\":false,\"timestamp\":\"2026-07-01T09:00:00Z\",\"cwd\":\"/repo/A\",\"gitBranch\":\"main\",\"message\":{\"role\":\"user\",\"content\":\"unrelated\"}}\n";
+
+        std::fs::write(&path, format!("{entry1}{entry2}")).unwrap();
+
+        let meta = scan_session_metadata(path.to_str().unwrap());
+        assert!(
+            meta.integrity_warning.is_some(),
+            "an hour-long timestamp regression plus a broken chain must be flagged even without a cwd/branch change"
+        );
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn scan_session_metadata_never_flags_the_files_first_entry() {
+        // Even a first entry with a nonsense parentUuid must not be flagged — there
+        // is nothing earlier in the file to compare it against, so `seen_uuids` is
+        // still empty when it is scanned.
+        let tmp = env::temp_dir().join("tail-test-splice-first-entry-safe");
+        std::fs::create_dir_all(&tmp).unwrap();
+        let path = tmp.join("session.jsonl");
+
+        let entry1 = "{\"type\":\"user\",\"uuid\":\"u1\",\"parentUuid\":\"does-not-exist\",\"isSidechain\":false,\"timestamp\":\"2026-07-01T10:00:00Z\",\"cwd\":\"/repo/A\",\"gitBranch\":\"main\",\"message\":{\"role\":\"user\",\"content\":\"start\"}}\n";
+
+        std::fs::write(&path, entry1).unwrap();
+
+        let meta = scan_session_metadata(path.to_str().unwrap());
+        assert_eq!(meta.integrity_warning, None);
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn scan_session_metadata_does_not_flag_attachment_mediated_parent_with_dir_change() {
+        // Real-world shape: an "attachment" entry commonly sits between a user
+        // entry and the assistant reply that answers it. Its uuid must still count
+        // as "seen" for chain purposes — otherwise a completely ordinary `/cd` into
+        // a subdirectory (same branch, no splice) looks identical to a broken
+        // parent chain landing at a context jump.
+        let tmp = env::temp_dir().join("tail-test-splice-attachment-mediated");
+        std::fs::create_dir_all(&tmp).unwrap();
+        let path = tmp.join("session.jsonl");
+
+        let entry1 = "{\"type\":\"user\",\"uuid\":\"u1\",\"parentUuid\":null,\"isSidechain\":false,\"timestamp\":\"2026-07-01T10:00:00Z\",\"cwd\":\"/repo/A\",\"gitBranch\":\"main\",\"message\":{\"role\":\"user\",\"content\":\"start\"}}\n";
+        let entry2 = "{\"type\":\"attachment\",\"uuid\":\"att1\",\"parentUuid\":\"u1\",\"isSidechain\":false,\"timestamp\":\"2026-07-01T10:00:01Z\",\"cwd\":\"/repo/A/subpkg\",\"gitBranch\":\"main\"}\n";
+        let entry3 = "{\"type\":\"assistant\",\"uuid\":\"a1\",\"parentUuid\":\"att1\",\"isSidechain\":false,\"timestamp\":\"2026-07-01T10:00:02Z\",\"cwd\":\"/repo/A/subpkg\",\"gitBranch\":\"main\",\"message\":{\"role\":\"assistant\",\"model\":\"claude-sonnet-4-20250514\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}}\n";
+
+        std::fs::write(&path, format!("{entry1}{entry2}{entry3}")).unwrap();
+
+        let meta = scan_session_metadata(path.to_str().unwrap());
+        assert_eq!(
+            meta.integrity_warning, None,
+            "an attachment-mediated parent link must count as an intact chain"
+        );
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn scan_session_metadata_does_not_flag_detached_head_branch_toggle() {
+        // "HEAD" is git's `--abbrev-ref` sentinel for a detached-HEAD state (see
+        // `commands/git.rs`) — a worktree can pass through it mid-operation with no
+        // relation to session identity. Even paired with a genuinely broken parent
+        // chain, a transition into "HEAD" and back must not read as a splice.
+        let tmp = env::temp_dir().join("tail-test-splice-detached-head");
+        std::fs::create_dir_all(&tmp).unwrap();
+        let path = tmp.join("session.jsonl");
+
+        let entry1 = "{\"type\":\"user\",\"uuid\":\"u1\",\"parentUuid\":null,\"isSidechain\":false,\"timestamp\":\"2026-07-01T10:00:00Z\",\"cwd\":\"/repo/A\",\"gitBranch\":\"main\",\"message\":{\"role\":\"user\",\"content\":\"start\"}}\n";
+        // Broken parent chain (references a hidden/omitted entry), same cwd, but the
+        // branch momentarily reads "HEAD" instead of "main".
+        let entry2 = "{\"type\":\"user\",\"uuid\":\"u2\",\"parentUuid\":\"hidden-assistant\",\"isSidechain\":false,\"timestamp\":\"2026-07-01T10:00:01Z\",\"cwd\":\"/repo/A\",\"gitBranch\":\"HEAD\",\"message\":{\"role\":\"user\",\"content\":\"continuing\"}}\n";
+
+        std::fs::write(&path, format!("{entry1}{entry2}")).unwrap();
+
+        let meta = scan_session_metadata(path.to_str().unwrap());
+        assert_eq!(
+            meta.integrity_warning, None,
+            "a detached-HEAD branch reading must not count as a context jump"
         );
 
         std::fs::remove_dir_all(&tmp).ok();

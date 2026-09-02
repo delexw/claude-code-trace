@@ -693,6 +693,83 @@ mod tests {
         assert!(deferred.is_deferred);
     }
 
+    // --- Issue #269: Claude Code v2.1.246 confirmed a third-party ANTHROPIC_BASE_URL proxy
+    // can stream tool_use blocks without an `id`. classify.rs now synthesizes a distinct
+    // placeholder id per block, but merge_ai_buffer's `pending` map is still keyed by that
+    // id — confirm two such calls in the same message render as two separate items instead
+    // of the second clobbering the first's HashMap entry. ---
+
+    #[test]
+    fn tool_uses_with_synthesized_ids_do_not_collide() {
+        let msgs = vec![ClassifiedMsg::AI(make_ai_msg(
+            vec![
+                tool_use_block("missing-tool-id-0", "Bash"),
+                tool_use_block("missing-tool-id-1", "Read"),
+            ],
+            false,
+        ))];
+        let chunks = build_chunks(&msgs);
+        assert_eq!(chunks.len(), 1);
+        let items = &chunks[0].items;
+        assert_eq!(
+            items.len(),
+            2,
+            "both id-less tool calls must render as separate items"
+        );
+        assert!(items.iter().any(|i| i.tool_name == "Bash"));
+        assert!(items.iter().any(|i| i.tool_name == "Read"));
+    }
+
+    #[test]
+    fn tool_uses_with_synthesized_ids_do_not_collide_across_entries() {
+        // The `pending` map spans the whole AI buffer, so uuid-scoped placeholders (not just
+        // index-scoped) are what keep two id-less calls in *different* assistant entries
+        // apart. With an index-only placeholder both would be "missing-tool-id-0" and the
+        // Read call would steal the Bash call's result.
+        let msgs = vec![
+            ClassifiedMsg::AI(make_ai_msg(
+                vec![tool_use_block("missing-tool-id-entry-one-0", "Bash")],
+                false,
+            )),
+            ClassifiedMsg::AI(make_ai_msg(
+                vec![tool_result_block(
+                    "missing-tool-id-entry-one-0",
+                    "bash output",
+                )],
+                true,
+            )),
+            ClassifiedMsg::AI(make_ai_msg(
+                vec![tool_use_block("missing-tool-id-entry-two-0", "Read")],
+                false,
+            )),
+            ClassifiedMsg::AI(make_ai_msg(
+                vec![tool_result_block(
+                    "missing-tool-id-entry-two-0",
+                    "read output",
+                )],
+                true,
+            )),
+        ];
+        let chunks = build_chunks(&msgs);
+        let items = &chunks[0].items;
+        let bash = items
+            .iter()
+            .find(|i| i.tool_name == "Bash")
+            .expect("Bash call must render");
+        let read = items
+            .iter()
+            .find(|i| i.tool_name == "Read")
+            .expect("Read call must render");
+        assert_eq!(
+            bash.tool_result, "bash output",
+            "each call must keep its own result"
+        );
+        assert_eq!(
+            read.tool_result, "read output",
+            "each call must keep its own result"
+        );
+    }
+
     #[test]
     fn deferred_subagent_tool_use_is_marked_deferred() {
         // A Task/Agent tool_use block without a matching result is also deferred.
