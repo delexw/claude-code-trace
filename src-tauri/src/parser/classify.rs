@@ -629,7 +629,7 @@ pub fn classify(e: Entry) -> Option<ClassifiedMsg> {
     }
 
     // Fallback: entries with an unrecognised type but a message role -> meta AI message.
-    let blocks = extract_meta_blocks(&e.message.content, &content_str);
+    let blocks = extract_meta_blocks(&e.message.content, &content_str, &e.tool_use_result);
     Some(ClassifiedMsg::AI(AIMsg {
         timestamp: ts,
         model: String::new(),
@@ -906,7 +906,35 @@ fn extract_assistant_details(
     (thinking, calls, content_blocks)
 }
 
-fn extract_meta_blocks(content: &Option<Value>, text_fallback: &str) -> Vec<ContentBlock> {
+/// Claude Code v2.1.247+: when a subagent's fallback model chain is exhausted, the
+/// Task tool's top-level `toolUseResult` (not the plain-text `content` sent to the
+/// model) carries these four structured fields instead of the usual `agentId`. Only
+/// non-empty fields are included, so a partial error shape still renders legibly.
+fn structured_error_overlay(
+    tool_use_result: &Option<Value>,
+) -> Option<serde_json::Map<String, Value>> {
+    let obj = tool_use_result.as_ref()?.as_object()?;
+    const FIELDS: [&str; 4] = ["error_type", "status", "request_id", "model"];
+    let mut overlay = serde_json::Map::new();
+    for &field in &FIELDS {
+        if let Some(v) = obj.get(field) {
+            if !v.is_null() {
+                overlay.insert(field.to_string(), v.clone());
+            }
+        }
+    }
+    if overlay.is_empty() {
+        None
+    } else {
+        Some(overlay)
+    }
+}
+
+fn extract_meta_blocks(
+    content: &Option<Value>,
+    text_fallback: &str,
+    tool_use_result: &Option<Value>,
+) -> Vec<ContentBlock> {
     let blocks = match content {
         Some(Value::Array(arr)) => arr,
         _ => {
@@ -948,7 +976,20 @@ fn extract_meta_blocks(content: &Option<Value>, text_fallback: &str) -> Vec<Cont
             let is_error = b.get("is_error").and_then(|v| v.as_bool()).unwrap_or(false);
             // Keep the raw Value so callers can access all key-value pairs when the
             // tool result is a JSON object (not just the stringified form).
-            let content_json = raw_content_val.filter(|v| v.is_object() || v.is_array());
+            let mut content_json = raw_content_val.filter(|v| v.is_object() || v.is_array());
+            // A plain-text error whose entry also carries structured error fields (e.g. a
+            // failed Task/subagent call) has nothing in content_json yet — merge those
+            // fields in so the error still renders legibly instead of being dropped.
+            if is_error && content_json.is_none() {
+                if let Some(overlay) = structured_error_overlay(tool_use_result) {
+                    let mut merged = serde_json::Map::new();
+                    if !content.is_empty() {
+                        merged.insert("message".to_string(), Value::String(content.clone()));
+                    }
+                    merged.extend(overlay);
+                    content_json = Some(Value::Object(merged));
+                }
+            }
             Some(ContentBlock {
                 block_type: "tool_result".to_string(),
                 tool_id,
@@ -2289,6 +2330,171 @@ mod tests {
         }));
         // classify must not panic; it returns None (tool-loaded noise) or a SystemMsg.
         let _ = classify(e);
+    }
+
+    // --- Issue #270: v2.1.247 subagent model-404 fallback structured error fields ---
+
+    #[test]
+    fn structured_error_overlay_extracts_only_present_fields() {
+        let overlay = structured_error_overlay(&Some(json!({
+            "error_type": "not_found_error",
+            "status": 404,
+            "request_id": "req_abc",
+            "model": "claude-nonexistent-model",
+            "agentId": "unrelated-should-be-ignored"
+        })))
+        .expect("overlay should be present");
+        assert_eq!(overlay.len(), 4, "only the 4 known fields should be copied");
+        assert_eq!(
+            overlay.get("error_type").and_then(|v| v.as_str()),
+            Some("not_found_error")
+        );
+        assert!(!overlay.contains_key("agentId"));
+    }
+
+    #[test]
+    fn structured_error_overlay_none_for_absent_fields() {
+        assert!(structured_error_overlay(&Some(json!({"agentId": "abc"}))).is_none());
+        assert!(structured_error_overlay(&None).is_none());
+        assert!(structured_error_overlay(&Some(json!("just a string"))).is_none());
+    }
+
+    #[test]
+    fn classify_task_tool_result_error_merges_structured_tool_use_result_fields() {
+        // A subagent's fallback model chain was exhausted: the Task tool_result's
+        // `content` is a plain error string, but the entry's toolUseResult carries
+        // error_type/status/request_id/model — these must be merged in so the error
+        // is still legible instead of being silently dropped.
+        let mut e = Entry {
+            entry_type: "user".to_string(),
+            uuid: "uuid-task-err".to_string(),
+            timestamp: "2025-01-15T10:30:00Z".to_string(),
+            message: super::super::entry::EntryMessage {
+                role: "user".to_string(),
+                content: Some(json!([{
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_task1",
+                    "content": "Model not found: claude-nonexistent-model",
+                    "is_error": true
+                }])),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        e.tool_use_result = Some(json!({
+            "error_type": "not_found_error",
+            "status": 404,
+            "request_id": "req_abc",
+            "model": "claude-nonexistent-model"
+        }));
+
+        match classify(e) {
+            Some(ClassifiedMsg::AI(ai)) => {
+                assert!(ai.is_meta);
+                assert_eq!(ai.blocks.len(), 1);
+                let b = &ai.blocks[0];
+                assert!(b.is_error);
+                let json = b
+                    .content_json
+                    .as_ref()
+                    .expect("content_json should be populated from the merged overlay");
+                assert_eq!(
+                    json.get("error_type").and_then(|v| v.as_str()),
+                    Some("not_found_error")
+                );
+                assert_eq!(json.get("status").and_then(|v| v.as_i64()), Some(404));
+                assert_eq!(
+                    json.get("request_id").and_then(|v| v.as_str()),
+                    Some("req_abc")
+                );
+                assert_eq!(
+                    json.get("model").and_then(|v| v.as_str()),
+                    Some("claude-nonexistent-model")
+                );
+                assert_eq!(
+                    json.get("message").and_then(|v| v.as_str()),
+                    Some("Model not found: claude-nonexistent-model")
+                );
+            }
+            other => panic!("Expected meta AI with merged error content, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_successful_tool_result_does_not_merge_tool_use_result() {
+        // is_error:false must never pull in toolUseResult fields, even if present —
+        // the overlay is scoped strictly to error rendering.
+        let mut e = Entry {
+            entry_type: "user".to_string(),
+            uuid: "uuid-task-ok".to_string(),
+            timestamp: "2025-01-15T10:30:00Z".to_string(),
+            message: super::super::entry::EntryMessage {
+                role: "user".to_string(),
+                content: Some(json!([{
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_task2",
+                    "content": "Subagent completed successfully.",
+                    "is_error": false
+                }])),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        e.tool_use_result = Some(json!({
+            "error_type": "not_found_error",
+            "status": 404,
+            "request_id": "req_abc",
+            "model": "claude-nonexistent-model"
+        }));
+
+        match classify(e) {
+            Some(ClassifiedMsg::AI(ai)) => {
+                assert_eq!(ai.blocks.len(), 1);
+                assert!(!ai.blocks[0].is_error);
+                assert!(ai.blocks[0].content_json.is_none());
+            }
+            other => panic!("Expected meta AI, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_tool_result_error_with_existing_content_json_is_not_overwritten() {
+        // When the tool_result's own `content` is already a JSON object/array, the
+        // overlay must not clobber it — merging only applies to plain-text errors.
+        let mut e = Entry {
+            entry_type: "user".to_string(),
+            uuid: "uuid-task-err2".to_string(),
+            timestamp: "2025-01-15T10:30:00Z".to_string(),
+            message: super::super::entry::EntryMessage {
+                role: "user".to_string(),
+                content: Some(json!([{
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_task3",
+                    "content": [{"type": "text", "text": "structured failure"}],
+                    "is_error": true
+                }])),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        e.tool_use_result = Some(json!({
+            "error_type": "not_found_error",
+            "status": 404
+        }));
+
+        match classify(e) {
+            Some(ClassifiedMsg::AI(ai)) => {
+                let json = ai.blocks[0]
+                    .content_json
+                    .as_ref()
+                    .expect("original content_json must be preserved");
+                assert!(
+                    json.is_array(),
+                    "original array content must not be replaced by the overlay object"
+                );
+            }
+            other => panic!("Expected meta AI, got {other:?}"),
+        }
     }
 
     // --- Issue #48: PreCompact hook event (v2.1.105) is handled generically ---
@@ -3863,6 +4069,68 @@ mod tests {
                 assert_eq!(u.text, "[laptop-b]: Hey, can you check the build?");
             }
             other => panic!("expected User message for cross-session message, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_task_tool_result_with_structured_v2_1_247_fallback_error_content() {
+        // v2.1.247: when a subagent's first-call model 404 survives the full
+        // fallback-model chain, the Task tool's result content is a structured
+        // error object (error_type/status/request_id/model) instead of the usual
+        // string/array. It must still classify with is_error preserved and the
+        // raw object captured in content_json so it renders as legible
+        // pretty-printed JSON instead of collapsing to an unreadable dump
+        // (issue #270).
+        let content = json!([
+            {
+                "type": "tool_result",
+                "tool_use_id": "toolu_task1",
+                "is_error": true,
+                "content": {
+                    "error_type": "not_found_error",
+                    "status": 404,
+                    "request_id": "req_01ABC",
+                    "model": "claude-nonexistent-model"
+                }
+            }
+        ]);
+        let e = Entry {
+            entry_type: "user".to_string(),
+            uuid: "task-fallback-error".to_string(),
+            timestamp: "2026-08-26T00:00:00Z".to_string(),
+            message: super::super::entry::EntryMessage {
+                role: "user".to_string(),
+                content: Some(content),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::AI(ai)) => {
+                assert_eq!(ai.blocks.len(), 1);
+                let b = &ai.blocks[0];
+                assert_eq!(b.block_type, "tool_result");
+                assert_eq!(b.tool_id, "toolu_task1");
+                assert!(b.is_error);
+                let cj = b
+                    .content_json
+                    .as_ref()
+                    .expect("object content must be captured for pretty rendering");
+                assert_eq!(
+                    cj.get("error_type").and_then(|v| v.as_str()),
+                    Some("not_found_error")
+                );
+                assert_eq!(cj.get("status").and_then(|v| v.as_i64()), Some(404));
+                assert_eq!(
+                    cj.get("request_id").and_then(|v| v.as_str()),
+                    Some("req_01ABC")
+                );
+                assert_eq!(
+                    cj.get("model").and_then(|v| v.as_str()),
+                    Some("claude-nonexistent-model")
+                );
+            }
+            other => panic!("Expected AI message, got {other:?}"),
         }
     }
 }

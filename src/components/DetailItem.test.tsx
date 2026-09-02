@@ -529,6 +529,74 @@ describe("DetailItem", () => {
     expect(screen.getByText("Find all components")).toBeInTheDocument();
   });
 
+  // --- Issue #270: v2.1.247 subagent model-404 fallback structured error fields ---
+
+  it("shows a Subagent's error content when the Task call failed", () => {
+    render(
+      <DetailItem
+        item={makeItem({
+          item_type: "Subagent",
+          subagent_type: "researcher",
+          tool_error: true,
+          tool_result: "Model not found: claude-nonexistent-model",
+        })}
+        index={0}
+        isSelected={false}
+        isExpanded={true}
+        onToggle={vi.fn()}
+        onToggleExpand={vi.fn()}
+        onSelect={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Error")).toBeInTheDocument();
+    expect(screen.getByText("Model not found: claude-nonexistent-model")).toBeInTheDocument();
+  });
+
+  it("pretty-prints a Subagent's structured error object as a code block", () => {
+    const { container } = render(
+      <DetailItem
+        item={makeItem({
+          item_type: "Subagent",
+          subagent_type: "researcher",
+          tool_error: true,
+          tool_result_json:
+            '{\n  "error_type": "not_found_error",\n  "status": 404,\n  "request_id": "req_abc",\n  "model": "claude-nonexistent-model"\n}',
+        })}
+        index={0}
+        isSelected={false}
+        isExpanded={true}
+        onToggle={vi.fn()}
+        onToggleExpand={vi.fn()}
+        onSelect={vi.fn()}
+      />,
+    );
+    const code = container.querySelector(".detail-item__json code");
+    expect(code).toBeInTheDocument();
+    expect(code?.textContent).toContain("not_found_error");
+    expect(code?.textContent).toContain("req_abc");
+  });
+
+  it("omits the Output section for a Subagent with no result yet", () => {
+    render(
+      <DetailItem
+        item={makeItem({
+          item_type: "Subagent",
+          subagent_type: "researcher",
+          tool_result: "",
+          tool_result_json: "",
+        })}
+        index={0}
+        isSelected={false}
+        isExpanded={true}
+        onToggle={vi.fn()}
+        onToggleExpand={vi.fn()}
+        onSelect={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText("Output")).not.toBeInTheDocument();
+    expect(screen.queryByText("Error")).not.toBeInTheDocument();
+  });
+
   it("shows HookEvent body with event and command when expanded", () => {
     render(
       <DetailItem

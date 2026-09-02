@@ -115,6 +115,37 @@ async def test_tool_call_input_label_has_no_border_but_json_box_does():
         assert box.styles.border.top[0] == "round", "JSON content must stay boxed"
 
 
+@pytest.mark.asyncio
+async def test_subagent_task_failure_shows_error_content():
+    """Issue #270: v2.1.247 subagent model-404 fallback structured error.
+
+    A Subagent item whose Task call failed (tool_error) must surface its
+    tool_result content — previously the Subagent body only rendered
+    agent_id/description/prompt/text and silently dropped the error.
+    """
+    async with _DVApp().run_test() as pilot:
+        dv = pilot.app.query_one(DetailView)
+        item = DisplayItem(
+            id="t1",
+            item_type="Subagent",
+            subagent_type="researcher",
+            tool_error=True,
+            tool_result_json=(
+                '{"error_type": "not_found_error", "status": 404, '
+                '"request_id": "req_abc", "model": "claude-nonexistent-model"}'
+            ),
+        )
+        msg = DisplayMessage(role="claude", content="x", items=[item])
+        dv.populate(message=msg, expanded_items={0}, ongoing=False, depth=0)
+        await pilot.pause(0.2)
+
+        label = dv.query_one("#item-0 Static.item-label", Static)
+        assert "Error" in str(label.render())
+
+        box = dv.query_one("#item-0 Static.diff-block", Static)
+        assert "not_found_error" in str(box.render())
+
+
 def test_output_summary_is_empty_so_prose_is_not_duplicated():
     item = DisplayItem(id="o", item_type="Output", text="a" * 100)
     assert get_item_summary(item) == ""

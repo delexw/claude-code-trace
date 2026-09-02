@@ -343,6 +343,18 @@ function DetailItemBody({ item }: { item: DisplayItem }) {
               <div className="detail-item__text">{item.text}</div>
             </div>
           )}
+          {(item.tool_result || item.tool_result_json) && (
+            <div className="detail-item__section detail-item__section--output">
+              <div className="detail-item__section-title">
+                {item.tool_error ? "Error" : "Output"}
+              </div>
+              <div
+                className={`detail-item__text${item.tool_error ? " detail-item__text--error" : ""}`}
+              >
+                <ToolResultBody result={item.tool_result} resultJson={item.tool_result_json} />
+              </div>
+            </div>
+          )}
         </div>
       );
     case "TeammateMessage":
@@ -415,7 +427,11 @@ export function getItemIcon(item: DisplayItem): React.ReactNode {
         (toolCategoryIcons[item.tool_category] ?? toolCategoryIcons.Other)
       );
     case "Subagent":
-      return <ClaudeIcon className="detail-item__claude-icon" />;
+      return item.tool_error ? (
+        <WarningIcon />
+      ) : (
+        <ClaudeIcon className="detail-item__claude-icon" />
+      );
     case "TeammateMessage":
       return <ClaudeIcon className="detail-item__claude-icon" />;
     case "HookEvent":
