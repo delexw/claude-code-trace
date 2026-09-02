@@ -1885,6 +1885,36 @@ mod tests {
         }
     }
 
+    /// Claude Code v2.1.248 introduced `desktopSessionCleanupPeriodDays`, making
+    /// upstream transcript retention vary per-session (Desktop/Cowork sessions can
+    /// outlive CLI ones) instead of one uniform window. Session discovery must not
+    /// bake in any assumed lifespan of its own — it has to treat whatever files are
+    /// actually present on disk as the full truth, however old their mtime is.
+    #[test]
+    fn discover_project_sessions_does_not_filter_by_file_age() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("old-session.jsonl");
+        std::fs::write(
+            &path,
+            "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"hi\"}}\n",
+        )
+        .unwrap();
+
+        // Back-date the file far past any plausible cleanup window (e.g. the old
+        // uniform 30-day rule, or any org-configured `desktopSessionCleanupPeriodDays`).
+        let ancient = std::time::SystemTime::now() - std::time::Duration::from_secs(400 * 86400);
+        filetime::set_file_mtime(&path, filetime::FileTime::from_system_time(ancient)).unwrap();
+
+        let sessions = discover_project_sessions(dir.path().to_str().unwrap()).unwrap();
+        assert_eq!(
+            sessions.len(),
+            1,
+            "a session file must be discovered purely from its presence on disk, \
+             regardless of how old its mtime is"
+        );
+        assert_eq!(sessions[0].session_id, "old-session");
+    }
+
     #[test]
     fn recap_from_entry_matches_away_summary_string() {
         let v = serde_json::json!({"type":"system","subtype":"away_summary","content":"Migrated X, decided Y."});
