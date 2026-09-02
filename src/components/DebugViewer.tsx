@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo, useCallback } from "react";
+import { useState, useRef, useMemo, useCallback } from "react";
 import type { DebugEntry } from "../types";
 import { useToggleSet } from "../hooks/useToggleSet";
 import { useScrollToSelected } from "../hooks/useScrollToSelected";
@@ -15,9 +15,8 @@ export function DebugViewer({ entries, viewActionsRef }: DebugViewerProps) {
   const [levelFilter, setLevelFilter] = useState<DebugLevel>("all");
   const [searchText, setSearchText] = useState("");
   const { set: expandedSet, toggle: toggleExpand, clear: clearExpanded, addAll } = useToggleSet();
-  const [selectedIndex, setSelectedIndex] = useState(0);
+  const [storedSelectedIndex, setSelectedIndex] = useState(0);
   const bodyRef = useRef<HTMLDivElement>(null);
-  const selectedRef = useScrollToSelected(selectedIndex);
 
   // Filter entries
   const filtered = useMemo(() => {
@@ -42,12 +41,12 @@ export function DebugViewer({ entries, viewActionsRef }: DebugViewerProps) {
     return result;
   }, [entries, levelFilter, searchText]);
 
-  // Clamp selected index
-  useEffect(() => {
-    if (selectedIndex >= filtered.length && filtered.length > 0) {
-      setSelectedIndex(filtered.length - 1);
-    }
-  }, [filtered.length, selectedIndex]);
+  // Clamp during render rather than from an effect: filtering can shrink the list below the
+  // stored index, and correcting that in an effect renders once with an out-of-range index
+  // (scrolling to a row that no longer exists) before fixing it up.
+  const selectedIndex =
+    filtered.length > 0 ? Math.min(storedSelectedIndex, filtered.length - 1) : storedSelectedIndex;
+  const selectedRef = useScrollToSelected(selectedIndex);
 
   const debugExpandAll = useCallback(() => {
     const indices = filtered.map((_, i) => i).filter((i) => !!filtered[i].extra);

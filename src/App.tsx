@@ -28,7 +28,7 @@ import {
 
 export function App() {
   const [view, setView] = useState<ViewState>("picker");
-  const [selectedMessage, setSelectedMessage] = useState(0);
+  const [storedSelectedMessage, setSelectedMessage] = useState(0);
   const [pickerSelectedIndex, setPickerSelectedIndex] = useState(0);
   const [showKeybinds, setShowKeybinds] = useState(true);
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
@@ -159,6 +159,10 @@ export function App() {
     if (restoredRef.current) return;
     restoredRef.current = true;
     const pending = takeRestoreState();
+    // This is the "synchronizing with an external system" case the rule carves out:
+    // takeRestoreState() reads and *consumes* pending state from session storage, so it
+    // cannot run during render, and the resulting navigation is inherently a state update.
+    // oxlint-disable-next-line react/set-state-in-effect
     if (pending) openSessionByPath(pending.sessionPath);
   }, [openSessionByPath]);
 
@@ -179,12 +183,14 @@ export function App() {
     [openSessionByPath],
   );
 
-  // Auto-select newest message (last index) when messages load
-  useEffect(() => {
-    if (session.count > 0 && view === "list") {
-      setSelectedMessage((prev) => (prev >= session.count ? session.count - 1 : prev));
-    }
-  }, [session.count, view]);
+  // Clamp the selection to the loaded message range during render rather than correcting it
+  // from an effect. When a shorter session loads, the stored index can point past the end;
+  // deriving here keeps every read in this render pass consistent, where the effect version
+  // rendered once with the stale index before fixing it up.
+  const selectedMessage =
+    session.count > 0 && view === "list"
+      ? Math.min(storedSelectedMessage, session.count - 1)
+      : storedSelectedMessage;
 
   // Open detail view. The list holds only lightened messages, so fetch the full
   // (heavy-body) message on demand. Guard against out-of-order resolves when the

@@ -7,7 +7,12 @@ import { listen, type UnlistenFn } from "../lib/listen";
  */
 export function useTauriEvent<T>(event: string, handler: (payload: T) => void | Promise<void>) {
   const handlerRef = useRef(handler);
-  handlerRef.current = handler;
+  // Refresh after commit rather than during render — writing a ref while rendering is
+  // unsafe under concurrent rendering, and the handler is only ever read from the
+  // listener callback, which cannot run before the commit anyway.
+  useEffect(() => {
+    handlerRef.current = handler;
+  });
 
   const unlistenRef = useRef<UnlistenFn | null>(null);
 
