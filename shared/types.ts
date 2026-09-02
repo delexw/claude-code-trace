@@ -124,6 +124,12 @@ export interface SessionInfo {
    *  signal for grouping it back under its parent's project. Optional for
    *  backward-compatibility with older cached payloads. */
   forked_from_session_id?: string | null;
+  /** Set when the parser finds a conversation-chain break (an unknown parent, or a
+   *  fresh-conversation root after the first entry) landing at the same point the
+   *  file's cwd/branch or timestamp order jumps — the signature of two unrelated
+   *  sessions briefly colliding on the same filename (Claude Code < v2.1.251) and
+   *  getting spliced into one file. `null`/absent when the file looks consistent. */
+  integrity_warning?: string | null;
 }
 
 export interface SessionMeta {

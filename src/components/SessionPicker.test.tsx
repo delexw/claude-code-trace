@@ -292,6 +292,44 @@ describe("SessionPicker", () => {
     expect(screen.queryByText("CWDs:")).not.toBeInTheDocument();
   });
 
+  it("shows a splice warning when the parser flags an integrity_warning", () => {
+    const sessions = [
+      makeSession({
+        integrity_warning:
+          "possible spliced transcript: entry a2 has an unknown parent (u1) right where the working directory/branch or timestamp order jumps",
+      }),
+    ];
+    render(
+      <SessionPicker
+        sessions={sessions}
+        loading={false}
+        searchQuery=""
+        selectedIndex={0}
+        onSelect={vi.fn()}
+        onSearchChange={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("⚠ Possibly spliced:")).toBeInTheDocument();
+    expect(
+      screen.getByText("⚠ Possibly spliced:").closest(".picker__session-warning"),
+    ).not.toBeNull();
+  });
+
+  it("hides the splice warning when integrity_warning is absent", () => {
+    const sessions = [makeSession({ integrity_warning: null })];
+    render(
+      <SessionPicker
+        sessions={sessions}
+        loading={false}
+        searchQuery=""
+        selectedIndex={0}
+        onSelect={vi.fn()}
+        onSearchChange={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText("⚠ Possibly spliced:")).not.toBeInTheDocument();
+  });
+
   it("shows active badge for ongoing sessions", () => {
     const sessions = [makeSession({ is_ongoing: true })];
     render(

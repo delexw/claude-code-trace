@@ -593,6 +593,19 @@ body {
   background: var(--text-muted);
 }
 
+/* Shown when the parser flags a conversation-chain break landing at a
+   cwd/branch or timestamp discontinuity — see .picker__session-warning
+   (same signal, surfaced here for the currently open transcript instead of
+   the session list). */
+.info-bar__integrity-warning {
+  display: inline-flex;
+  align-items: center;
+  color: var(--error);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: help;
+}
+
 .info-bar__context {
   display: flex;
   align-items: center;
@@ -1111,6 +1124,21 @@ body {
 
 .picker__session-dirs-label {
   color: var(--accent);
+  font-weight: 600;
+}
+
+/* Shown only when the parser detects a conversation-chain break landing at a
+   cwd/branch or timestamp discontinuity — the signature of two unrelated
+   sessions spliced into one file by the pre-v2.1.251 directory-change
+   session-id collision (delexw/claude-code-trace#274). */
+.picker__session-warning {
+  margin-top: 2px;
+  color: var(--error);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.picker__session-warning-label {
   font-weight: 600;
 }
 
