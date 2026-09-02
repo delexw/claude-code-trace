@@ -1396,6 +1396,106 @@ mod tests {
         );
     }
 
+    // --- Issue #272: v2.1.251+ PreModelSwitch/PostModelSwitch hook events + SessionStart
+    // staleness/re-cache-cost fields ---
+
+    #[test]
+    fn parse_entry_captures_pre_model_switch_hook_event_as_string() {
+        // v2.1.251+: PreModelSwitch fires before Claude Code switches models mid-session
+        // (lets a hook block, confirm, or annotate the switch). hook_event is stored as a
+        // plain String so this new value is captured without rejection.
+        let line = json!({
+            "type": "system",
+            "subtype": "hook_progress",
+            "uuid": "pre-model-switch-uuid",
+            "timestamp": "2026-08-28T10:00:00Z",
+            "hookEvent": "PreModelSwitch",
+            "hookName": "confirm-model-switch"
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("must parse PreModelSwitch hook entry");
+        assert_eq!(entry.hook_event, "PreModelSwitch");
+        assert_eq!(entry.hook_name, "confirm-model-switch");
+    }
+
+    #[test]
+    fn parse_entry_captures_post_model_switch_hook_event_as_string() {
+        // v2.1.251+: PostModelSwitch fires after the model switch completes.
+        let line = json!({
+            "type": "system",
+            "subtype": "hook_progress",
+            "uuid": "post-model-switch-uuid",
+            "timestamp": "2026-08-28T10:00:05Z",
+            "hookEvent": "PostModelSwitch",
+            "hookName": "annotate-model-switch"
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("must parse PostModelSwitch hook entry");
+        assert_eq!(entry.hook_event, "PostModelSwitch");
+        assert_eq!(entry.hook_name, "annotate-model-switch");
+    }
+
+    #[test]
+    fn parse_entry_model_switch_as_attachment_is_captured() {
+        // PreModelSwitch/PostModelSwitch hook results can also surface as attachment entries,
+        // like every other non-Stop hook.
+        let line = json!({
+            "type": "attachment",
+            "uuid": "model-switch-att-uuid",
+            "timestamp": "2026-08-28T10:00:10Z",
+            "attachment": {
+                "type": "hook_success",
+                "hookEvent": "PreModelSwitch",
+                "hookName": "confirm-model-switch",
+                "fromModel": "claude-sonnet-5",
+                "toModel": "claude-opus-5"
+            }
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("must parse PreModelSwitch attachment entry");
+        let att = entry.attachment.expect("attachment must be captured");
+        assert_eq!(
+            att.get("hookEvent").and_then(|v| v.as_str()),
+            Some("PreModelSwitch")
+        );
+    }
+
+    #[test]
+    fn parse_entry_session_start_resume_hook_captures_staleness_and_recache_cost_fields() {
+        // v2.1.251+: SessionStart resume hooks now receive session staleness and the
+        // estimated re-cache cost under hookSpecificOutput. hookSpecificOutput is stored as
+        // an arbitrary serde_json::Value (not a fixed-field struct), so any new field Claude
+        // Code adds here is captured without requiring a parser change.
+        let line = json!({
+            "type": "system",
+            "subtype": "hook_progress",
+            "uuid": "session-start-resume-uuid",
+            "timestamp": "2026-08-28T10:00:15Z",
+            "hookEvent": "SessionStart",
+            "hookName": "on-resume",
+            "hookSpecificOutput": {
+                "sessionStaleness": "stale",
+                "estimatedRecacheCostTokens": 12000
+            }
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes)
+            .expect("must parse SessionStart resume hook_progress with new fields");
+        assert_eq!(entry.hook_event, "SessionStart");
+        let hso = entry
+            .hook_specific_output
+            .expect("hookSpecificOutput must be captured for SessionStart hook_progress");
+        assert_eq!(
+            hso.get("sessionStaleness").and_then(|v| v.as_str()),
+            Some("stale")
+        );
+        assert_eq!(
+            hso.get("estimatedRecacheCostTokens")
+                .and_then(|v| v.as_i64()),
+            Some(12000)
+        );
+    }
+
     #[test]
     fn parse_entry_unknown_fields_are_silently_ignored() {
         // Future Claude Code versions may add more fields. The parser must never crash on
