@@ -15,13 +15,14 @@ interface SettingsResponse {
   allowed_origins: string[];
   /** Whether the HTTP API requires the shared client token. */
   api_auth_enabled?: boolean;
-  /** "file" (rotatable here), "env" (CCTRACE_API_TOKEN, read-only) or "disabled". */
+  /** "file" (rotatable here), "env" (CCTRACE_API_TOKEN, read-only), "ephemeral"
+   * (token file unusable at startup; one-off, read-only) or "disabled". */
   api_token_source?: ApiTokenSource;
   /** The token accepted clients must present; null when disabled. */
   api_token?: string | null;
 }
 
-type ApiTokenSource = "file" | "env" | "disabled";
+type ApiTokenSource = "file" | "env" | "ephemeral" | "disabled";
 
 interface SettingsModalProps {
   onClose: () => void;
@@ -334,8 +335,14 @@ export function SettingsModal({
                 type="button"
                 className="settings-modal__btn"
                 onClick={handleRegenerate}
-                disabled={regenerating || apiTokenSource === "env"}
-                title={apiTokenSource === "env" ? "Set by CCTRACE_API_TOKEN" : undefined}
+                disabled={regenerating || apiTokenSource !== "file"}
+                title={
+                  apiTokenSource === "env"
+                    ? "Set by CCTRACE_API_TOKEN"
+                    : apiTokenSource === "ephemeral"
+                      ? "The token file could not be written at startup"
+                      : undefined
+                }
               >
                 {confirmRegen ? "Confirm regenerate?" : "Regenerate"}
               </button>
@@ -343,6 +350,12 @@ export function SettingsModal({
             {apiTokenSource === "env" && (
               <p className="settings-modal__hint">
                 The token is set by CCTRACE_API_TOKEN, so it cannot be regenerated here.
+              </p>
+            )}
+            {apiTokenSource === "ephemeral" && (
+              <p className="settings-modal__hint settings-modal__hint--missing">
+                The token file could not be written at startup, so this is a one-off token no other
+                client can read (see the server log). Fix the config directory and restart.
               </p>
             )}
             {tokenNotice && (

@@ -174,11 +174,16 @@ export function MessageDetail({
 
   useLayoutEffect(() => {
     const saved = savedScroll.current;
-    if (saved && saved.depth !== panelStack.length && bodyRef.current) {
+    if (!saved) return;
+    // A depth change re-lays out the columns, which can move the main body's
+    // scroll position — put it back. Replacing a panel at the same depth
+    // doesn't, so the saved position is simply dropped; keeping it armed
+    // would restore a stale offset on the next unrelated push/pop.
+    if (saved.depth !== panelStack.length && bodyRef.current) {
       bodyRef.current.scrollTop = saved.top;
-      savedScroll.current = null;
     }
-  }, [panelStack.length]);
+    savedScroll.current = null;
+  }, [panelStack]);
 
   const model = msg.model ? shortModel(msg.model) : "";
   const modelColor = msg.model ? getModelColor(msg.model) : undefined;

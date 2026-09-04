@@ -43,6 +43,26 @@ function readToken(path) {
   }
 }
 
+/** Synchronous pause — Vite's `config` hook is synchronous, and the window
+ * between the backend's O_EXCL create and its write is a few milliseconds. */
+function pauseMs(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+const EMPTY_FILE_RETRIES = 10;
+const EMPTY_FILE_RETRY_MS = 20;
+
+/** Re-read a file another creator has just made, tolerating the moment
+ * between its create and its write. */
+function readTokenWithRetry(path) {
+  for (let attempt = 0; attempt <= EMPTY_FILE_RETRIES; attempt++) {
+    const t = readToken(path);
+    if (t) return t;
+    if (attempt < EMPTY_FILE_RETRIES) pauseMs(EMPTY_FILE_RETRY_MS);
+  }
+  return null;
+}
+
 /**
  * Resolve the token the web UI should send, or `null` when verification is
  * off. Creates the token file (mode 0600) when it does not exist yet.
@@ -63,7 +83,16 @@ export function resolveApiToken(opts = {}) {
     writeFileSync(path, `${fresh}\n`, { flag: "wx", mode: 0o600 });
     return fresh;
   } catch (err) {
-    if (err && err.code === "EEXIST") return readToken(path) ?? fresh;
+    if (err && err.code === "EEXIST") {
+      const winner = readTokenWithRetry(path);
+      if (winner) return winner;
+      // Never hand the UI a token no backend accepts: fail loudly instead, the
+      // same way the Rust side treats an empty token file.
+      throw new Error(
+        `api-token file exists but is empty: ${path} — delete it and restart, or set CCTRACE_API_TOKEN`,
+        { cause: err },
+      );
+    }
     throw err;
   }
 }

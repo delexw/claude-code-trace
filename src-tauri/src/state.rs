@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, RwLock};
 use std::time::{Duration, Instant};
 use tokio::sync::broadcast;
@@ -66,6 +66,10 @@ pub struct AppState {
     /// Live API client-verification mode (see `crate::auth`). Read on every
     /// HTTP request by the auth middleware; swapped by Settings → Regenerate.
     pub api_auth: RwLock<ApiAuth>,
+    /// Where the shared token file lives (`None` when there is no config dir).
+    /// Read by Regenerate and by the on-mismatch re-read in the auth
+    /// middleware; overridable for tests so they never touch the real file.
+    pub api_token_path: RwLock<Option<PathBuf>>,
     /// Ongoing status reported by the session watcher for the currently viewed session.
     /// (session_path, is_ongoing) — kept in sync by the session watcher loop.
     pub watched_session_ongoing: Mutex<Option<(String, bool)>>,
@@ -99,6 +103,7 @@ impl AppState {
             session_cache: Mutex::new(SessionCache::new()),
             settings: Mutex::new(crate::settings::load_settings()),
             api_auth: RwLock::new(api_auth),
+            api_token_path: RwLock::new(crate::auth::token_file_path()),
             watched_session_ongoing: Mutex::new(None),
             event_tx,
             sessions_cache: Mutex::new(None),
@@ -116,9 +121,57 @@ impl AppState {
             .unwrap_or_else(|poisoned| poisoned.into_inner().clone())
     }
 
+    /// Point the token-file logic at a different path (tests only).
+    #[cfg(test)]
+    pub fn set_api_token_path(&self, path: Option<PathBuf>) {
+        if let Ok(mut g) = self.api_token_path.write() {
+            *g = path;
+        }
+    }
+
+    fn api_token_path(&self) -> Option<PathBuf> {
+        self.api_token_path.read().ok().and_then(|g| g.clone())
+    }
+
     /// Rotate the token file and swap the live token (Settings → Regenerate).
     pub fn regenerate_api_token(&self) -> Result<String, String> {
-        self.regenerate_api_token_at(crate::auth::token_file_path().as_deref())
+        self.regenerate_api_token_at(self.api_token_path().as_deref())
+    }
+
+    /// If the live token came from the file and the file now holds a different
+    /// token (another cctrace process regenerated it, or the user edited it),
+    /// adopt the file's token. Returns whether the live token changed. Called
+    /// by the auth middleware only after a mismatch, so the happy path never
+    /// reads the disk.
+    pub fn refresh_api_token_from_file(&self) -> bool {
+        let Some(path) = self.api_token_path() else {
+            return false;
+        };
+        let live = match self.api_auth.read() {
+            Ok(g) => match &*g {
+                ApiAuth::File(t) => t.clone(),
+                _ => return false,
+            },
+            Err(_) => return false,
+        };
+        let Some(on_disk) = crate::auth::read_token_file(&path) else {
+            return false;
+        };
+        if on_disk == live {
+            return false;
+        }
+        let Ok(mut g) = self.api_auth.write() else {
+            return false;
+        };
+        // Re-check under the write lock: a concurrent request may have swapped
+        // it already, in which case there is nothing left to do.
+        match &*g {
+            ApiAuth::File(t) if *t == live => {
+                *g = ApiAuth::File(on_disk);
+                true
+            }
+            _ => false,
+        }
     }
 
     /// Testable core of [`regenerate_api_token`](Self::regenerate_api_token):
@@ -135,6 +188,11 @@ impl AppState {
             ApiAuth::Env(_) => Err(
                 "the API token is set by CCTRACE_API_TOKEN; unset it to manage the token from \
                  Settings"
+                    .to_string(),
+            ),
+            ApiAuth::Ephemeral(_) => Err(
+                "the API token could not be persisted at startup (see the server log), so it \
+                 cannot be regenerated; fix the config directory and restart"
                     .to_string(),
             ),
             ApiAuth::File(_) => {
@@ -514,6 +572,54 @@ mod tests {
         let state = AppState::new(ApiAuth::Disabled);
         let err = state.regenerate_api_token_at(None).unwrap_err();
         assert!(err.contains("disabled"), "{err}");
+    }
+
+    #[test]
+    fn regenerate_is_rejected_for_ephemeral_token() {
+        let state = AppState::new(ApiAuth::Ephemeral("oneoff".into()));
+        let err = state.regenerate_api_token_at(None).unwrap_err();
+        assert!(err.contains("could not be persisted"), "{err}");
+        assert_eq!(
+            state.api_auth_snapshot(),
+            ApiAuth::Ephemeral("oneoff".into())
+        );
+    }
+
+    #[test]
+    fn refresh_adopts_a_rotated_file_token() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("api-token");
+        std::fs::write(&path, "rotated-elsewhere\n").unwrap();
+        let state = AppState::new(ApiAuth::File("stale".into()));
+        state.set_api_token_path(Some(path));
+
+        assert!(state.refresh_api_token_from_file());
+        assert_eq!(
+            state.api_auth_snapshot(),
+            ApiAuth::File("rotated-elsewhere".into())
+        );
+        // Nothing changed on disk since → no-op.
+        assert!(!state.refresh_api_token_from_file());
+    }
+
+    #[test]
+    fn refresh_ignores_missing_or_empty_file_and_non_file_sources() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("missing");
+        let state = AppState::new(ApiAuth::File("live".into()));
+        state.set_api_token_path(Some(missing.clone()));
+        assert!(!state.refresh_api_token_from_file());
+
+        std::fs::write(&missing, "\n").unwrap();
+        assert!(!state.refresh_api_token_from_file());
+        assert_eq!(state.api_auth_snapshot(), ApiAuth::File("live".into()));
+
+        let env_state = AppState::new(ApiAuth::Env("fixed".into()));
+        let env_path = dir.path().join("env-token");
+        std::fs::write(&env_path, "other\n").unwrap();
+        env_state.set_api_token_path(Some(env_path));
+        assert!(!env_state.refresh_api_token_from_file());
+        assert_eq!(env_state.api_auth_snapshot(), ApiAuth::Env("fixed".into()));
     }
 
     #[test]

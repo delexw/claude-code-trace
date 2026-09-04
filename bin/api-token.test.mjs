@@ -19,6 +19,11 @@ const enoent = () => {
   e.code = "ENOENT";
   throw e;
 };
+const eexist = () => {
+  const e = new Error("EEXIST");
+  e.code = "EEXIST";
+  throw e;
+};
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -96,12 +101,24 @@ describe("resolveApiToken", () => {
 
   it("re-reads the winner's token when the backend created the file first (EEXIST)", () => {
     readFileSync.mockImplementationOnce(enoent).mockImplementation(() => "winner\n");
-    writeFileSync.mockImplementation(() => {
-      const e = new Error("EEXIST");
-      e.code = "EEXIST";
-      throw e;
-    });
+    writeFileSync.mockImplementation(eexist);
     expect(resolveApiToken({ ...opts, env: {} })).toBe("winner");
+  });
+
+  it("waits for the winner to finish writing when the file is momentarily empty", () => {
+    readFileSync
+      .mockImplementationOnce(enoent) // initial probe: not there yet
+      .mockImplementationOnce(() => "") // EEXIST: created but not yet written
+      .mockImplementationOnce(() => "\n")
+      .mockImplementation(() => "winner\n");
+    writeFileSync.mockImplementation(eexist);
+    expect(resolveApiToken({ ...opts, env: {} })).toBe("winner");
+  });
+
+  it("throws instead of fabricating a token when the file stays empty", () => {
+    readFileSync.mockImplementationOnce(enoent).mockImplementation(() => "");
+    writeFileSync.mockImplementation(eexist);
+    expect(() => resolveApiToken({ ...opts, env: {} })).toThrow(/exists but is empty/);
   });
 
   it("rethrows unexpected write errors", () => {

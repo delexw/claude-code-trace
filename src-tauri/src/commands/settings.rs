@@ -34,7 +34,8 @@ pub struct SettingsResponse {
     /// `CCTRACE_API_AUTH=off`). See `crate::auth`.
     pub api_auth_enabled: bool,
     /// Where the live token comes from: `"file"` (rotatable from Settings),
-    /// `"env"` (`CCTRACE_API_TOKEN`, read-only), or `"disabled"`.
+    /// `"env"` (`CCTRACE_API_TOKEN`, read-only), `"ephemeral"` (the token file
+    /// was unusable at startup; one-off token, read-only), or `"disabled"`.
     pub api_token_source: &'static str,
     /// The token accepted clients must present, or null when disabled. Only
     /// ever returned to a caller that already authenticated (or over IPC).

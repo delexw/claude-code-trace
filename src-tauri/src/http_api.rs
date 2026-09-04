@@ -1114,6 +1114,68 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn mismatch_re_reads_a_rotated_token_file_before_rejecting() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("api-token");
+        std::fs::write(&path, "rotated-by-other-process\n").unwrap();
+        let state = test_state(ApiAuth::File(TOKEN.into()));
+        state.app_state.set_api_token_path(Some(path));
+
+        // The token in the file (rotated by another process) is accepted…
+        let fresh = build_router(state.clone(), None)
+            .oneshot(get_with(
+                "/api/settings",
+                &[("x-cctrace-token", "rotated-by-other-process")],
+            ))
+            .await
+            .unwrap();
+        assert_eq!(fresh.status(), StatusCode::OK);
+        // …and from then on the stale in-memory token is rejected.
+        let stale = build_router(state.clone(), None)
+            .oneshot(get_with("/api/settings", &[("x-cctrace-token", TOKEN)]))
+            .await
+            .unwrap();
+        assert_eq!(stale.status(), StatusCode::UNAUTHORIZED);
+        // A wrong token still fails even though the file exists.
+        let wrong = build_router(state, None)
+            .oneshot(get_with("/api/settings", &[("x-cctrace-token", "nope")]))
+            .await
+            .unwrap();
+        assert_eq!(wrong.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn sse_route_accepts_percent_encoded_env_token_in_query() {
+        let resp = api_router(ApiAuth::Env("my/secret+key".into()))
+            .oneshot(get("/api/events?token=my%2Fsecret%2Bkey"))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn regenerate_route_rejects_ephemeral_source() {
+        let router = api_router(ApiAuth::Ephemeral(TOKEN.into()));
+        let req = Request::builder()
+            .method(Method::POST)
+            .uri("/api/settings/token/regenerate")
+            .header("x-cctrace-token", TOKEN)
+            .body(Body::empty())
+            .unwrap();
+        let resp = router.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        let json = body_json(resp).await;
+        assert!(json["error"]
+            .as_str()
+            .unwrap()
+            .contains("could not be persisted"));
+        assert!(!json["error"]
+            .as_str()
+            .unwrap()
+            .contains("CCTRACE_API_TOKEN"));
+    }
+
+    #[tokio::test]
     async fn regenerate_route_requires_token_and_rejects_env_source() {
         let router = api_router(ApiAuth::Env(TOKEN.into()));
         let post = |headers: &[(&str, &str)]| {

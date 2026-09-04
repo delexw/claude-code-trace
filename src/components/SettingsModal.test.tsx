@@ -392,7 +392,7 @@ describe("SettingsModal", () => {
 
   // --- API access (shared client token) -------------------------------------
 
-  const withToken = (source: "file" | "env" | "disabled", token: string | null) => ({
+  const withToken = (source: "file" | "env" | "ephemeral" | "disabled", token: string | null) => ({
     ...makeSettings(null),
     api_auth_enabled: source !== "disabled",
     api_token_source: source,
@@ -492,6 +492,17 @@ describe("SettingsModal", () => {
     );
     expect((screen.getByText("Regenerate") as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText(/cannot be regenerated here/)).toBeInTheDocument();
+  });
+
+  it("disables Regenerate and explains when the token could not be persisted", async () => {
+    useSettings(withToken("ephemeral", "oneoff"));
+    renderModal();
+    await waitFor(() =>
+      expect((screen.getByLabelText("API token") as HTMLInputElement).value).toBe("oneoff"),
+    );
+    expect((screen.getByText("Regenerate") as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText(/could not be written at startup/)).toBeInTheDocument();
+    expect(screen.queryByText(/CCTRACE_API_TOKEN, so it cannot/)).toBeNull();
   });
 
   it("shows only a hint when client verification is disabled", async () => {

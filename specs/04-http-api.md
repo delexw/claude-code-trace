@@ -77,8 +77,9 @@ state (see [Authentication](#authentication)).
 }
 ```
 
-`api_token_source` is `"file"` (rotatable from Settings), `"env"` (`CCTRACE_API_TOKEN`, read-only)
-or `"disabled"` (`CCTRACE_API_AUTH=off`, `api_token` is `null`).
+`api_token_source` is `"file"` (rotatable from Settings), `"env"` (`CCTRACE_API_TOKEN`, read-only),
+`"ephemeral"` (the token file was unusable at startup; one-off, read-only) or `"disabled"`
+(`CCTRACE_API_AUTH=off`, `api_token` is `null`).
 
 ---
 
@@ -401,11 +402,18 @@ over IPC, never HTTP.
 
 Creation uses `O_EXCL`: in `cctrace --web`, Tauri starts Vite _before_ the Rust binary, and the
 Vite plugin (`bin/api-token.mjs`) may create the file first. Whichever side loses the race re-reads
-the winner's token, so both converge. If the file cannot be read or created the server fails
-**closed** — it runs with an unpersisted random token, never unauthenticated.
+the winner's token (retrying briefly while the winner is still writing), so both converge. If the
+file cannot be read or created the server fails **closed**: it runs with an unpersisted one-off token
+(`api_token_source: "ephemeral"`), never unauthenticated, and Settings says so rather than blaming
+`CCTRACE_API_TOKEN`. The Vite side throws instead, so the dev server fails loudly rather than baking
+a token no backend accepts.
 
 `AppState.api_auth: RwLock<ApiAuth>` holds the live value; the middleware reads it on every request
-so a rotation takes effect immediately.
+so a rotation takes effect immediately. Rotation writes a sibling temp file and renames it over the
+token file, so concurrent readers never see it empty. When a request's token does **not** match and
+the live token came from the file, the middleware re-reads the file once before rejecting: if another
+cctrace process (a background `--web` service next to the desktop app, say) rotated it, the live
+token heals on the spot instead of every client getting 401 until a restart.
 
 ### Accepted carriers (`auth::require_api_token`)
 
@@ -446,9 +454,10 @@ still 404 rather than 401.
 
 ### Settings UI
 
-`GET /api/settings` reports `api_auth_enabled`, `api_token_source` (`"file" | "env" | "disabled"`)
-and `api_token`. The Settings modal's **API access** section shows the token masked with Show /
-Copy / Regenerate; Regenerate is a two-click confirm and is disabled for `env` tokens.
+`GET /api/settings` reports `api_auth_enabled`, `api_token_source`
+(`"file" | "env" | "ephemeral" | "disabled"`) and `api_token`. The Settings modal's **API access**
+section shows the token masked with Show / Copy / Regenerate; Regenerate is a two-click confirm and
+is disabled for `env` and `ephemeral` tokens.
 `POST /api/settings/token/regenerate` (or the `regenerate_api_token` Tauri command) performs the
 rotation.
 

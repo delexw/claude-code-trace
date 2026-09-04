@@ -55,6 +55,11 @@ pub enum ApiAuth {
     Env(String),
     /// Token read from (or generated into) the token file.
     File(String),
+    /// Unpersisted one-off token: the token file could not be read or created
+    /// (read-only config dir, empty file…). Verification stays on — fail closed
+    /// — but nothing else can learn this token, so the UI must say so instead
+    /// of blaming `CCTRACE_API_TOKEN`.
+    Ephemeral(String),
 }
 
 impl ApiAuth {
@@ -62,16 +67,18 @@ impl ApiAuth {
     pub fn token(&self) -> Option<&str> {
         match self {
             ApiAuth::Disabled => None,
-            ApiAuth::Env(t) | ApiAuth::File(t) => Some(t.as_str()),
+            ApiAuth::Env(t) | ApiAuth::File(t) | ApiAuth::Ephemeral(t) => Some(t.as_str()),
         }
     }
 
-    /// Stable string for the frontend: `"disabled"`, `"env"`, or `"file"`.
+    /// Stable string for the frontend: `"disabled"`, `"env"`, `"file"`, or
+    /// `"ephemeral"`.
     pub fn source(&self) -> &'static str {
         match self {
             ApiAuth::Disabled => "disabled",
             ApiAuth::Env(_) => "env",
             ApiAuth::File(_) => "file",
+            ApiAuth::Ephemeral(_) => "ephemeral",
         }
     }
 
@@ -98,7 +105,8 @@ pub fn token_eq(presented: &str, expected: &str) -> bool {
     presented.as_bytes().ct_eq(expected.as_bytes()).into()
 }
 
-fn read_token_file(path: &Path) -> Option<String> {
+/// Trimmed contents of the token file, or `None` when missing or empty.
+pub(crate) fn read_token_file(path: &Path) -> Option<String> {
     fs::read_to_string(path)
         .ok()
         .map(|s| s.trim().to_string())
@@ -114,16 +122,23 @@ fn open_options_0600(opts: &mut OpenOptions) -> &mut OpenOptions {
     opts
 }
 
-#[cfg(unix)]
-fn enforce_0600(path: &Path) -> Result<(), String> {
-    use std::os::unix::fs::PermissionsExt;
-    fs::set_permissions(path, fs::Permissions::from_mode(0o600)).map_err(|e| e.to_string())
-}
+/// How long to keep re-reading a token file that exists but is still empty:
+/// the creator writes right after its `O_EXCL` create, so the window is tiny.
+const EMPTY_FILE_RETRIES: u32 = 5;
+const EMPTY_FILE_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(20);
 
-#[cfg(not(unix))]
-fn enforce_0600(_path: &Path) -> Result<(), String> {
-    // Windows: `%APPDATA%` is already per-user; no POSIX mode bits to set.
-    Ok(())
+/// Re-read a token file that another creator has just made, tolerating the
+/// moment between its `create_new` and its `write_all`.
+fn read_token_file_with_retry(path: &Path) -> Option<String> {
+    for attempt in 0..=EMPTY_FILE_RETRIES {
+        if let Some(t) = read_token_file(path) {
+            return Some(t);
+        }
+        if attempt < EMPTY_FILE_RETRIES {
+            std::thread::sleep(EMPTY_FILE_RETRY_DELAY);
+        }
+    }
+    None
 }
 
 /// Read the token file, or create it with a fresh token if it does not exist.
@@ -149,29 +164,47 @@ pub fn load_or_create_token_file(path: &Path) -> Result<String, String> {
                 .map_err(|e| e.to_string())?;
             Ok(token)
         }
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => read_token_file(path)
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => read_token_file_with_retry(path)
             .ok_or_else(|| format!("api-token file exists but is empty: {}", path.display())),
         Err(e) => Err(format!("cannot create {}: {e}", path.display())),
     }
 }
 
-/// Overwrite the token file with a fresh token (Settings → Regenerate) and
-/// return the new token. Re-applies `0600` in case the file pre-existed with
-/// looser permissions.
+/// Replace the token file with a fresh token (Settings → Regenerate) and
+/// return the new token.
+///
+/// The new content is written to a sibling temp file (created `0600`) and then
+/// renamed over the target, so concurrent readers — the TUI re-reads the file
+/// per request and the Vite dev server watches it — see either the old token
+/// or the new one, never an empty file. The rename also replaces any looser
+/// permissions the old file may have had.
 pub fn rotate_token_file(path: &Path) -> Result<String, String> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
+    let parent = path
+        .parent()
+        .ok_or_else(|| format!("api-token path has no parent: {}", path.display()))?;
+    fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     let token = generate_token();
+    let file_name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("api-token");
+    let tmp = parent.join(format!("{file_name}.{}.tmp", &token[..8]));
     let mut opts = OpenOptions::new();
-    opts.write(true).create(true).truncate(true);
-    let mut f = open_options_0600(&mut opts)
-        .open(path)
-        .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
-    f.write_all(token.as_bytes())
-        .and_then(|()| f.write_all(b"\n"))
-        .map_err(|e| e.to_string())?;
-    enforce_0600(path)?;
+    opts.write(true).create_new(true);
+    let mut write = || -> Result<(), String> {
+        let mut f = open_options_0600(&mut opts)
+            .open(&tmp)
+            .map_err(|e| format!("cannot write {}: {e}", tmp.display()))?;
+        f.write_all(token.as_bytes())
+            .and_then(|()| f.write_all(b"\n"))
+            .and_then(|()| f.sync_all())
+            .map_err(|e| e.to_string())?;
+        fs::rename(&tmp, path).map_err(|e| format!("cannot replace {}: {e}", path.display()))
+    };
+    if let Err(e) = write() {
+        let _ = fs::remove_file(&tmp);
+        return Err(e);
+    }
     Ok(token)
 }
 
@@ -198,60 +231,88 @@ pub fn resolve_api_auth_from(
     load_or_create_token_file(path).map(ApiAuth::File)
 }
 
+/// [`resolve_api_auth_from`] that never fails: a token file that cannot be read
+/// or created yields an [`ApiAuth::Ephemeral`] one-off token (fail *closed* —
+/// never unauthenticated). Returns the error text alongside for logging.
+pub fn resolve_api_auth_with(
+    env_auth: Option<String>,
+    env_token: Option<String>,
+    path: Option<&Path>,
+) -> (ApiAuth, Option<String>) {
+    match resolve_api_auth_from(env_auth, env_token, path) {
+        Ok(auth) => (auth, None),
+        Err(e) => (ApiAuth::Ephemeral(generate_token()), Some(e)),
+    }
+}
+
 /// Resolve the live auth mode from the environment and the token file, logging
-/// where the token lives (never the token itself). Fails *closed*: if the file
-/// cannot be read or created, the server runs with an unpersisted random token
-/// rather than unauthenticated.
+/// where the token lives (never the token itself).
 pub fn resolve_api_auth() -> ApiAuth {
     let path = token_file_path();
-    let resolved = resolve_api_auth_from(
+    let (auth, error) = resolve_api_auth_with(
         std::env::var(ENV_AUTH).ok(),
         std::env::var(ENV_TOKEN).ok(),
         path.as_deref(),
     );
-    match resolved {
-        Ok(ApiAuth::Disabled) => {
-            eprintln!(
-                "HTTP API: WARNING — client verification is DISABLED ({ENV_AUTH}=off). \
-                 Every local process can call the API."
-            );
-            ApiAuth::Disabled
+    match &auth {
+        ApiAuth::Disabled => eprintln!(
+            "HTTP API: WARNING — client verification is DISABLED ({ENV_AUTH}=off). \
+             Every local process can call the API."
+        ),
+        ApiAuth::Env(_) => {
+            eprintln!("HTTP API: client verification on (token from {ENV_TOKEN})")
         }
-        Ok(ApiAuth::Env(t)) => {
-            eprintln!("HTTP API: client verification on (token from {ENV_TOKEN})");
-            ApiAuth::Env(t)
-        }
-        Ok(ApiAuth::File(t)) => {
+        ApiAuth::File(_) => {
             if let Some(p) = &path {
                 eprintln!(
                     "HTTP API: client verification on (token file: {})",
                     p.display()
                 );
             }
-            ApiAuth::File(t)
         }
-        Err(e) => {
-            eprintln!(
-                "HTTP API: could not persist the api-token ({e}); using a one-off token for this \
-                 run. Set {ENV_TOKEN} to share a token with clients."
-            );
-            ApiAuth::Env(generate_token())
-        }
+        ApiAuth::Ephemeral(_) => eprintln!(
+            "HTTP API: could not persist the api-token ({}); using a one-off token for this run \
+             that no client can read. Fix the config directory and restart, or set {ENV_TOKEN}.",
+            error.unwrap_or_default()
+        ),
     }
+    auth
 }
 
 // ---------------------------------------------------------------------------
 // Request-side carriers
 // ---------------------------------------------------------------------------
 
-/// Value of `name` in a raw query string. Tokens are hex, so no
-/// percent-decoding is needed.
+/// Decode `%XX` escapes (as produced by `encodeURIComponent`). A `+` is left
+/// literal — `encodeURIComponent` never emits a raw `+`, so one in the query
+/// is part of the token. Malformed escapes are passed through unchanged.
+fn percent_decode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let Ok(b) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
+                out.push(b);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8(out).unwrap_or_else(|_| s.to_string())
+}
+
+/// Value of `name` in a raw query string, percent-decoded. Generated tokens
+/// are plain hex, but a `CCTRACE_API_TOKEN` may contain URL-reserved
+/// characters that the web client escapes in the SSE URL.
 fn query_param(query: &str, name: &str) -> Option<String> {
     query
         .split('&')
         .filter_map(|kv| kv.split_once('='))
         .find(|(k, _)| *k == name)
-        .map(|(_, v)| v.to_string())
+        .map(|(_, v)| percent_decode(v))
 }
 
 /// Value of `name` in a `Cookie:` header (`a=1; b=2`).
@@ -317,18 +378,37 @@ pub async fn require_api_token(
             )
         }
     };
-    match expected {
-        None => next.run(req).await,
-        Some(tok) if request_has_token(&req, &tok) => next.run(req).await,
-        Some(_) => err_response(
-            StatusCode::UNAUTHORIZED,
-            format!(
-                "missing or invalid API token — send an X-CCTrace-Token header or \
-                 Authorization: Bearer, or copy the token from Settings > API access \
-                 ({ENV_AUTH}=off disables verification)"
-            ),
-        ),
+    let Some(expected) = expected else {
+        return next.run(req).await;
+    };
+    if request_has_token(&req, &expected) {
+        return next.run(req).await;
     }
+    // Mismatch. Another cctrace process sharing the token file (a background
+    // `--web` service plus the desktop app, say) — or the user by hand — may
+    // have rotated it since this process started. Re-read the file once and
+    // re-check before rejecting, so the live token heals instead of every
+    // client getting 401 until a restart. Only on a mismatch, so the happy
+    // path never touches the disk.
+    if state.app_state.refresh_api_token_from_file() {
+        let fresh = state
+            .app_state
+            .api_auth
+            .read()
+            .ok()
+            .and_then(|g| g.token().map(str::to_owned));
+        if fresh.is_some_and(|f| request_has_token(&req, &f)) {
+            return next.run(req).await;
+        }
+    }
+    err_response(
+        StatusCode::UNAUTHORIZED,
+        format!(
+            "missing or invalid API token — send an X-CCTrace-Token header or \
+             Authorization: Bearer, or copy the token from Settings > API access \
+             ({ENV_AUTH}=off disables verification)"
+        ),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -386,6 +466,16 @@ pub fn token_cookie_header(token: &str) -> Option<HeaderValue> {
     .ok()
 }
 
+/// Static (defaults + env) ∪ live (Settings UI) CORS origins — the same union
+/// `http_api::build_cors` checks.
+fn allowed_origins(state: &HttpState) -> Vec<String> {
+    let mut origins = crate::http_api::resolve_allowed_origins();
+    if let Ok(g) = state.app_state.settings.lock() {
+        origins.extend(g.allowed_origins.iter().cloned());
+    }
+    origins
+}
+
 fn is_html(resp: &Response) -> bool {
     resp.headers()
         .get(header::CONTENT_TYPE)
@@ -401,19 +491,16 @@ pub async fn attach_token_cookie(
     req: Request,
     next: Next,
 ) -> Response {
-    let host_ok = req
+    // Only the HTML shell can receive the cookie, so defer the allowlist work
+    // (env read, settings lock) until the response type is known — every
+    // JS/CSS/image request through the fallback skips it entirely.
+    let host = req
         .headers()
         .get(header::HOST)
         .and_then(|h| h.to_str().ok())
-        .is_some_and(|h| {
-            let mut origins = crate::http_api::resolve_allowed_origins();
-            if let Ok(g) = state.app_state.settings.lock() {
-                origins.extend(g.allowed_origins.iter().cloned());
-            }
-            host_allowed(h, &origins)
-        });
+        .map(str::to_owned);
     let mut resp = next.run(req).await;
-    if host_ok && is_html(&resp) {
+    if is_html(&resp) && host.is_some_and(|h| host_allowed(&h, &allowed_origins(&state))) {
         let token = state
             .app_state
             .api_auth
@@ -470,6 +557,33 @@ mod tests {
     }
 
     // -- carriers -----------------------------------------------------------
+
+    #[test]
+    fn percent_decode_handles_encoded_reserved_chars() {
+        assert_eq!(percent_decode("my%2Fsecret%2Bkey%20x"), "my/secret+key x");
+        assert_eq!(percent_decode("plainhex0123"), "plainhex0123");
+    }
+
+    #[test]
+    fn percent_decode_leaves_plus_and_malformed_escapes_alone() {
+        assert_eq!(percent_decode("a+b"), "a+b");
+        assert_eq!(percent_decode("bad%zz%4"), "bad%zz%4");
+        assert_eq!(percent_decode("%"), "%");
+    }
+
+    #[test]
+    fn query_param_percent_decodes_the_token() {
+        assert_eq!(
+            query_param("token=my%2Fsecret%2Bkey", "token"),
+            Some("my/secret+key".to_string())
+        );
+    }
+
+    #[test]
+    fn request_has_token_matches_encoded_query_against_raw_env_token() {
+        let req = req_with(&[], "/api/events?token=my%2Fsecret%2Bkey");
+        assert!(request_has_token(&req, "my/secret+key"));
+    }
 
     #[test]
     fn query_param_extracts_token() {
@@ -576,6 +690,38 @@ mod tests {
     }
 
     #[test]
+    fn resolve_with_falls_back_to_an_ephemeral_token_when_the_file_is_unusable() {
+        // A path *under a regular file* can never be created.
+        let dir = tempfile::tempdir().unwrap();
+        let blocker = dir.path().join("not-a-dir");
+        fs::write(&blocker, "x").unwrap();
+        let path = blocker.join("api-token");
+        let (auth, err) = resolve_api_auth_with(None, None, Some(&path));
+        let ApiAuth::Ephemeral(t) = auth else {
+            panic!("expected Ephemeral, got {auth:?}");
+        };
+        assert_eq!(t.len(), 64);
+        assert!(err.is_some());
+    }
+
+    #[test]
+    fn resolve_with_reports_no_error_on_success() {
+        let (_d, p) = tmp_token_path();
+        let (auth, err) = resolve_api_auth_with(None, None, Some(&p));
+        assert!(matches!(auth, ApiAuth::File(_)));
+        assert!(err.is_none());
+    }
+
+    #[test]
+    fn load_or_create_errors_on_a_persistently_empty_file() {
+        let (_d, p) = tmp_token_path();
+        fs::create_dir_all(p.parent().unwrap()).unwrap();
+        fs::write(&p, "\n").unwrap();
+        let err = load_or_create_token_file(&p).unwrap_err();
+        assert!(err.contains("empty"), "{err}");
+    }
+
+    #[test]
     fn load_or_create_reads_existing_trimmed() {
         let (_d, p) = tmp_token_path();
         fs::create_dir_all(p.parent().unwrap()).unwrap();
@@ -602,12 +748,24 @@ mod tests {
     }
 
     #[test]
-    fn rotate_changes_content() {
+    fn rotate_changes_content_and_leaves_no_temp_file_behind() {
         let (_d, p) = tmp_token_path();
         let a = load_or_create_token_file(&p).unwrap();
         let b = rotate_token_file(&p).unwrap();
         assert_ne!(a, b);
         assert_eq!(fs::read_to_string(&p).unwrap().trim(), b);
+        let siblings: Vec<_> = fs::read_dir(p.parent().unwrap())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
+            .collect();
+        assert_eq!(siblings, vec!["api-token"], "{siblings:?}");
+    }
+
+    #[test]
+    fn rotate_creates_the_file_when_missing() {
+        let (_d, p) = tmp_token_path();
+        let t = rotate_token_file(&p).unwrap();
+        assert_eq!(fs::read_to_string(&p).unwrap().trim(), t);
     }
 
     #[cfg(unix)]
@@ -630,6 +788,9 @@ mod tests {
         assert_eq!(ApiAuth::Disabled.token(), None);
         assert_eq!(ApiAuth::Disabled.source(), "disabled");
         assert!(!ApiAuth::Disabled.is_enabled());
+        assert_eq!(ApiAuth::Ephemeral("x".into()).token(), Some("x"));
+        assert_eq!(ApiAuth::Ephemeral("x".into()).source(), "ephemeral");
+        assert!(ApiAuth::Ephemeral("x".into()).is_enabled());
         assert_eq!(ApiAuth::Env("e".into()).token(), Some("e"));
         assert_eq!(ApiAuth::Env("e".into()).source(), "env");
         assert_eq!(ApiAuth::File("f".into()).token(), Some("f"));
