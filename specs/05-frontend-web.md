@@ -427,6 +427,15 @@ flowchart LR
 
 Static assets are served from `dist/` when `CCTRACE_STATIC_DIR` is set in the Rust backend.
 
+The Docker image builds this bundle in the `frontend-builder` stage, which copies only the
+files the build needs rather than the whole repo. Vite resolves every import in
+`vite.config.ts` when it loads the config, so a local import that the stage doesn't `COPY`
+fails the image build with `UNRESOLVED_IMPORT` — even when the importing code never runs in a
+production build, as is the case for the serve-only `cctrace-api-token` plugin's
+`bin/api-token.mjs`. Nothing in the toolchain ties the config's import list to those `COPY`
+lines, so `src/test/dockerBuildContext.test.ts` reads both files and asserts every local
+import is covered.
+
 ---
 
 ## Related Specs

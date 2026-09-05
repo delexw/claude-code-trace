@@ -42,6 +42,10 @@ RUN npm ci --no-audit --no-fund
 COPY tsconfig.json tsconfig.node.json vite.config.ts index.html ./
 COPY src ./src
 COPY shared ./shared
+# vite.config.ts imports bin/api-token.mjs at config-load time (the dev-only
+# token plugin), so the config fails to load without it even though the plugin
+# itself never runs in a production build.
+COPY bin ./bin
 
 # Empty VITE_API_BASE → frontend uses relative URLs, matching the single-port
 # axum server that also serves these static assets.
