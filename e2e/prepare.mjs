@@ -11,7 +11,7 @@
  *    (`VITE_API_BASE=""` → same-origin relative URLs) into `e2e/.tmp/dist`.
  */
 import { execSync } from "node:child_process";
-import { cpSync, mkdirSync, rmSync } from "node:fs";
+import { cpSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -20,6 +20,10 @@ const tmp = resolve(root, "e2e/.tmp");
 const fixtures = resolve(root, "e2e/fixtures/projects");
 
 rmSync(tmp, { recursive: true, force: true });
+mkdirSync(tmp, { recursive: true });
+// Timestamp the run so specs can prove no server wrote a token to the *real*
+// config dir (see "keeps the secret on the test path" in same-origin.spec.ts).
+writeFileSync(resolve(tmp, "started-at"), String(Date.now()));
 for (const shape of ["same", "web"]) {
   mkdirSync(resolve(tmp, shape, "config"), { recursive: true });
   cpSync(fixtures, resolve(tmp, shape, "projects"), { recursive: true });

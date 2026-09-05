@@ -121,6 +121,18 @@ impl AppState {
             .unwrap_or_else(|poisoned| poisoned.into_inner().clone())
     }
 
+    /// Test constructor: like [`new`](Self::new) but with **no** token-file path,
+    /// so nothing a test does — Regenerate, or the on-mismatch re-read in the
+    /// auth middleware — can ever touch the developer's real `api-token`.
+    /// Tests that need a file point at a temp path via
+    /// [`set_api_token_path`](Self::set_api_token_path).
+    #[cfg(test)]
+    pub fn for_tests(api_auth: ApiAuth) -> Self {
+        let state = Self::new(api_auth);
+        state.set_api_token_path(None);
+        state
+    }
+
     /// Point the token-file logic at a different path (tests only).
     #[cfg(test)]
     pub fn set_api_token_path(&self, path: Option<PathBuf>) {
@@ -456,7 +468,7 @@ mod tests {
     fn load_session_windowed_returns_window_with_total_count() {
         let dir = tempfile::tempdir().unwrap();
         let path = write_session(dir.path());
-        let state = AppState::new(ApiAuth::Disabled);
+        let state = AppState::for_tests(ApiAuth::Disabled);
 
         let full = state
             .load_session_windowed(&path, LoadOptions::full())
@@ -483,7 +495,7 @@ mod tests {
     fn light_cache_serves_repeated_windows_and_clears() {
         let dir = tempfile::tempdir().unwrap();
         let path = write_session(dir.path());
-        let state = AppState::new(ApiAuth::Disabled);
+        let state = AppState::for_tests(ApiAuth::Disabled);
 
         // First call builds and caches; second (same path+size) hits the cache
         // and must return identical content.
@@ -512,7 +524,7 @@ mod tests {
     fn full_message_at_works_without_a_warm_light_cache() {
         let dir = tempfile::tempdir().unwrap();
         let path = write_session(dir.path());
-        let state = AppState::new(ApiAuth::Disabled);
+        let state = AppState::for_tests(ApiAuth::Disabled);
 
         // No list load has happened yet — full_message_at must not depend on
         // the light cache being populated first.
@@ -526,7 +538,7 @@ mod tests {
     fn full_message_at_never_populates_the_light_cache() {
         let dir = tempfile::tempdir().unwrap();
         let path = write_session(dir.path());
-        let state = AppState::new(ApiAuth::Disabled);
+        let state = AppState::for_tests(ApiAuth::Disabled);
 
         state.full_message_at(&path, 0).unwrap();
         state.full_message_at(&path, 1).unwrap();
@@ -539,7 +551,7 @@ mod tests {
     fn full_message_at_out_of_range_returns_none() {
         let dir = tempfile::tempdir().unwrap();
         let path = write_session(dir.path());
-        let state = AppState::new(ApiAuth::Disabled);
+        let state = AppState::for_tests(ApiAuth::Disabled);
 
         assert!(state.full_message_at(&path, 9999).unwrap().is_none());
     }
@@ -551,7 +563,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("api-token");
         std::fs::write(&path, "old-token\n").unwrap();
-        let state = AppState::new(ApiAuth::File("old-token".into()));
+        let state = AppState::for_tests(ApiAuth::File("old-token".into()));
 
         let new_token = state.regenerate_api_token_at(Some(&path)).unwrap();
         assert_ne!(new_token, "old-token");
@@ -561,7 +573,7 @@ mod tests {
 
     #[test]
     fn regenerate_is_rejected_for_env_token() {
-        let state = AppState::new(ApiAuth::Env("fixed".into()));
+        let state = AppState::for_tests(ApiAuth::Env("fixed".into()));
         let err = state.regenerate_api_token_at(None).unwrap_err();
         assert!(err.contains("CCTRACE_API_TOKEN"), "{err}");
         assert_eq!(state.api_auth_snapshot(), ApiAuth::Env("fixed".into()));
@@ -569,14 +581,14 @@ mod tests {
 
     #[test]
     fn regenerate_is_rejected_when_disabled() {
-        let state = AppState::new(ApiAuth::Disabled);
+        let state = AppState::for_tests(ApiAuth::Disabled);
         let err = state.regenerate_api_token_at(None).unwrap_err();
         assert!(err.contains("disabled"), "{err}");
     }
 
     #[test]
     fn regenerate_is_rejected_for_ephemeral_token() {
-        let state = AppState::new(ApiAuth::Ephemeral("oneoff".into()));
+        let state = AppState::for_tests(ApiAuth::Ephemeral("oneoff".into()));
         let err = state.regenerate_api_token_at(None).unwrap_err();
         assert!(err.contains("could not be persisted"), "{err}");
         assert_eq!(
@@ -590,7 +602,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("api-token");
         std::fs::write(&path, "rotated-elsewhere\n").unwrap();
-        let state = AppState::new(ApiAuth::File("stale".into()));
+        let state = AppState::for_tests(ApiAuth::File("stale".into()));
         state.set_api_token_path(Some(path));
 
         assert!(state.refresh_api_token_from_file());
@@ -606,7 +618,7 @@ mod tests {
     fn refresh_ignores_missing_or_empty_file_and_non_file_sources() {
         let dir = tempfile::tempdir().unwrap();
         let missing = dir.path().join("missing");
-        let state = AppState::new(ApiAuth::File("live".into()));
+        let state = AppState::for_tests(ApiAuth::File("live".into()));
         state.set_api_token_path(Some(missing.clone()));
         assert!(!state.refresh_api_token_from_file());
 
@@ -614,7 +626,7 @@ mod tests {
         assert!(!state.refresh_api_token_from_file());
         assert_eq!(state.api_auth_snapshot(), ApiAuth::File("live".into()));
 
-        let env_state = AppState::new(ApiAuth::Env("fixed".into()));
+        let env_state = AppState::for_tests(ApiAuth::Env("fixed".into()));
         let env_path = dir.path().join("env-token");
         std::fs::write(&env_path, "other\n").unwrap();
         env_state.set_api_token_path(Some(env_path));
@@ -623,8 +635,18 @@ mod tests {
     }
 
     #[test]
+    fn for_tests_has_no_token_path_so_it_cannot_reach_a_real_file() {
+        let state = AppState::for_tests(ApiAuth::File("live".into()));
+        assert_eq!(state.api_token_path(), None);
+        // With no path, neither the re-read nor Regenerate can do any file I/O.
+        assert!(!state.refresh_api_token_from_file());
+        assert!(state.regenerate_api_token().is_err());
+        assert_eq!(state.api_auth_snapshot(), ApiAuth::File("live".into()));
+    }
+
+    #[test]
     fn regenerate_without_config_dir_is_an_error() {
-        let state = AppState::new(ApiAuth::File("t".into()));
+        let state = AppState::for_tests(ApiAuth::File("t".into()));
         assert!(state.regenerate_api_token_at(None).is_err());
         // The live token is untouched when rotation fails.
         assert_eq!(state.api_auth_snapshot(), ApiAuth::File("t".into()));

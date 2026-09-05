@@ -33,20 +33,20 @@ mod tests {
     use super::*;
     use crate::auth::ApiAuth;
 
-    // File-mode rotation is covered in `state.rs` against a temp path; the
-    // impl here would rotate the developer's real token file, so only the
-    // rejection paths are exercised.
+    // File-mode rotation is covered in `state.rs` against a temp path.
+    // `AppState::for_tests` carries no token path, so only the rejection
+    // paths are meaningful here.
 
     #[test]
     fn env_token_cannot_be_regenerated() {
-        let state = AppState::new(ApiAuth::Env("fixed".into()));
+        let state = AppState::for_tests(ApiAuth::Env("fixed".into()));
         let err = regenerate_api_token_impl(&state).unwrap_err();
         assert!(err.contains("CCTRACE_API_TOKEN"), "{err}");
     }
 
     #[test]
     fn disabled_auth_cannot_be_regenerated() {
-        let state = AppState::new(ApiAuth::Disabled);
+        let state = AppState::for_tests(ApiAuth::Disabled);
         let err = regenerate_api_token_impl(&state).unwrap_err();
         assert!(err.contains("disabled"), "{err}");
     }

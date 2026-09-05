@@ -856,7 +856,9 @@ mod tests {
 
     #[test]
     fn build_cors_constructs_without_panicking() {
-        let state = Arc::new(crate::state::AppState::new(crate::auth::ApiAuth::Disabled));
+        let state = Arc::new(crate::state::AppState::for_tests(
+            crate::auth::ApiAuth::Disabled,
+        ));
         let _ = build_cors(state);
     }
 
@@ -917,7 +919,7 @@ mod tests {
 
     fn test_state(auth: ApiAuth) -> Arc<HttpState> {
         Arc::new(HttpState {
-            app_state: Arc::new(crate::state::AppState::new(auth)),
+            app_state: Arc::new(crate::state::AppState::for_tests(auth)),
             app: None,
         })
     }

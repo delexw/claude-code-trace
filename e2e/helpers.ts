@@ -1,7 +1,9 @@
 import { expect, type Page } from "@playwright/test";
-import { appendFileSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, statSync } from "node:fs";
 import http from "node:http";
 import { join } from "node:path";
+import { apiTokenPath } from "../bin/api-token.mjs";
+import { E2E } from "../playwright.config";
 
 /** Texts from e2e/fixtures/projects/-tmp-e2e-demo/e2e-session.jsonl. */
 export const FIXTURE_FIRST_MESSAGE = "hello from the e2e fixture";
@@ -14,6 +16,30 @@ export function sessionFile(projectsDir: string): string {
 /** The shared token the backend wrote (or adopted) in this scratch config dir. */
 export function readToken(configDir: string): string {
   return readFileSync(join(configDir, "api-token"), "utf8").trim();
+}
+
+/** Where the token file would live if `CCTRACE_CONFIG_DIR` were *not* set —
+ * the developer's real secret. The suite must never create or modify it. */
+export function realTokenPath(): string {
+  const env = { ...process.env };
+  delete env.CCTRACE_CONFIG_DIR;
+  return apiTokenPath({ env });
+}
+
+/** Assert the secret for `configDir` lives on the test path with owner-only
+ * permissions, and that the real token file was not written during this run. */
+export function expectSecretOnTestPath(configDir: string): void {
+  const testPath = join(configDir, "api-token");
+  expect(testPath.startsWith(E2E.tmp)).toBe(true);
+  expect(existsSync(testPath)).toBe(true);
+  if (process.platform !== "win32") {
+    expect(statSync(testPath).mode & 0o777).toBe(0o600);
+  }
+  const real = realTokenPath();
+  if (existsSync(real)) {
+    const startedAt = Number(readFileSync(join(E2E.tmp, "started-at"), "utf8"));
+    expect(statSync(real).mtimeMs, `${real} was modified by the e2e run`).toBeLessThan(startedAt);
+  }
 }
 
 /** Append a user turn to the fixture transcript, as Claude Code would while a

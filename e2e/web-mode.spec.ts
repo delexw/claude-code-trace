@@ -7,6 +7,7 @@
 import { expect, test } from "@playwright/test";
 import { E2E } from "../playwright.config";
 import {
+  expectSecretOnTestPath,
   FIXTURE_FIRST_MESSAGE,
   openSettings,
   readToken,
@@ -49,6 +50,7 @@ test("Regenerate switches this tab to the new token on fetch and SSE", async ({
   const newToken = await regenerateToken(page);
   expect(newToken).not.toBe(oldToken);
   expect(readToken(configDir)).toBe(newToken);
+  expectSecretOnTestPath(configDir);
 
   // listen.ts reopens the stream with the rotated token without a reload.
   expect(new URL((await reconnected).url()).searchParams.get("token")).toBe(newToken);

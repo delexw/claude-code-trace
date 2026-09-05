@@ -7,6 +7,7 @@ import { expect, test } from "@playwright/test";
 import { E2E } from "../playwright.config";
 import {
   appendUserMessage,
+  expectSecretOnTestPath,
   FIXTURE_FIRST_MESSAGE,
   FIXTURE_REPLY,
   rawGet,
@@ -18,6 +19,11 @@ import {
 const { port, configDir, projectsDir } = E2E.sameOrigin;
 
 test.describe("HTTP API without a browser", () => {
+  test("keeps the secret on the test path, never the real config dir", () => {
+    expectSecretOnTestPath(configDir);
+    expectSecretOnTestPath(E2E.webMode.configDir);
+  });
+
   test("refuses anonymous callers and accepts the shared token", async ({ request }) => {
     const token = readToken(configDir);
 
@@ -125,6 +131,7 @@ test.describe("browser UI", () => {
     await expect(field).toHaveValue(newToken);
     expect(newToken).not.toBe(oldToken);
     expect(readToken(configDir)).toBe(newToken);
+    expectSecretOnTestPath(configDir);
 
     // The old token is dead for everyone…
     const stale = await request.get("/api/settings", { headers: { "X-CCTrace-Token": oldToken } });
