@@ -29,9 +29,17 @@ export function configDir({ platform = osPlatform(), env = process.env, home = h
   return env.XDG_CONFIG_HOME || join(home, ".config");
 }
 
-/** `<config dir>/claude-code-trace/api-token` — sibling of `settings.json`. */
+/** The app's own config root — `$CCTRACE_CONFIG_DIR` when set (mirrors the
+ * backend's `settings::config_root`; the e2e suite relies on it to keep test
+ * runs away from real files), else `<config dir>/claude-code-trace`. */
+export function appConfigRoot(opts = {}) {
+  const override = ((opts.env ?? process.env).CCTRACE_CONFIG_DIR ?? "").trim();
+  return override || join(configDir(opts), "claude-code-trace");
+}
+
+/** `<config root>/api-token` — sibling of `settings.json`. */
 export function apiTokenPath(opts = {}) {
-  return join(configDir(opts), "claude-code-trace", "api-token");
+  return join(appConfigRoot(opts), "api-token");
 }
 
 function readToken(path) {

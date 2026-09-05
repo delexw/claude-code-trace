@@ -17,6 +17,7 @@ cargo fmt --manifest-path src-tauri/Cargo.toml     # Rust format
 
 # Test
 npx vitest run           # Frontend tests
+npm run test:e2e         # Playwright e2e: real headless backend + real browser (see e2e/)
 cargo test --manifest-path src-tauri/Cargo.toml    # Rust tests
 
 # Type check

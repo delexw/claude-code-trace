@@ -12,7 +12,7 @@ vi.mock("node:fs", () => {
 
 const { platform } = await import("node:os");
 const { readFileSync, writeFileSync, mkdirSync } = await import("node:fs");
-const { configDir, apiTokenPath, resolveApiToken } = await import("./api-token.mjs");
+const { configDir, appConfigRoot, apiTokenPath, resolveApiToken } = await import("./api-token.mjs");
 
 const enoent = () => {
   const e = new Error("ENOENT");
@@ -66,6 +66,16 @@ describe("apiTokenPath", () => {
     expect(apiTokenPath({ platform: "linux", env: {}, home: "/h" })).toBe(
       "/h/.config/claude-code-trace/api-token",
     );
+  });
+
+  it("honours CCTRACE_CONFIG_DIR as the whole config root", () => {
+    const env = { CCTRACE_CONFIG_DIR: " /e2e/cfg ", XDG_CONFIG_HOME: "/ignored" };
+    expect(appConfigRoot({ platform: "linux", env, home: "/h" })).toBe("/e2e/cfg");
+    expect(apiTokenPath({ platform: "linux", env, home: "/h" })).toBe("/e2e/cfg/api-token");
+    // Blank override falls through to the OS location.
+    expect(
+      appConfigRoot({ platform: "linux", env: { CCTRACE_CONFIG_DIR: "  " }, home: "/h" }),
+    ).toBe("/h/.config/claude-code-trace");
   });
 });
 

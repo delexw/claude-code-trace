@@ -32,6 +32,15 @@ def test_token_path_is_inside_app_config_dir():
     )
 
 
+def test_app_config_root_honours_override_env():
+    env = {"CCTRACE_CONFIG_DIR": " /e2e/cfg ", "XDG_CONFIG_HOME": "/ignored"}
+    assert auth.app_config_root("linux", env, Path("/h")) == Path("/e2e/cfg")
+    assert auth.token_path("linux", env, Path("/h")) == Path("/e2e/cfg/api-token")
+    assert auth.app_config_root("linux", {"CCTRACE_CONFIG_DIR": "  "}, Path("/h")) == Path(
+        "/h/.config/claude-code-trace"
+    )
+
+
 def test_resolve_env_off_wins(tmp_path: Path):
     p = tmp_path / "api-token"
     p.write_text("filetoken\n")

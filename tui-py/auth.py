@@ -24,6 +24,7 @@ from pathlib import Path
 TOKEN_HEADER = "X-CCTrace-Token"
 ENV_TOKEN = "CCTRACE_API_TOKEN"
 ENV_AUTH = "CCTRACE_API_AUTH"
+ENV_CONFIG_DIR = "CCTRACE_CONFIG_DIR"
 
 
 def config_dir(
@@ -44,13 +45,27 @@ def config_dir(
     return Path(xdg) if xdg else home / ".config"
 
 
+def app_config_root(
+    platform: str | None = None,
+    env: Mapping[str, str] | None = None,
+    home: Path | None = None,
+) -> Path:
+    """The app's config root: ``$CCTRACE_CONFIG_DIR`` when set (mirrors the backend's
+    ``settings::config_root``), else ``<config dir>/claude-code-trace``."""
+    env = os.environ if env is None else env
+    override = env.get(ENV_CONFIG_DIR, "").strip()
+    if override:
+        return Path(override)
+    return config_dir(platform, env, home) / "claude-code-trace"
+
+
 def token_path(
     platform: str | None = None,
     env: Mapping[str, str] | None = None,
     home: Path | None = None,
 ) -> Path:
-    """``<config dir>/claude-code-trace/api-token`` — sibling of ``settings.json``."""
-    return config_dir(platform, env, home) / "claude-code-trace" / "api-token"
+    """``<config root>/api-token`` — sibling of ``settings.json``."""
+    return app_config_root(platform, env, home) / "api-token"
 
 
 def resolve_api_token(env: Mapping[str, str] | None = None, path: Path | None = None) -> str | None:

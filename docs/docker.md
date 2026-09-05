@@ -51,14 +51,15 @@ CCTRACE_HOST_PORT=9090 CLAUDE_HOME=/srv/claude docker compose up
 All runtime knobs are environment variables, so you can override them with
 `-e VAR=value` on `docker run` or under `environment:` in compose.
 
-| Variable                  | Default     | What it does                                    |
-| ------------------------- | ----------- | ----------------------------------------------- |
-| `CCTRACE_HTTP_HOST`       | `0.0.0.0`   | Bind host for the HTTP server                   |
-| `CCTRACE_HTTP_PORT`       | `1421`      | Bind port for the HTTP server                   |
-| `CCTRACE_STATIC_DIR`      | `/app/dist` | Directory of static frontend assets to serve    |
-| `CCTRACE_ALLOWED_ORIGINS` | (unset)     | Extra CORS origins, comma-separated (see below) |
-| `CCTRACE_API_TOKEN`       | (unset)     | Fixed API client token (see "API access" below) |
-| `CCTRACE_API_AUTH`        | (unset)     | `off` disables the API token check              |
+| Variable                  | Default     | What it does                                                                          |
+| ------------------------- | ----------- | ------------------------------------------------------------------------------------- |
+| `CCTRACE_HTTP_HOST`       | `0.0.0.0`   | Bind host for the HTTP server                                                         |
+| `CCTRACE_HTTP_PORT`       | `1421`      | Bind port for the HTTP server                                                         |
+| `CCTRACE_STATIC_DIR`      | `/app/dist` | Directory of static frontend assets to serve                                          |
+| `CCTRACE_ALLOWED_ORIGINS` | (unset)     | Extra CORS origins, comma-separated (see below)                                       |
+| `CCTRACE_API_TOKEN`       | (unset)     | Fixed API client token (see "API access" below)                                       |
+| `CCTRACE_API_AUTH`        | (unset)     | `off` disables the API token check                                                    |
+| `CCTRACE_CONFIG_DIR`      | (unset)     | Relocate `settings.json` + `api-token` (default `$XDG_CONFIG_HOME/claude-code-trace`) |
 
 Outside Docker (i.e. the normal desktop/web app) these variables are not
 set, and the server falls back to the historical defaults

@@ -326,14 +326,15 @@ the way the web frontend does.
 
 ## Configuration
 
-| Env var                   | Default                  | Description                                                           |
-| ------------------------- | ------------------------ | --------------------------------------------------------------------- |
-| `CCTRACE_HTTP_HOST`       | `127.0.0.1`              | Bind address                                                          |
-| `CCTRACE_HTTP_PORT`       | `11423` (Docker: `1421`) | Listen port                                                           |
-| `CCTRACE_STATIC_DIR`      | (unset)                  | Directory to serve as static files at `/`                             |
-| `CCTRACE_ALLOWED_ORIGINS` | (unset)                  | Extra CORS origins, comma-separated (see CORS Policy below)           |
-| `CCTRACE_API_TOKEN`       | (unset)                  | Fixed API client token; overrides the token file (see Authentication) |
-| `CCTRACE_API_AUTH`        | (unset)                  | `off` disables the API token check entirely (loud stderr warning)     |
+| Env var                   | Default                  | Description                                                                                                                           |
+| ------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `CCTRACE_HTTP_HOST`       | `127.0.0.1`              | Bind address                                                                                                                          |
+| `CCTRACE_HTTP_PORT`       | `11423` (Docker: `1421`) | Listen port                                                                                                                           |
+| `CCTRACE_STATIC_DIR`      | (unset)                  | Directory to serve as static files at `/`                                                                                             |
+| `CCTRACE_ALLOWED_ORIGINS` | (unset)                  | Extra CORS origins, comma-separated (see CORS Policy below)                                                                           |
+| `CCTRACE_API_TOKEN`       | (unset)                  | Fixed API client token; overrides the token file (see Authentication)                                                                 |
+| `CCTRACE_API_AUTH`        | (unset)                  | `off` disables the API token check entirely (loud stderr warning)                                                                     |
+| `CCTRACE_CONFIG_DIR`      | (unset)                  | Relocates the config dir holding `settings.json` and `api-token` (default `<OS config dir>/claude-code-trace`; used by the e2e suite) |
 
 The default port for native binaries is `11423` (defined in `http_api.rs:38` as
 `DEFAULT_HTTP_PORT`). The Docker image overrides this to `1421` via `CCTRACE_HTTP_PORT=1421` so
@@ -460,6 +461,12 @@ section shows the token masked with Show / Copy / Regenerate; Regenerate is a tw
 is disabled for `env` and `ephemeral` tokens.
 `POST /api/settings/token/regenerate` (or the `regenerate_api_token` Tauri command) performs the
 rotation.
+
+Both deployment shapes are exercised end-to-end by the Playwright suite (`npm run test:e2e`,
+`playwright.config.ts`, `e2e/`): a real headless backend plus the real UI in Chromium, once served
+same-origin from a built bundle (cookie path, `Host` gate, live SSE, Regenerate) and once from the Vite
+dev server cross-origin (header + query carriers, plugin/backend token convergence, rotation). It runs
+against `CCTRACE_CONFIG_DIR=e2e/.tmp/...` so it never touches a real token file.
 
 Note: in dev mode the SSE token travels in the URL. The server keeps no access log today; if one is
 added, the `token` query parameter must be redacted.

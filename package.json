@@ -18,6 +18,7 @@
     "fmt:check": "oxfmt --check && cargo fmt --manifest-path src-tauri/Cargo.toml --check",
     "test": "vitest run && cargo test --manifest-path src-tauri/Cargo.toml",
     "test:watch": "vitest",
+    "test:e2e": "playwright test",
     "check": "tsc --noEmit && oxlint && oxfmt --check && cargo clippy --manifest-path src-tauri/Cargo.toml && cargo fmt --manifest-path src-tauri/Cargo.toml --check && vitest run && cargo test --manifest-path src-tauri/Cargo.toml"
   },
   "dependencies": {
@@ -38,6 +39,7 @@
     "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
+    "@playwright/test": "~1.56.0",
     "@tauri-apps/cli": "^2",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.2",

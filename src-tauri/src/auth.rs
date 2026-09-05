@@ -12,8 +12,9 @@
 //! 1. `CCTRACE_API_AUTH=off` disables verification entirely (loud warning).
 //! 2. `CCTRACE_API_TOKEN=<token>` uses that token verbatim (not rotatable).
 //! 3. Otherwise the token lives in `config_dir()/claude-code-trace/api-token`
-//!    (mode `0600` on unix). It is generated on first run and re-read on every
-//!    later run, so clients that share the same OS user can read it too.
+//!    (or `$CCTRACE_CONFIG_DIR/api-token`; mode `0600` on unix). It is generated
+//!    on first run and re-read on every later run, so clients that share the
+//!    same OS user can read it too.
 //!
 //! Accepted carriers on a request, in this order: `X-CCTrace-Token` header,
 //! `Authorization: Bearer`, `?token=` query (browser `EventSource` cannot set
@@ -87,9 +88,11 @@ impl ApiAuth {
     }
 }
 
-/// `config_dir()/claude-code-trace/api-token` — sibling of `settings.json`.
+/// `<config root>/api-token` — sibling of `settings.json`. The root is
+/// `dirs::config_dir()/claude-code-trace`, or `$CCTRACE_CONFIG_DIR` when set
+/// (see `settings::config_root`).
 pub fn token_file_path() -> Option<PathBuf> {
-    dirs::config_dir().map(|c| c.join("claude-code-trace").join("api-token"))
+    crate::settings::config_root().map(|root| root.join("api-token"))
 }
 
 /// 32 random bytes as 64 lowercase hex chars: safe in headers, cookies, and

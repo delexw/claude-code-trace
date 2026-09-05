@@ -230,6 +230,7 @@ npm run tauri build      # production build
 ```bash
 npm run check            # run all checks at once
 npx vitest run           # frontend tests
+npm run test:e2e         # Playwright end-to-end (builds the headless backend + web UI, drives Chromium)
 cargo test --manifest-path src-tauri/Cargo.toml    # Rust tests
 npx tsc --noEmit         # TypeScript type check
 npx oxlint               # JS/TS lint
