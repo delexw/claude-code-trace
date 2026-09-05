@@ -13,10 +13,17 @@ import { useRef, useEffect } from "react";
  * scroll container and adjust only its `scrollTop`; if there is no dedicated
  * scroll container, we do nothing rather than risk scrolling the shell.
  */
-export function useScrollToSelected(dep: number) {
+export function useScrollToSelected(selected: number) {
   const ref = useRef<HTMLDivElement>(null);
+  // The selection this hook last scrolled for. Callers move `ref` to whichever
+  // item is selected, and refs aren't reactive, so the selected index is the
+  // signal that the ref now points at a different element.
+  const scrolledFor = useRef<number | null>(null);
 
   useEffect(() => {
+    if (scrolledFor.current === selected) return;
+    scrolledFor.current = selected;
+
     const el = ref.current;
     if (!el) return;
 
@@ -51,7 +58,7 @@ export function useScrollToSelected(dep: number) {
       container.scrollTop += elRect.bottom - containerRect.bottom;
     }
     // Already fully visible → no-op.
-  }, [dep]);
+  }, [selected]);
 
   return ref;
 }

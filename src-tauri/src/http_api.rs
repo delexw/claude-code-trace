@@ -4,7 +4,8 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 
 use axum::extract::{Query, State};
-use axum::http::{header, HeaderValue, Method};
+use axum::http::{header, HeaderName, HeaderValue, Method};
+use axum::middleware::from_fn_with_state;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Json, Response};
 use axum::routing::{get, post};
@@ -15,6 +16,7 @@ use tokio_stream::StreamExt;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::services::ServeDir;
 
+use crate::auth;
 use crate::parser::debuglog::*;
 use crate::parser::session::extract_session_meta;
 use crate::state::AppState;
@@ -93,7 +95,7 @@ fn parse_extra_origins(raw: Option<String>) -> Vec<String> {
 /// runtime. The *live* half (origins configured via the Settings UI) is
 /// checked per-request in `build_cors`'s predicate; the two are unioned, not
 /// one replacing the other.
-fn resolve_allowed_origins() -> Vec<String> {
+pub(crate) fn resolve_allowed_origins() -> Vec<String> {
     let mut origins: Vec<String> = DEFAULT_ALLOWED_ORIGINS
         .iter()
         .map(|s| s.to_string())
@@ -141,7 +143,12 @@ fn build_cors(app_state: Arc<AppState>) -> CorsLayer {
             },
         ))
         .allow_methods([Method::GET, Method::POST])
-        .allow_headers([header::CONTENT_TYPE])
+        // The token header must be preflight-allowed or browsers never send it.
+        .allow_headers([
+            header::CONTENT_TYPE,
+            header::AUTHORIZATION,
+            HeaderName::from_static(auth::TOKEN_HEADER),
+        ])
 }
 
 /// Start the HTTP API server from a Tauri AppHandle (desktop/web mode).
@@ -165,11 +172,27 @@ pub async fn start_http_server_headless(state: Arc<AppState>) {
     .await;
 }
 
-async fn run_server(state: Arc<HttpState>) {
+/// Assemble the full router: token-gated `/api/*` routes, the optional static
+/// UI fallback (Docker), and CORS outermost.
+///
+/// Layer order matters:
+/// - `route_layer` applies the auth middleware to the registered API routes
+///   only — the static fallback stays public (the SPA shell must load before
+///   it can authenticate) and unknown paths still 404 rather than 401.
+/// - The static fallback gets its own middleware that hands the token to the
+///   same-origin browser UI as a cookie (see `auth::attach_token_cookie`).
+/// - CORS is added last, so it runs first: preflights are answered before the
+///   auth check, and 401 responses carry CORS headers so the browser can read
+///   the `{"error"}` body.
+fn build_router(state: Arc<HttpState>, static_dir: Option<String>) -> Router {
     let mut router = Router::new()
         .route("/api/settings", get(api_get_settings))
         .route("/api/settings/dir", post(api_set_projects_dir))
         .route("/api/settings/origins", post(api_set_allowed_origins))
+        .route(
+            "/api/settings/token/regenerate",
+            post(api_regenerate_api_token),
+        )
         .route(
             "/api/wsl/distros",
             get(api_list_wsl_distros).post(api_set_wsl_distros),
@@ -187,16 +210,24 @@ async fn run_server(state: Arc<HttpState>) {
         .route("/api/git-info", get(api_get_git_info))
         .route("/api/debug-log", get(api_get_debug_log))
         .route("/api/focus", post(api_focus_session_window))
-        .route("/api/events", get(api_events));
+        .route("/api/events", get(api_events))
+        .route_layer(from_fn_with_state(state.clone(), auth::require_api_token));
 
-    if let Some(dir) = resolve_static_dir() {
+    if let Some(dir) = static_dir {
         let serve = ServeDir::new(&dir).append_index_html_on_directories(true);
-        router = router.fallback_service(serve);
+        let static_ui = Router::new()
+            .fallback_service(serve)
+            .layer(from_fn_with_state(state.clone(), auth::attach_token_cookie));
+        router = router.fallback_service(static_ui);
         eprintln!("HTTP API: serving static assets from {dir}");
     }
 
     let cors_state = state.app_state.clone();
-    let router = router.layer(build_cors(cors_state)).with_state(state);
+    router.layer(build_cors(cors_state)).with_state(state)
+}
+
+async fn run_server(state: Arc<HttpState>) {
+    let router = build_router(state, resolve_static_dir());
 
     let (host, port) = resolve_bind_addr();
     let addr = format!("{host}:{port}");
@@ -222,7 +253,7 @@ fn app_state(state: &HttpState) -> &AppState {
     &state.app_state
 }
 
-fn err_response(status: axum::http::StatusCode, msg: String) -> Response {
+pub(crate) fn err_response(status: axum::http::StatusCode, msg: String) -> Response {
     (status, Json(serde_json::json!({ "error": msg }))).into_response()
 }
 
@@ -242,7 +273,10 @@ async fn api_get_settings(State(state): State<Arc<HttpState>>) -> Response {
             return err_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
         }
     };
-    ok_json(&crate::commands::settings::build_response_pub(&guard))
+    ok_json(&crate::commands::settings::build_response_pub(
+        &guard,
+        &app_state.api_auth_snapshot(),
+    ))
 }
 
 #[derive(Deserialize)]
@@ -282,7 +316,10 @@ async fn api_set_projects_dir(
     if let Err(e) = crate::settings::save_settings(&guard) {
         return err_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e);
     }
-    ok_json(&crate::commands::settings::build_response_pub(&guard))
+    ok_json(&crate::commands::settings::build_response_pub(
+        &guard,
+        &app_state.api_auth_snapshot(),
+    ))
 }
 
 #[derive(Deserialize)]
@@ -311,7 +348,31 @@ async fn api_set_allowed_origins(
     if let Err(e) = crate::settings::save_settings(&guard) {
         return err_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e);
     }
-    ok_json(&crate::commands::settings::build_response_pub(&guard))
+    ok_json(&crate::commands::settings::build_response_pub(
+        &guard,
+        &app_state.api_auth_snapshot(),
+    ))
+}
+
+/// Rotate the shared API token. Reachable only by a caller that already holds
+/// the current token (the route is gated like every other). The new token is
+/// also set as the same-origin cookie so a Docker browser tab rotates in place.
+async fn api_regenerate_api_token(State(state): State<Arc<HttpState>>) -> Response {
+    let app_state = app_state(&state);
+    match crate::commands::api_token::regenerate_api_token_impl(app_state) {
+        Ok(settings) => {
+            let mut response = ok_json(&settings);
+            if let Some(cookie) = settings
+                .api_token
+                .as_deref()
+                .and_then(auth::token_cookie_header)
+            {
+                response.headers_mut().append(header::SET_COOKIE, cookie);
+            }
+            response
+        }
+        Err(e) => err_response(axum::http::StatusCode::BAD_REQUEST, e),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -358,7 +419,10 @@ async fn api_set_wsl_distros(
     if let Err(e) = crate::settings::save_settings(&guard) {
         return err_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e);
     }
-    ok_json(&crate::commands::settings::build_response_pub(&guard))
+    ok_json(&crate::commands::settings::build_response_pub(
+        &guard,
+        &app_state.api_auth_snapshot(),
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -792,7 +856,9 @@ mod tests {
 
     #[test]
     fn build_cors_constructs_without_panicking() {
-        let state = Arc::new(crate::state::AppState::new());
+        let state = Arc::new(crate::state::AppState::for_tests(
+            crate::auth::ApiAuth::Disabled,
+        ));
         let _ = build_cors(state);
     }
 
@@ -838,6 +904,415 @@ mod tests {
             &static_origins,
             &[]
         ));
+    }
+
+    // -----------------------------------------------------------------------
+    // Client verification (token middleware) — full router via `oneshot`
+    // -----------------------------------------------------------------------
+
+    use crate::auth::ApiAuth;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use tower::ServiceExt;
+
+    const TOKEN: &str = "test-token-0123456789abcdef";
+
+    fn test_state(auth: ApiAuth) -> Arc<HttpState> {
+        Arc::new(HttpState {
+            app_state: Arc::new(crate::state::AppState::for_tests(auth)),
+            app: None,
+        })
+    }
+
+    fn api_router(auth: ApiAuth) -> Router {
+        build_router(test_state(auth), None)
+    }
+
+    fn get(uri: &str) -> Request<Body> {
+        Request::builder().uri(uri).body(Body::empty()).unwrap()
+    }
+
+    fn get_with(uri: &str, headers: &[(&str, &str)]) -> Request<Body> {
+        let mut b = Request::builder().uri(uri);
+        for (k, v) in headers {
+            b = b.header(*k, *v);
+        }
+        b.body(Body::empty()).unwrap()
+    }
+
+    async fn body_json(resp: Response) -> serde_json::Value {
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        serde_json::from_slice(&bytes).unwrap()
+    }
+
+    #[tokio::test]
+    async fn api_route_without_token_is_401_with_json_error() {
+        let resp = api_router(ApiAuth::File(TOKEN.into()))
+            .oneshot(get("/api/settings"))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+        let json = body_json(resp).await;
+        assert!(json["error"].as_str().unwrap().contains("API token"));
+    }
+
+    #[tokio::test]
+    async fn api_route_with_wrong_token_is_401() {
+        let resp = api_router(ApiAuth::File(TOKEN.into()))
+            .oneshot(get_with("/api/settings", &[("x-cctrace-token", "nope")]))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn api_route_with_header_token_is_200() {
+        let resp = api_router(ApiAuth::File(TOKEN.into()))
+            .oneshot(get_with("/api/settings", &[("x-cctrace-token", TOKEN)]))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json = body_json(resp).await;
+        assert_eq!(json["api_token"], TOKEN);
+        assert_eq!(json["api_token_source"], "file");
+    }
+
+    #[tokio::test]
+    async fn api_route_with_bearer_token_is_200() {
+        let resp = api_router(ApiAuth::Env(TOKEN.into()))
+            .oneshot(get_with(
+                "/api/settings",
+                &[("authorization", &format!("Bearer {TOKEN}"))],
+            ))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn api_route_with_query_token_is_200() {
+        let resp = api_router(ApiAuth::File(TOKEN.into()))
+            .oneshot(get(&format!("/api/settings?token={TOKEN}")))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn api_route_with_cookie_token_is_200() {
+        let resp = api_router(ApiAuth::File(TOKEN.into()))
+            .oneshot(get_with(
+                "/api/settings",
+                &[("cookie", &format!("theme=dark; cctrace_token={TOKEN}"))],
+            ))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn sse_route_accepts_query_token() {
+        let resp = api_router(ApiAuth::File(TOKEN.into()))
+            .oneshot(get(&format!("/api/events?token={TOKEN}")))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let ct = resp.headers().get(header::CONTENT_TYPE).unwrap();
+        assert!(ct.to_str().unwrap().starts_with("text/event-stream"));
+    }
+
+    #[tokio::test]
+    async fn auth_disabled_allows_requests_without_token() {
+        let resp = api_router(ApiAuth::Disabled)
+            .oneshot(get("/api/settings"))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json = body_json(resp).await;
+        assert_eq!(json["api_auth_enabled"], false);
+        assert!(json["api_token"].is_null());
+    }
+
+    #[tokio::test]
+    async fn unknown_path_is_404_not_401() {
+        let resp = api_router(ApiAuth::File(TOKEN.into()))
+            .oneshot(get("/api/does-not-exist"))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn cors_preflight_passes_without_token_and_allows_token_header() {
+        let req = Request::builder()
+            .method(Method::OPTIONS)
+            .uri("/api/settings")
+            .header("origin", "http://localhost:1420")
+            .header("access-control-request-method", "GET")
+            .header("access-control-request-headers", "x-cctrace-token")
+            .body(Body::empty())
+            .unwrap();
+        let resp = api_router(ApiAuth::File(TOKEN.into()))
+            .oneshot(req)
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let allowed = resp
+            .headers()
+            .get("access-control-allow-headers")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_ascii_lowercase();
+        assert!(allowed.contains("x-cctrace-token"), "{allowed}");
+    }
+
+    #[tokio::test]
+    async fn unauthorized_response_still_carries_cors_headers() {
+        let resp = api_router(ApiAuth::File(TOKEN.into()))
+            .oneshot(get_with(
+                "/api/settings",
+                &[("origin", "http://localhost:1420")],
+            ))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            resp.headers()
+                .get("access-control-allow-origin")
+                .and_then(|v| v.to_str().ok()),
+            Some("http://localhost:1420")
+        );
+    }
+
+    #[tokio::test]
+    async fn regenerate_rotates_live_token_so_old_token_is_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("api-token");
+        std::fs::write(&path, format!("{TOKEN}\n")).unwrap();
+        let state = test_state(ApiAuth::File(TOKEN.into()));
+
+        let new_token = state
+            .app_state
+            .regenerate_api_token_at(Some(&path))
+            .unwrap();
+
+        let old = build_router(state.clone(), None)
+            .oneshot(get_with("/api/settings", &[("x-cctrace-token", TOKEN)]))
+            .await
+            .unwrap();
+        assert_eq!(old.status(), StatusCode::UNAUTHORIZED);
+
+        let fresh = build_router(state, None)
+            .oneshot(get_with(
+                "/api/settings",
+                &[("x-cctrace-token", &new_token)],
+            ))
+            .await
+            .unwrap();
+        assert_eq!(fresh.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn mismatch_re_reads_a_rotated_token_file_before_rejecting() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("api-token");
+        std::fs::write(&path, "rotated-by-other-process\n").unwrap();
+        let state = test_state(ApiAuth::File(TOKEN.into()));
+        state.app_state.set_api_token_path(Some(path));
+
+        // The token in the file (rotated by another process) is accepted…
+        let fresh = build_router(state.clone(), None)
+            .oneshot(get_with(
+                "/api/settings",
+                &[("x-cctrace-token", "rotated-by-other-process")],
+            ))
+            .await
+            .unwrap();
+        assert_eq!(fresh.status(), StatusCode::OK);
+        // …and from then on the stale in-memory token is rejected.
+        let stale = build_router(state.clone(), None)
+            .oneshot(get_with("/api/settings", &[("x-cctrace-token", TOKEN)]))
+            .await
+            .unwrap();
+        assert_eq!(stale.status(), StatusCode::UNAUTHORIZED);
+        // A wrong token still fails even though the file exists.
+        let wrong = build_router(state, None)
+            .oneshot(get_with("/api/settings", &[("x-cctrace-token", "nope")]))
+            .await
+            .unwrap();
+        assert_eq!(wrong.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn sse_route_accepts_percent_encoded_env_token_in_query() {
+        let resp = api_router(ApiAuth::Env("my/secret+key".into()))
+            .oneshot(get("/api/events?token=my%2Fsecret%2Bkey"))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn regenerate_route_rejects_ephemeral_source() {
+        let router = api_router(ApiAuth::Ephemeral(TOKEN.into()));
+        let req = Request::builder()
+            .method(Method::POST)
+            .uri("/api/settings/token/regenerate")
+            .header("x-cctrace-token", TOKEN)
+            .body(Body::empty())
+            .unwrap();
+        let resp = router.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        let json = body_json(resp).await;
+        assert!(json["error"]
+            .as_str()
+            .unwrap()
+            .contains("could not be persisted"));
+        assert!(!json["error"]
+            .as_str()
+            .unwrap()
+            .contains("CCTRACE_API_TOKEN"));
+    }
+
+    #[tokio::test]
+    async fn regenerate_route_requires_token_and_rejects_env_source() {
+        let router = api_router(ApiAuth::Env(TOKEN.into()));
+        let post = |headers: &[(&str, &str)]| {
+            let mut b = Request::builder()
+                .method(Method::POST)
+                .uri("/api/settings/token/regenerate");
+            for (k, v) in headers {
+                b = b.header(*k, *v);
+            }
+            b.body(Body::empty()).unwrap()
+        };
+        let denied = router.clone().oneshot(post(&[])).await.unwrap();
+        assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
+
+        let rejected = router
+            .oneshot(post(&[("x-cctrace-token", TOKEN)]))
+            .await
+            .unwrap();
+        assert_eq!(rejected.status(), StatusCode::BAD_REQUEST);
+        let json = body_json(rejected).await;
+        assert!(json["error"]
+            .as_str()
+            .unwrap()
+            .contains("CCTRACE_API_TOKEN"));
+    }
+
+    // -- static fallback + cookie -------------------------------------------
+
+    fn static_dir() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("index.html"),
+            "<!doctype html><title>x</title>",
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("app.js"), "console.log(1)").unwrap();
+        dir
+    }
+
+    fn static_router(auth: ApiAuth, dir: &tempfile::TempDir) -> Router {
+        build_router(
+            test_state(auth),
+            Some(dir.path().to_string_lossy().to_string()),
+        )
+    }
+
+    fn set_cookie(resp: &Response) -> Option<String> {
+        resp.headers()
+            .get(header::SET_COOKIE)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned)
+    }
+
+    #[tokio::test]
+    async fn static_fallback_serves_without_token() {
+        let dir = static_dir();
+        let resp = static_router(ApiAuth::File(TOKEN.into()), &dir)
+            .oneshot(get_with("/app.js", &[("host", "localhost:1421")]))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        // Non-HTML assets never carry the cookie.
+        assert!(set_cookie(&resp).is_none());
+    }
+
+    #[tokio::test]
+    async fn static_index_sets_token_cookie_for_localhost_host() {
+        let dir = static_dir();
+        let resp = static_router(ApiAuth::File(TOKEN.into()), &dir)
+            .oneshot(get_with("/", &[("host", "localhost:1421")]))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let cookie = set_cookie(&resp).expect("Set-Cookie present");
+        assert!(
+            cookie.starts_with(&format!("cctrace_token={TOKEN};")),
+            "{cookie}"
+        );
+        assert!(cookie.contains("HttpOnly"));
+        assert!(cookie.contains("SameSite=Strict"));
+    }
+
+    #[tokio::test]
+    async fn static_index_does_not_set_cookie_for_unknown_host() {
+        let dir = static_dir();
+        let resp = static_router(ApiAuth::File(TOKEN.into()), &dir)
+            .oneshot(get_with("/", &[("host", "attacker.example:1421")]))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK, "the page still loads");
+        assert!(set_cookie(&resp).is_none(), "but no token cookie is issued");
+    }
+
+    #[tokio::test]
+    async fn static_index_does_not_set_cookie_without_host_header() {
+        let dir = static_dir();
+        let resp = static_router(ApiAuth::File(TOKEN.into()), &dir)
+            .oneshot(get("/"))
+            .await
+            .unwrap();
+        assert!(set_cookie(&resp).is_none());
+    }
+
+    #[tokio::test]
+    async fn static_index_sets_cookie_for_settings_allowlisted_host() {
+        let dir = static_dir();
+        let state = test_state(ApiAuth::File(TOKEN.into()));
+        state.app_state.settings.lock().unwrap().allowed_origins =
+            vec!["https://cctrace.example.com".to_string()];
+        let resp = build_router(state, Some(dir.path().to_string_lossy().to_string()))
+            .oneshot(get_with("/", &[("host", "cctrace.example.com")]))
+            .await
+            .unwrap();
+        assert!(set_cookie(&resp).is_some());
+    }
+
+    #[tokio::test]
+    async fn static_index_sets_no_cookie_when_auth_disabled() {
+        let dir = static_dir();
+        let resp = static_router(ApiAuth::Disabled, &dir)
+            .oneshot(get_with("/", &[("host", "localhost:1421")]))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert!(set_cookie(&resp).is_none());
+    }
+
+    #[tokio::test]
+    async fn api_routes_stay_gated_when_static_fallback_is_mounted() {
+        let dir = static_dir();
+        let resp = static_router(ApiAuth::File(TOKEN.into()), &dir)
+            .oneshot(get_with("/api/settings", &[("host", "localhost:1421")]))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
     }
 
     // -----------------------------------------------------------------------

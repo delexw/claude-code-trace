@@ -70,7 +70,7 @@ pub async fn set_allowed_origins(
     let mut guard = state.settings.lock().map_err(|e| e.to_string())?;
     guard.allowed_origins = validated;
     crate::settings::save_settings(&guard)?;
-    Ok(build_response_pub(&guard))
+    Ok(build_response_pub(&guard, &state.api_auth_snapshot()))
 }
 
 #[cfg(test)]

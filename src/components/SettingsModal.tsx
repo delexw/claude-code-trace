@@ -1,5 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "../lib/invoke";
+import { isTauri } from "../lib/isTauri";
+import { setApiToken as setLiveApiToken } from "../lib/apiToken";
+import { reconnectSse } from "../lib/listen";
 import { PopoutModal } from "./PopoutModal";
 import { FONT_SCALE_PRESETS, formatFontScale } from "../lib/fontScale";
 
@@ -10,7 +13,16 @@ interface SettingsResponse {
   effective_dir_exists: boolean;
   wsl_distros: string[];
   allowed_origins: string[];
+  /** Whether the HTTP API requires the shared client token. */
+  api_auth_enabled?: boolean;
+  /** "file" (rotatable here), "env" (CCTRACE_API_TOKEN, read-only), "ephemeral"
+   * (token file unusable at startup; one-off, read-only) or "disabled". */
+  api_token_source?: ApiTokenSource;
+  /** The token accepted clients must present; null when disabled. */
+  api_token?: string | null;
 }
+
+type ApiTokenSource = "file" | "env" | "ephemeral" | "disabled";
 
 interface SettingsModalProps {
   onClose: () => void;
@@ -57,6 +69,12 @@ export function SettingsModal({
   const [availableDistros, setAvailableDistros] = useState<string[]>([]);
   const [selectedDistros, setSelectedDistros] = useState<Set<string>>(new Set());
   const [allowedOriginsText, setAllowedOriginsText] = useState("");
+  const [apiToken, setApiTokenState] = useState<string | null>(null);
+  const [apiTokenSource, setApiTokenSource] = useState<ApiTokenSource>("file");
+  const [showToken, setShowToken] = useState(false);
+  const [confirmRegen, setConfirmRegen] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
+  const [tokenNotice, setTokenNotice] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -67,6 +85,10 @@ export function SettingsModal({
     setEffectiveDirExists(res.effective_dir_exists);
     setSelectedDistros(new Set(res.wsl_distros ?? []));
     setAllowedOriginsText((res.allowed_origins ?? []).join("\n"));
+    setApiTokenState(res.api_token ?? null);
+    setApiTokenSource(
+      res.api_token_source ?? (res.api_auth_enabled === false ? "disabled" : "file"),
+    );
   }, []);
 
   useEffect(() => {
@@ -133,6 +155,45 @@ export function SettingsModal({
       setSaving(false);
     }
   }, [applyResponse, onSaved, onClose]);
+
+  const handleCopyToken = useCallback(async () => {
+    if (!apiToken) return;
+    try {
+      await navigator.clipboard.writeText(apiToken);
+      setTokenNotice("Token copied to clipboard.");
+    } catch {
+      setTokenNotice("Could not access the clipboard — use Show and copy it manually.");
+    }
+  }, [apiToken]);
+
+  // Two-click confirm: the first click arms the button, the second rotates.
+  // Rotation invalidates every other client's token, so it shouldn't be one
+  // accidental click away.
+  const handleRegenerate = useCallback(async () => {
+    if (!confirmRegen) {
+      setConfirmRegen(true);
+      setTokenNotice(
+        "Click again to confirm. Other clients (TUI, scripts) will need the new token.",
+      );
+      return;
+    }
+    setConfirmRegen(false);
+    setRegenerating(true);
+    setError("");
+    try {
+      const res = await invoke<SettingsResponse>("regenerate_api_token");
+      applyResponse(res);
+      // Keep this tab working: send the new token from now on and reopen the
+      // SSE stream, which was authenticated with the old one.
+      setLiveApiToken(res.api_token);
+      if (!isTauri) reconnectSse();
+      setTokenNotice("Token regenerated — update the TUI and any scripts that used the old one.");
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setRegenerating(false);
+    }
+  }, [confirmRegen, applyResponse]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -232,6 +293,76 @@ export function SettingsModal({
           spellCheck={false}
           rows={3}
         />
+
+        <label className="settings-modal__label settings-modal__label--section">API access</label>
+        {apiTokenSource === "disabled" ? (
+          <p className="settings-modal__hint">
+            Client verification is off (CCTRACE_API_AUTH=off): any local process can call the HTTP
+            API. Unset the variable to require the token again.
+          </p>
+        ) : (
+          <>
+            <p className="settings-modal__hint">
+              Only clients presenting this token can call the local HTTP API. The bundled web UI and
+              TUI pick it up automatically; give it to other tools as an{" "}
+              <code>X-CCTrace-Token</code> header.
+            </p>
+            <div className="settings-modal__token-row">
+              <input
+                className="settings-modal__input settings-modal__input--token"
+                type={showToken ? "text" : "password"}
+                value={apiToken ?? ""}
+                readOnly
+                aria-label="API token"
+                spellCheck={false}
+              />
+              <button
+                type="button"
+                className="settings-modal__btn"
+                onClick={() => setShowToken((v) => !v)}
+              >
+                {showToken ? "Hide" : "Show"}
+              </button>
+              <button
+                type="button"
+                className="settings-modal__btn"
+                onClick={handleCopyToken}
+                disabled={!apiToken}
+              >
+                Copy
+              </button>
+              <button
+                type="button"
+                className="settings-modal__btn"
+                onClick={handleRegenerate}
+                disabled={regenerating || apiTokenSource !== "file"}
+                title={
+                  apiTokenSource === "env"
+                    ? "Set by CCTRACE_API_TOKEN"
+                    : apiTokenSource === "ephemeral"
+                      ? "The token file could not be written at startup"
+                      : undefined
+                }
+              >
+                {confirmRegen ? "Confirm regenerate?" : "Regenerate"}
+              </button>
+            </div>
+            {apiTokenSource === "env" && (
+              <p className="settings-modal__hint">
+                The token is set by CCTRACE_API_TOKEN, so it cannot be regenerated here.
+              </p>
+            )}
+            {apiTokenSource === "ephemeral" && (
+              <p className="settings-modal__hint settings-modal__hint--missing">
+                The token file could not be written at startup, so this is a one-off token no other
+                client can read (see the server log). Fix the config directory and restart.
+              </p>
+            )}
+            {tokenNotice && (
+              <p className="settings-modal__hint settings-modal__hint--effective">{tokenNotice}</p>
+            )}
+          </>
+        )}
 
         <label className="settings-modal__label settings-modal__label--section">Font Size</label>
         <p className="settings-modal__hint">Zoom the whole interface in or out.</p>

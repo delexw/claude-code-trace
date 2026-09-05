@@ -78,6 +78,21 @@ function makeViewActionsRef(): ViewActionsRef {
   return { current: {} };
 }
 
+function makeSubagent(agentId: string, type: string): DisplayItem {
+  return makeItem({
+    id: `subagent-${agentId}`,
+    item_type: "Subagent",
+    tool_name: "",
+    tool_summary: "",
+    subagent_type: type,
+    subagent_desc: `${type} work`,
+    agent_id: agentId,
+    subagent_messages: [
+      makeMessage({ timestamp: "2026-04-27T00:00:01Z", content: `${type} output` }),
+    ],
+  });
+}
+
 function makeRootMessage(nestedItems: DisplayItem[]): DisplayMessage {
   const subagentMessage = makeMessage({
     role: "claude",
@@ -130,6 +145,34 @@ describe("MessageDetail", () => {
     );
 
     expect(screen.getByText("Bash")).toBeInTheDocument();
+  });
+
+  it("does not restore a stale scroll offset after replacing a panel at the same depth", () => {
+    const { container } = render(
+      <MessageDetail
+        message={makeMessage({
+          items: [makeSubagent("agent-a", "Explore"), makeSubagent("agent-b", "Plan")],
+        })}
+        onBack={vi.fn()}
+        viewActionsRef={makeViewActionsRef()}
+      />,
+    );
+    const body = container.querySelector(".message-detail__body") as HTMLDivElement;
+
+    // Open A from the main column (depth 0 → 1); the position is saved and restored.
+    body.scrollTop = 100;
+    fireEvent.click(screen.getAllByText("Explore")[0]);
+    expect(body.scrollTop).toBe(100);
+
+    // Replace A with B at the same depth: no re-layout, the saved offset must be dropped.
+    body.scrollTop = 50;
+    fireEvent.click(screen.getAllByText("Plan")[0]);
+    expect(body.scrollTop).toBe(50);
+
+    // Scroll on, then close B (depth 1 → 0): nothing stale to restore.
+    body.scrollTop = 70;
+    fireEvent.click(screen.getAllByText("Plan")[0]);
+    expect(body.scrollTop).toBe(70);
   });
 
   it("suppresses the flattened content blob when Output items render the prose inline", () => {

@@ -42,6 +42,8 @@ tauri-plugin-single-instance = { version = "2", optional = true }
 axum = { version = "0.8", features = ["json"] }
 tower-http = { version = "0.7", features = ["cors", "fs"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
+rand = "0.8"
+subtle = "2"
 
 [lints.clippy]
 all = { level = "warn", priority = -1 }
@@ -58,3 +60,4 @@ strip = true
 [dev-dependencies]
 tempfile = "3.27.0"
 filetime = "0.2"
+tower = { version = "0.5", features = ["util"] }

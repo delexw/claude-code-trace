@@ -23,6 +23,7 @@ from textual.widget import Widget
 from textual.widgets import ContentSwitcher, Footer, Header, ListView
 
 import api as api_client
+import auth
 from data_types import (
     DisplayMessage,
     SessionInfo,
@@ -185,7 +186,9 @@ class CCTraceApp(App):
         self._start_sse()
 
     def _start_sse(self) -> None:
-        self._sse = SSEClient(f"{API_BASE}/api/events")
+        # `auth.auth_headers` is re-evaluated on every (re)connect so a token
+        # rotated from the Settings UI is picked up without restarting the TUI.
+        self._sse = SSEClient(f"{API_BASE}/api/events", headers=auth.auth_headers)
         self._sse.on("picker-refresh", self._on_picker_refresh)
         self._sse.on("session-update", self._on_session_update)
         self._sse.start()

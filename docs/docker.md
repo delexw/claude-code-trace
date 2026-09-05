@@ -51,12 +51,15 @@ CCTRACE_HOST_PORT=9090 CLAUDE_HOME=/srv/claude docker compose up
 All runtime knobs are environment variables, so you can override them with
 `-e VAR=value` on `docker run` or under `environment:` in compose.
 
-| Variable                  | Default     | What it does                                    |
-| ------------------------- | ----------- | ----------------------------------------------- |
-| `CCTRACE_HTTP_HOST`       | `0.0.0.0`   | Bind host for the HTTP server                   |
-| `CCTRACE_HTTP_PORT`       | `1421`      | Bind port for the HTTP server                   |
-| `CCTRACE_STATIC_DIR`      | `/app/dist` | Directory of static frontend assets to serve    |
-| `CCTRACE_ALLOWED_ORIGINS` | (unset)     | Extra CORS origins, comma-separated (see below) |
+| Variable                  | Default     | What it does                                                                          |
+| ------------------------- | ----------- | ------------------------------------------------------------------------------------- |
+| `CCTRACE_HTTP_HOST`       | `0.0.0.0`   | Bind host for the HTTP server                                                         |
+| `CCTRACE_HTTP_PORT`       | `1421`      | Bind port for the HTTP server                                                         |
+| `CCTRACE_STATIC_DIR`      | `/app/dist` | Directory of static frontend assets to serve                                          |
+| `CCTRACE_ALLOWED_ORIGINS` | (unset)     | Extra CORS origins, comma-separated (see below)                                       |
+| `CCTRACE_API_TOKEN`       | (unset)     | Fixed API client token (see "API access" below)                                       |
+| `CCTRACE_API_AUTH`        | (unset)     | `off` disables the API token check                                                    |
+| `CCTRACE_CONFIG_DIR`      | (unset)     | Relocate `settings.json` + `api-token` (default `$XDG_CONFIG_HOME/claude-code-trace`) |
 
 Outside Docker (i.e. the normal desktop/web app) these variables are not
 set, and the server falls back to the historical defaults
@@ -74,6 +77,28 @@ named `cctrace-config` volume (and the Dockerfile's own `VOLUME` declaration
 gives plain `docker run` an anonymous volume for the same path) — so they
 survive a container recreate either way. Both mechanisms compose (the
 allowlist is a union), so you can use either or both.
+
+## API access (client verification)
+
+Every `/api/*` route requires a shared client token, so a container exposed on a LAN port isn't an
+open door to your session transcripts. Nothing to configure for the bundled UI: the server sets the
+token as an `HttpOnly` cookie on the HTML shell, and the browser sends it back automatically.
+
+The token lives in `/home/app/.config/claude-code-trace/api-token` (mode `0600`), i.e. inside the
+persisted config volume, so it survives container recreation. To pin a token instead — for example
+to share it with a script — set `CCTRACE_API_TOKEN`. `CCTRACE_API_AUTH=off` turns the check off
+entirely (not recommended when the port is reachable from other machines).
+
+The cookie is only issued when the request `Host` is `localhost`/`127.0.0.1` or matches an allowed
+origin. So if you open the UI via a LAN IP or a reverse-proxy hostname, add that origin to
+`CCTRACE_ALLOWED_ORIGINS` (e.g. `http://192.168.1.20:1421`) or the Settings UI — the same knob that
+was already needed for cross-origin API access. Scripts hitting the container's API directly must
+send the token:
+
+```bash
+TOKEN=$(docker compose exec cctrace cat /home/app/.config/claude-code-trace/api-token)
+curl -H "X-CCTrace-Token: $TOKEN" http://localhost:1421/api/settings
+```
 
 ## Volumes
 

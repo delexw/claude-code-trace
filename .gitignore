@@ -12,6 +12,11 @@ venv/
 dist/
 src-tauri/target/
 
+# Playwright e2e scratch space and reports
+e2e/.tmp/
+playwright-report/
+test-results/
+
 # Tauri-generated ACL schemas — regenerated from permissions/*.toml on every build
 src-tauri/gen/schemas/
 
