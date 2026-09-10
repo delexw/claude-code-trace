@@ -45,7 +45,7 @@ tokio-stream = { version = "0.1", features = ["sync"] }
 rand = "0.8"
 subtle = "2"
 hmac = "0.12"
-sha2 = "0.10"
+sha2 = "0.11"
 base64 = "0.22"
 uuid = { version = "1", features = ["v4", "serde"] }
 
