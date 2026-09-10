@@ -360,8 +360,15 @@ shows as a top-level banner instead of opening Settings. `setApiToken()` notifie
 subscribers only when the value really changes; `listen.ts` subscribes and reopens its stream, so the
 SSE connection follows the credential whether the reissue came from Settings → Accepted clients in
 this tab or was pushed over HMR because another client rewrote the file. The dev server is never
-restarted for a reissue. `SettingsModal` owns the **Accepted clients** section: list, Add client
-(credential shown once), Reissue and Revoke (two-click confirms, `web-ui` lock-out warning).
+restarted for a reissue. `EventSource` retries network failures by itself, but a non-200 reply makes
+it fail the connection for good (`readyState` `CLOSED`, one `error`, no retry) — and since
+`/api/events` is authenticated, a reconnect the browser makes with the URL or cookie the stream was
+opened with can now be refused with a 401 (backend restart, sleep/wake, a suspended tab, after the
+credential changed). `listen.ts` watches for that and reopens the stream with the _current_
+credential, backing off from 1 s to 30 s between attempts and resetting once a stream opens, for as
+long as anything is listening; a credential change reopens immediately instead. `SettingsModal`
+owns the **Accepted clients** section: list, Add client (credential shown once), Reissue and Revoke
+(two-click confirms, `web-ui` lock-out warning).
 
 ```mermaid
 flowchart LR
