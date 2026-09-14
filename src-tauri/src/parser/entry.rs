@@ -3,9 +3,15 @@ use serde_json::Value;
 use std::borrow::Cow;
 use std::collections::HashMap;
 
-/// Deserializes a JSON string field, treating `null` as the type's default
-/// value. Serde's `#[serde(default)]` only applies when the field is absent;
-/// this helper also handles the `"field": null` case.
+/// Deserializes a field, treating `null` as the type's default value. Serde's
+/// `#[serde(default)]` only applies when the field is *absent*; this helper also
+/// handles the `"field": null` case.
+///
+/// Every non-`Option` field on the entry structs below must carry this, because
+/// a single field serde refuses to deserialize fails the *whole line*: the entry
+/// is dropped, leaving a hole in the `parentUuid` chain that can hide the rest of
+/// the session. `Option<T>` fields need no annotation — serde already maps `null`
+/// to `None`. The `entry_null_tolerance` integration test enforces this rule.
 fn null_as_default<'de, D, T>(d: D) -> Result<T, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -17,59 +23,71 @@ where
 /// Entry represents a raw JSONL line from a Claude Code session file.
 #[derive(Debug, Deserialize, Default)]
 pub struct Entry {
-    #[serde(default, rename = "type")]
+    #[serde(default, rename = "type", deserialize_with = "null_as_default")]
     pub entry_type: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub uuid: String,
     #[serde(default, rename = "parentUuid", deserialize_with = "null_as_default")]
     pub parent_uuid: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub timestamp: String,
-    #[serde(default, rename = "isSidechain")]
+    #[serde(default, rename = "isSidechain", deserialize_with = "null_as_default")]
     pub is_sidechain: bool,
-    #[serde(default, rename = "isMeta")]
+    #[serde(default, rename = "isMeta", deserialize_with = "null_as_default")]
     pub is_meta: bool,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub message: EntryMessage,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub cwd: String,
-    #[serde(default, rename = "gitBranch")]
+    #[serde(default, rename = "gitBranch", deserialize_with = "null_as_default")]
     pub git_branch: String,
-    #[serde(default, rename = "permissionMode")]
+    #[serde(
+        default,
+        rename = "permissionMode",
+        deserialize_with = "null_as_default"
+    )]
     pub permission_mode: String,
     #[serde(default, rename = "toolUseResult")]
     pub tool_use_result: Option<Value>,
-    #[serde(default, rename = "sourceToolUseID")]
+    #[serde(
+        default,
+        rename = "sourceToolUseID",
+        deserialize_with = "null_as_default"
+    )]
     pub source_tool_use_id: String,
-    #[serde(default, rename = "leafUuid")]
+    #[serde(default, rename = "leafUuid", deserialize_with = "null_as_default")]
     pub leaf_uuid: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub summary: String,
-    #[serde(default, rename = "requestId")]
+    #[serde(default, rename = "requestId", deserialize_with = "null_as_default")]
     pub request_id: String,
-    #[serde(default, rename = "teamName")]
+    #[serde(default, rename = "teamName", deserialize_with = "null_as_default")]
     pub team_name: String,
-    #[serde(default, rename = "agentName")]
+    #[serde(default, rename = "agentName", deserialize_with = "null_as_default")]
     pub agent_name: String,
     #[serde(default)]
     pub data: Option<Value>,
     // Top-level fields present in system/hook_progress entries (verbose/stream-json mode).
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub subtype: String,
     // hook_event is stored as a plain String (not an enum) so that new hook event names
     // introduced by future Claude Code releases (e.g. MessageDisplay added in v2.1.152) are
     // captured as-is rather than rejected. Callers that need to distinguish specific event
     // types should match on the string value with a wildcard fallback arm.
-    #[serde(default, rename = "hookEvent")]
+    #[serde(default, rename = "hookEvent", deserialize_with = "null_as_default")]
     pub hook_event: String,
-    #[serde(default, rename = "hookName")]
+    #[serde(default, rename = "hookName", deserialize_with = "null_as_default")]
     pub hook_name: String,
     // Top-level fields present in system/stop_hook_summary entries.
-    #[serde(default, rename = "hookCount")]
+    #[serde(default, rename = "hookCount", deserialize_with = "null_as_default")]
     pub hook_count: u32,
     #[serde(default, rename = "hookInfos")]
     pub hook_infos: Option<Value>,
-    #[serde(default, rename = "preventedContinuation")]
+    #[serde(
+        default,
+        rename = "preventedContinuation",
+        deserialize_with = "null_as_default"
+    )]
     pub prevented_continuation: bool,
     // Present in type:"attachment" entries. Hook results for PreToolUse, PostToolUse, etc.
     // are written as attachment entries: {type:"attachment", attachment:{type:"hook_success"|
@@ -79,7 +97,7 @@ pub struct Entry {
     // Present in type:"system", subtype:"away_summary" entries (v2.1.108+). Claude Code writes
     // a recap entry when the user returns after being idle; the recap text is at top-level
     // `content`, not inside `message.content`.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub content: String,
     // Present in type:"system", subtype:"compact_boundary" entries. Claude Code writes this to
     // mark where a compaction occurred. parentUuid is null (breaks the chain), but
@@ -93,7 +111,11 @@ pub struct Entry {
     pub logical_parent_uuid: String,
     // Present in type:"user" entries when Claude Code wrote the AI-generated summary of a
     // compacted conversation. We classify these as CompactMsg instead of regular user messages.
-    #[serde(default, rename = "isCompactSummary")]
+    #[serde(
+        default,
+        rename = "isCompactSummary",
+        deserialize_with = "null_as_default"
+    )]
     pub is_compact_summary: bool,
     // Present in forked session entries (pre-v2.1.118). When /fork branched a conversation,
     // each duplicated parent entry carried forkedFrom:{sessionId,messageUuid} to identify
@@ -101,11 +123,19 @@ pub struct Entry {
     #[serde(default, rename = "forkedFrom")]
     pub forked_from: Option<Value>,
     // Present in type:"fork-context-ref" entries (v2.1.118+). The session being forked from.
-    #[serde(default, rename = "forkedSessionId")]
+    #[serde(
+        default,
+        rename = "forkedSessionId",
+        deserialize_with = "null_as_default"
+    )]
     pub forked_session_id: String,
     // Present in type:"fork-context-ref" entries (v2.1.118+). The message uuid in the parent
     // session up to which the fork context should be read.
-    #[serde(default, rename = "upToMessageId")]
+    #[serde(
+        default,
+        rename = "upToMessageId",
+        deserialize_with = "null_as_default"
+    )]
     pub up_to_message_id: String,
     // Present in hook-related entries (v2.1.133+). Claude Code injects the active effort level
     // into hook input JSON as effort:{level:"low"|"normal"|"high"}.
@@ -131,13 +161,21 @@ pub struct Entry {
     // Present in workflow lifecycle entries (v2.1.154+). Claude Code's dynamic workflow
     // system writes workflow-start, workflow-progress, workflow-complete, workflow-cancelled,
     // and workflow-error entries carrying these fields.
-    #[serde(default, rename = "workflowId")]
+    #[serde(default, rename = "workflowId", deserialize_with = "null_as_default")]
     pub workflow_id: String,
-    #[serde(default, rename = "workflowName")]
+    #[serde(default, rename = "workflowName", deserialize_with = "null_as_default")]
     pub workflow_name: String,
-    #[serde(default, rename = "workflowRunUrl")]
+    #[serde(
+        default,
+        rename = "workflowRunUrl",
+        deserialize_with = "null_as_default"
+    )]
     pub workflow_run_url: String,
-    #[serde(default, rename = "workflowStatus")]
+    #[serde(
+        default,
+        rename = "workflowStatus",
+        deserialize_with = "null_as_default"
+    )]
     pub workflow_status: String,
     // Present in sidechain entries when Claude Code writes deeply nested sub-agent attribution
     // fields (v2.1.172+). With 5-level sub-agent nesting, entries carry `agentDepth` (1-indexed
@@ -147,7 +185,11 @@ pub struct Entry {
     // silently dropped by the parser.
     #[serde(default, rename = "agentDepth")]
     pub agent_depth: Option<u32>,
-    #[serde(default, rename = "parentAgentName")]
+    #[serde(
+        default,
+        rename = "parentAgentName",
+        deserialize_with = "null_as_default"
+    )]
     pub parent_agent_name: String,
     // Present in type:"rewind-pointer" entries (v2.1.191+). When /rewind is used to resume a
     // conversation from before /clear was run, Claude Code may write a rewind-pointer entry.
@@ -157,7 +199,7 @@ pub struct Entry {
     pub rewind_to_uuid: String,
     // Present in summary or compact_boundary entries (v2.1.191+). When true, the compaction
     // checkpoint is persisted and the pre-clear state can be resumed via /rewind.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub rewindable: bool,
     // Present in summary or compact_boundary entries when rewindable:true (v2.1.191+).
     // Points to the UUID of the last pre-clear message — the anchor for /rewind. Enables
@@ -176,24 +218,24 @@ pub struct Entry {
     // `version` is the Claude Code version string that wrote the entry (e.g. "2.1.141").
     // It acts as a schema-version discriminant: parsers can gate forward-compat logic on it
     // without requiring a separate metadata file.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub version: String,
     // `entrypoint` identifies how Claude Code was invoked when the entry was written.
     // Common values: "sdk-ts" (TypeScript SDK / background agent), "cli" (interactive CLI).
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub entrypoint: String,
     // `sessionId` is the owning session's UUID. Present on all background-agent entries and
     // on type:"last-prompt" / type:"queue-operation" structural metadata entries.
-    #[serde(default, rename = "sessionId")]
+    #[serde(default, rename = "sessionId", deserialize_with = "null_as_default")]
     pub session_id: String,
     // `agentId` identifies the specific background-agent instance that wrote the entry.
     // Distinct from `agentName` (a human-readable label): agentId is an opaque identifier
     // assigned by Claude Code at agent creation time.
-    #[serde(default, rename = "agentId")]
+    #[serde(default, rename = "agentId", deserialize_with = "null_as_default")]
     pub agent_id: String,
     // `userType` classifies the actor that submitted the prompt. Common values:
     // "external" (SDK / background agent), "human" (interactive CLI user).
-    #[serde(default, rename = "userType")]
+    #[serde(default, rename = "userType", deserialize_with = "null_as_default")]
     pub user_type: String,
     // `attributionSkill` names the Claude Code skill that spawned this background-agent
     // session. Absent when the agent was launched directly rather than via a skill.
@@ -203,23 +245,31 @@ pub struct Entry {
     // entry to persist the most recent prompt text for background-agent checkpoint/resume.
     // The entry's `leafUuid` points to the last message in the conversation at the time
     // the checkpoint was written.
-    #[serde(default, rename = "lastPrompt")]
+    #[serde(default, rename = "lastPrompt", deserialize_with = "null_as_default")]
     pub last_prompt: String,
     // Present in auto-mode denial entries (v2.1.193+). When Claude Code's auto-mode denies a
     // tool call, it writes a denial entry to the transcript for replay and /permissions recent
     // denials display. `reason` holds the human-readable denial explanation; `tool_name` names
     // the tool that was blocked (may also appear in progress data for the same event).
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub reason: String,
-    #[serde(default, rename = "toolName")]
+    #[serde(default, rename = "toolName", deserialize_with = "null_as_default")]
     pub tool_name: String,
     // Present in background subagent permission prompt entries (v2.1.186+). When a background
     // subagent surfaces a permission prompt in the main session JSONL instead of being
     // auto-denied, `source_agent_name` is the requesting subagent's display name and
     // `requesting_agent_uuid` is its session UUID, allowing the UI to attribute the prompt.
-    #[serde(default, rename = "sourceAgentName")]
+    #[serde(
+        default,
+        rename = "sourceAgentName",
+        deserialize_with = "null_as_default"
+    )]
     pub source_agent_name: String,
-    #[serde(default, rename = "requestingAgentUuid")]
+    #[serde(
+        default,
+        rename = "requestingAgentUuid",
+        deserialize_with = "null_as_default"
+    )]
     pub requesting_agent_uuid: String,
     // Present in type:"progress" heartbeat entries (v2.1.214+). Claude Code emits periodic
     // heartbeats for long-running tool calls that previously went silent so the session file
@@ -227,21 +277,21 @@ pub struct Entry {
     // identifies the in-flight tool call; `heartbeat_elapsed_ms` is elapsed milliseconds
     // since the call started; `heartbeat_seq` is a monotonically increasing counter per
     // tool_use_id. These entries are noise (no data.hookEvent) and are dropped by classify.
-    #[serde(default, rename = "toolUseId")]
+    #[serde(default, rename = "toolUseId", deserialize_with = "null_as_default")]
     pub heartbeat_tool_use_id: String,
-    #[serde(default, rename = "elapsedMs")]
+    #[serde(default, rename = "elapsedMs", deserialize_with = "null_as_default")]
     pub heartbeat_elapsed_ms: u64,
-    #[serde(default, rename = "seq")]
+    #[serde(default, rename = "seq", deserialize_with = "null_as_default")]
     pub heartbeat_seq: u32,
 }
 
 #[derive(Debug, Deserialize, Default)]
 pub struct EntryMessage {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub role: String,
     #[serde(default)]
     pub content: Option<Value>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub model: String,
     #[serde(default)]
     pub stop_reason: Option<String>,
@@ -262,7 +312,7 @@ pub struct EntryMessage {
 /// addition to) the flat `usage.cache_creation_input_tokens` field.
 #[derive(Debug, Deserialize, Default)]
 pub struct CacheCreationUsage {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub input_tokens: i64,
 }
 
@@ -285,7 +335,7 @@ pub struct EntryUsage {
     /// Per-iteration usage breakdown. The advisor tool call (a single logical turn) actually
     /// spans multiple model invocations under the hood — the caller's own message plus a
     /// nested call to the advisor model — and Claude Code records each as one entry here.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub iterations: Vec<IterationUsage>,
 }
 
@@ -303,7 +353,7 @@ impl EntryUsage {
 /// One entry in `usage.iterations` — a single model invocation within a turn.
 #[derive(Debug, Deserialize, Default, Clone)]
 pub struct IterationUsage {
-    #[serde(default, rename = "type")]
+    #[serde(default, rename = "type", deserialize_with = "null_as_default")]
     pub iteration_type: String,
     #[serde(default)]
     pub model: Option<String>,
@@ -2126,6 +2176,85 @@ mod tests {
             parse_entry(&bytes).is_none(),
             "last-prompt with no leafUuid must return None"
         );
+    }
+
+    #[test]
+    fn parse_entry_keeps_synthetic_assistant_with_null_usage_iterations() {
+        // v2.1.266 writes `"iterations": null` on synthetic assistant messages. serde's
+        // `#[serde(default)]` only covers an ABSENT field, so this used to fail the whole
+        // line: the entry was dropped, the parentUuid chain lost a link, and the chain
+        // walk stopped there — blanking every earlier message in the session.
+        let line = json!({
+            "type": "assistant",
+            "uuid": "a94e01dc-2569-4aac-b8ef-2a0a9b96b589",
+            "parentUuid": "3b045d8c-43d0-4fd7-927d-32d66e755720",
+            "message": {
+                "role": "assistant",
+                "model": "<synthetic>",
+                "content": [{"type": "text", "text": "No response requested."}],
+                "usage": {
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "inference_geo": null,
+                    "iterations": null,
+                    "speed": null
+                }
+            }
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("null iterations must not discard the entry");
+        assert_eq!(entry.uuid, "a94e01dc-2569-4aac-b8ef-2a0a9b96b589");
+        assert_eq!(entry.parent_uuid, "3b045d8c-43d0-4fd7-927d-32d66e755720");
+        assert!(entry.message.usage.iterations.is_empty());
+        assert_eq!(entry.message.model, "<synthetic>");
+    }
+
+    #[test]
+    fn parse_entry_survives_null_in_any_non_option_field() {
+        // Blanket cover for the same failure shape on every other field: a `null` must
+        // read as the default, never fail the line. The `entry_null_tolerance` test
+        // enforces the annotation; this checks the behaviour it buys.
+        let line = json!({
+            "type": "assistant",
+            "uuid": "u1",
+            "parentUuid": null,
+            "timestamp": null,
+            "isSidechain": null,
+            "isMeta": null,
+            "cwd": null,
+            "gitBranch": null,
+            "requestId": null,
+            "version": null,
+            "sessionId": null,
+            "userType": null,
+            "hookCount": null,
+            "elapsedMs": null,
+            "rewindable": null,
+            "message": {
+                "role": null,
+                "model": null,
+                "content": [{"type": "text", "text": "hi"}],
+                "usage": {"input_tokens": null, "iterations": null, "cache_creation": null}
+            }
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("nulls must read as defaults");
+        assert_eq!(entry.uuid, "u1");
+        assert!(entry.parent_uuid.is_empty());
+        assert!(!entry.is_sidechain);
+        assert_eq!(entry.hook_count, 0);
+        assert_eq!(entry.message.usage.input_tokens, 0);
+    }
+
+    #[test]
+    fn parse_entry_null_message_does_not_discard_the_entry() {
+        // The whole `message` object can be null on structural entries; the entry still
+        // carries the uuid/parentUuid links the chain walk needs.
+        let line = json!({"type": "user", "uuid": "u1", "parentUuid": "p1", "message": null});
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("null message must not discard the entry");
+        assert_eq!(entry.parent_uuid, "p1");
+        assert!(entry.message.content.is_none());
     }
 
     #[test]
