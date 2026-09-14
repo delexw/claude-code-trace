@@ -21,7 +21,9 @@ import {
   reissueClient,
   reissueViaApi,
   revokeClient,
+  SCROLL_FIXTURE_FIRST_MESSAGE,
   whoami,
+  writeScrollableSession,
 } from "./helpers";
 
 const { port, configDir, projectsDir } = E2E.sameOrigin;
@@ -126,6 +128,64 @@ test.describe("browser UI", () => {
     const shell = await rawGet(port, "/", { Host: `localhost:${port}` });
     expect(shell.status).toBe(200);
     expect(shell.headers["cache-control"]).toBe("no-cache");
+  });
+
+  test("keeps a long message list scrollable to the bottom at 150%", async ({ page }) => {
+    writeScrollableSession(projectsDir, 80);
+    await page.setViewportSize({ width: 1200, height: 800 });
+    await page.goto("/");
+    await page.getByText(SCROLL_FIXTURE_FIRST_MESSAGE).click();
+
+    const list = page.locator(".message-list");
+    const main = page.locator(".main-content");
+    await expect(list).toBeVisible();
+    await expect.poll(() => list.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+    await expect.poll(() => list.evaluate((el) => getComputedStyle(el).minHeight)).toBe("0px");
+
+    const [listBox, mainBox] = await Promise.all([list.boundingBox(), main.boundingBox()]);
+    expect(listBox).not.toBeNull();
+    expect(mainBox).not.toBeNull();
+    expect(listBox!.y + listBox!.height).toBeLessThanOrEqual(mainBox!.y + mainBox!.height + 1);
+
+    const before = await list.evaluate((el) => el.scrollTop);
+    await list.hover();
+    await page.mouse.wheel(0, -500);
+    await expect.poll(() => list.evaluate((el) => el.scrollTop)).not.toBe(before);
+
+    await page.getByTitle("Settings").click();
+    await page
+      .getByRole("group", { name: "Font size" })
+      .getByRole("button", { name: "150%" })
+      .click();
+    await expect.poll(() => page.evaluate(() => document.documentElement.style.zoom)).toBe("1.5");
+    await page.locator(".popout-modal__close").click();
+
+    const lastMessage = page.locator(".message", { hasText: "scroll fixture 79:" });
+    const expectLastMessageFullyVisible = async () => {
+      await expect(lastMessage).toBeInViewport();
+      const [lastBox, zoomedListBox] = await Promise.all([
+        lastMessage.boundingBox(),
+        list.boundingBox(),
+      ]);
+      expect(lastBox).not.toBeNull();
+      expect(zoomedListBox).not.toBeNull();
+      expect(lastBox!.y + lastBox!.height).toBeLessThanOrEqual(
+        Math.min(zoomedListBox!.y + zoomedListBox!.height, page.viewportSize()!.height) + 1,
+      );
+    };
+
+    await list.hover();
+    await page.mouse.wheel(0, 100_000);
+    await expectLastMessageFullyVisible();
+
+    // The persisted scale must be in place before Virtuoso's first measurement
+    // on the next launch/page load, not applied one frame after it mounts.
+    await page.reload();
+    await expect.poll(() => page.evaluate(() => document.documentElement.style.zoom)).toBe("1.5");
+    await page.getByText(SCROLL_FIXTURE_FIRST_MESSAGE).click();
+    await list.hover();
+    await page.mouse.wheel(0, 100_000);
+    await expectLastMessageFullyVisible();
   });
 
   test("live-tails the session over the cookie-authenticated SSE stream", async ({ page }) => {

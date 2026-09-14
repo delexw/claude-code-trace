@@ -23,6 +23,9 @@ export function useFontScale(): [number, (scale: number) => void] {
 
   const updateScale = useCallback((next: number) => {
     const clamped = clampFontScale(next);
+    // Apply before the state update: scale-sensitive children remount during
+    // that render and need to measure against the new geometry immediately.
+    applyFontScale(clamped);
     setScale(clamped);
     storeFontScale(clamped);
   }, []);

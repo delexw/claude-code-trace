@@ -1,5 +1,5 @@
 import { expect, type APIRequestContext, type Page } from "@playwright/test";
-import { appendFileSync, existsSync, readFileSync, statSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import { join } from "node:path";
 import { E2E } from "../playwright.config";
@@ -8,6 +8,7 @@ import { SECRET_FILES, snapshotRealSecrets } from "./real-secrets.mjs";
 /** Texts from e2e/fixtures/projects/-tmp-e2e-demo/e2e-session.jsonl. */
 export const FIXTURE_FIRST_MESSAGE = "hello from the e2e fixture";
 export const FIXTURE_REPLY = "hi from the e2e backend";
+export const SCROLL_FIXTURE_FIRST_MESSAGE = "scroll fixture 0";
 
 /** Shape of `clients::Client` as the API serialises it. */
 export interface ApiClient {
@@ -115,6 +116,35 @@ export function appendUserMessage(projectsDir: string, text: string): void {
     message: { role: "user", content: text },
   };
   appendFileSync(sessionFile(projectsDir), `${JSON.stringify(entry)}\n`);
+}
+
+/** Write an isolated, linked conversation for layout/scrolling tests. Each
+ * message points to the previous one so the parser keeps the entire chain. */
+export function writeScrollableSession(projectsDir: string, count: number): void {
+  let parentUuid: string | null = null;
+  const entries: string[] = [];
+  for (let index = 0; index < count; index += 1) {
+    const uuid = `scroll-${index}`;
+    entries.push(
+      JSON.stringify({
+        type: "user",
+        uuid,
+        parentUuid,
+        sessionId: "scroll-session",
+        cwd: "/tmp/e2e-demo",
+        timestamp: new Date(Date.UTC(2026, 0, 1, 12, 0, 3 + index)).toISOString(),
+        message: {
+          role: "user",
+          content: `scroll fixture ${index}: ${"enough text to make this row measurable ".repeat(4)}`,
+        },
+      }),
+    );
+    parentUuid = uuid;
+  }
+  writeFileSync(
+    join(projectsDir, "-tmp-e2e-demo", "scroll-session.jsonl"),
+    `${entries.join("\n")}\n`,
+  );
 }
 
 /** Open Settings from the toolbar and wait for the Accepted clients table. */

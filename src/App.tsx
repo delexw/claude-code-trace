@@ -450,8 +450,11 @@ export function App() {
             </div>
           );
         }
+        // Root CSS zoom invalidates Virtuoso's cached row geometry. Remount at
+        // the new scale so its first measurements all use one coordinate space.
         return (
           <MessageList
+            key={fontScale}
             count={session.count}
             getMessage={session.getMessage}
             roles={session.roles}
