@@ -198,14 +198,15 @@ fn resolve_live_chain_uuids(entries: &[Entry]) -> HashSet<String> {
     // When parentUuid is empty but logicalParentUuid is set (compact_boundary entries),
     // follow logicalParentUuid instead so that pre-compaction messages are included.
     //
-    // UUID gap assumption (v2.1.152+): if a MessageDisplay hook hides an assistant message
-    // entirely, Claude Code may omit that entry from the JSONL, leaving a gap in the
-    // parentUuid chain. The `_ => break` arm below handles this gracefully — the backward
-    // walk simply terminates at the gap rather than panicking. The pre-gap messages are
-    // excluded from the live set, which is a conservative but safe degradation: they appear
-    // as a dead-end branch and are suppressed rather than shown in the wrong order.
+    // UUID gap: a parentUuid can point at an entry the file does not contain — a
+    // MessageDisplay hook hid the message (v2.1.152+), or the line failed to parse.
+    // Stopping the walk there would drop every pre-gap message, so one unreadable
+    // line would blank out a whole session. Resume from the nearest earlier entry
+    // in file order instead, the same recovery the compact_boundary cycle uses.
     let mut live_set: HashSet<String> = HashSet::new();
     let mut current = live_tip;
+    // File index of the last entry actually found — the anchor a gap resumes from.
+    let mut last_idx: Option<usize> = None;
     loop {
         if live_set.contains(&current) {
             break; // cycle guard
@@ -231,8 +232,14 @@ fn resolve_live_chain_uuids(entries: &[Entry]) -> HashSet<String> {
                     Some(candidate)
                 }
             }
-            _ => None,
+            // Entry found, but it is a genuine root — the chain is complete.
+            Some(_) => None,
+            // Gap: nothing in the file carries this uuid.
+            None => last_idx.and_then(|i| fallback_predecessor(entries, i, &live_set)),
         };
+        if idx.is_some() {
+            last_idx = idx;
+        }
         match parent {
             Some(p) => current = p,
             None => break,
@@ -255,6 +262,124 @@ fn fallback_predecessor(
         .rev()
         .find(|e| !e.uuid.is_empty() && !e.is_sidechain && !live_set.contains(&e.uuid))
         .map(|e| e.uuid.clone())
+}
+
+/// UUIDs of off-chain entries that are really part of a live turn's parallel tool
+/// call fan.
+///
+/// When an assistant turn fires several tools at once, Claude Code splits the one
+/// API response across several entries — thinking, text, then one per `tool_use` —
+/// chained linearly and all sharing a `requestId`. Each returning `tool_result` is
+/// a `user` entry whose `parentUuid` is the assistant entry that issued that
+/// specific call, and the conversation resumes from whichever result lands first.
+/// The turn is therefore a fan hanging off the chain, not a path along it: a
+/// single-path walk keeps one call and one result per batch and silently drops
+/// every sibling, which is what made large parallel turns render truncated.
+///
+/// Two narrow rules, so genuinely abandoned branches (rewound prompts, superseded
+/// retries) stay suppressed:
+/// 1. an assistant entry whose `requestId` matches one already on the live chain
+///    is part of that same response;
+/// 2. a `tool_result` is live when the `tool_use` it answers is live and no
+///    earlier entry already answered that call.
+fn rescue_parallel_tool_fan(entries: &[Entry], live_set: &HashSet<String>) -> HashSet<String> {
+    let mut rescued: HashSet<String> = HashSet::new();
+    if live_set.is_empty() {
+        return rescued;
+    }
+
+    let live_requests: HashSet<&str> = entries
+        .iter()
+        .filter(|e| live_set.contains(&e.uuid) && !e.request_id.is_empty())
+        .map(|e| e.request_id.as_str())
+        .collect();
+    for e in entries {
+        if is_off_chain(e, live_set, &rescued)
+            && !e.request_id.is_empty()
+            && live_requests.contains(e.request_id.as_str())
+        {
+            rescued.insert(e.uuid.clone());
+        }
+    }
+
+    // Calls the (now complete) live turns make, and the ones they already answer.
+    let mut live_calls: HashSet<&str> = HashSet::new();
+    let mut answered: HashSet<&str> = HashSet::new();
+    for e in entries
+        .iter()
+        .filter(|e| live_set.contains(&e.uuid) || rescued.contains(&e.uuid))
+    {
+        live_calls.extend(tool_use_ids(e));
+        answered.extend(answered_tool_use_ids(e));
+    }
+    let mut results: Vec<String> = Vec::new();
+    for e in entries {
+        if !is_off_chain(e, live_set, &rescued) {
+            continue;
+        }
+        let ids = answered_tool_use_ids(e);
+        if ids.is_empty()
+            || !ids
+                .iter()
+                .all(|id| live_calls.contains(id) && !answered.contains(id))
+        {
+            continue;
+        }
+        answered.extend(ids);
+        results.push(e.uuid.clone());
+    }
+    rescued.extend(results);
+    rescued
+}
+
+/// True when `entry` is a main-conversation entry that neither the live chain walk
+/// nor an earlier rescue pass has already claimed.
+fn is_off_chain(entry: &Entry, live_set: &HashSet<String>, rescued: &HashSet<String>) -> bool {
+    !entry.uuid.is_empty()
+        && !entry.is_sidechain
+        && !live_set.contains(&entry.uuid)
+        && !rescued.contains(&entry.uuid)
+}
+
+/// Ids of the tool calls this entry makes (empty for non-assistant entries).
+/// `server_tool_use` is Anthropic's server-managed equivalent of `tool_use` and
+/// is paired the same way — `classify` treats the two identically.
+fn tool_use_ids(entry: &Entry) -> Vec<&str> {
+    blocks_of_type(entry, &["tool_use", "server_tool_use"], "id")
+}
+
+/// Ids of the tool calls this entry answers with a result block.
+fn answered_tool_use_ids(entry: &Entry) -> Vec<&str> {
+    blocks_of_type(
+        entry,
+        &["tool_result", "advisor_tool_result"],
+        "tool_use_id",
+    )
+}
+
+/// String `key` of every content block in `entry` whose `type` is one of `types`.
+fn blocks_of_type<'a>(entry: &'a Entry, types: &[&str], key: &str) -> Vec<&'a str> {
+    content_blocks(entry)
+        .filter(|b| {
+            b.get("type")
+                .and_then(Value::as_str)
+                .is_some_and(|t| types.contains(&t))
+        })
+        .filter_map(|b| b.get(key).and_then(Value::as_str))
+        .collect()
+}
+
+/// The entry's `message.content` blocks, or nothing when content is absent or
+/// a plain string.
+fn content_blocks(entry: &Entry) -> impl Iterator<Item = &Value> {
+    entry
+        .message
+        .content
+        .as_ref()
+        .and_then(Value::as_array)
+        .map(|a| a.as_slice())
+        .unwrap_or(&[])
+        .iter()
 }
 
 /// Read new lines from a session file starting at the given byte offset.
@@ -313,6 +438,7 @@ pub fn read_session_incremental(
     } else {
         HashSet::new()
     };
+    let rescued = rescue_parallel_tool_fan(&raw_entries, &live_set);
 
     let mut msgs = Vec::new();
     // Track seen (agentName, teamName, summary_text) tuples to deduplicate `summary`
@@ -328,14 +454,16 @@ pub fn read_session_incremental(
         // Exception: "attachment" entries (hook results, skill listings, etc.) are
         // side-nodes — they hang off a chain entry via parentUuid but are never
         // referenced as someone else's parentUuid, so their own uuid never appears in
-        // the live set.  Include them when their parentUuid is on the live chain.
+        // the live set.  Include them when their parent is on the live chain (or is
+        // itself a rescued tool result).
         let is_live_attachment = entry.entry_type == "attachment"
             && !entry.parent_uuid.is_empty()
-            && live_set.contains(&entry.parent_uuid);
+            && (live_set.contains(&entry.parent_uuid) || rescued.contains(&entry.parent_uuid));
         if !live_set.is_empty()
             && !entry.uuid.is_empty()
             && !entry.is_sidechain
             && !live_set.contains(&entry.uuid)
+            && !rescued.contains(&entry.uuid)
             && !is_live_attachment
         {
             continue;
@@ -1936,6 +2064,7 @@ fn is_tool_use_rejection(raw: &Value) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use super::super::entry::EntryMessage;
     use super::*;
     use std::env;
     use std::sync::{Mutex, OnceLock};
@@ -3338,6 +3467,156 @@ mod tests {
         );
 
         std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    // --- Parallel tool call fans (delexw/claude-code-trace: blank / truncated sessions) ---
+
+    /// One assistant turn (`requestId` "r1") firing `calls` tools in parallel, written
+    /// the way Claude Code writes it: one entry per tool_use chained off `parent`, then
+    /// one `user` tool_result per call, each parented to the entry that issued it. The
+    /// conversation resumes from the FIRST call's result, so every other tool_use entry
+    /// and every other result is a dead-end leaf hanging off the chain.
+    fn parallel_tool_fan(parent: &str, calls: usize) -> String {
+        let mut out = String::new();
+        for i in 0..calls {
+            let prev = if i == 0 {
+                parent.to_string()
+            } else {
+                format!("a{}", i - 1)
+            };
+            out.push_str(&format!(
+                "{{\"type\":\"assistant\",\"uuid\":\"a{i}\",\"parentUuid\":\"{prev}\",\"requestId\":\"r1\",\"isSidechain\":false,\"timestamp\":\"2025-01-15T10:00:0{i}Z\",\"message\":{{\"role\":\"assistant\",\"content\":[{{\"type\":\"tool_use\",\"id\":\"t{i}\",\"name\":\"Bash\",\"input\":{{\"command\":\"echo {i}\"}}}}]}}}}\n"
+            ));
+        }
+        for i in 0..calls {
+            out.push_str(&format!(
+                "{{\"type\":\"user\",\"uuid\":\"res{i}\",\"parentUuid\":\"a{i}\",\"isSidechain\":false,\"timestamp\":\"2025-01-15T10:01:0{i}Z\",\"message\":{{\"role\":\"user\",\"content\":[{{\"type\":\"tool_result\",\"tool_use_id\":\"t{i}\",\"content\":\"output {i}\"}}]}}}}\n"
+            ));
+        }
+        out
+    }
+
+    #[test]
+    fn parallel_tool_results_are_not_truncated_to_the_one_that_continues_the_chain() {
+        // Regression: a turn firing 5 tools at once rendered only 1 call and 1 result,
+        // because the live-chain walk follows a single path and the other 4 tool_use
+        // entries (plus their results) hang off that path as leaves.
+        let tmp = env::temp_dir().join("tail-test-parallel-fan");
+        std::fs::create_dir_all(&tmp).unwrap();
+        let path = tmp.join("session.jsonl");
+
+        let user = "{\"type\":\"user\",\"uuid\":\"u1\",\"parentUuid\":null,\"isSidechain\":false,\"timestamp\":\"2025-01-15T09:59:00Z\",\"message\":{\"role\":\"user\",\"content\":\"run five things\"}}\n";
+        // res0 continues the chain into the next turn.
+        let next = "{\"type\":\"assistant\",\"uuid\":\"a9\",\"parentUuid\":\"res0\",\"requestId\":\"r2\",\"isSidechain\":false,\"timestamp\":\"2025-01-15T10:02:00Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"all done\"}]}}\n";
+        std::fs::write(&path, format!("{user}{}{next}", parallel_tool_fan("u1", 5))).unwrap();
+
+        let (msgs, _, _) = read_session_incremental(path.to_str().unwrap(), 0).unwrap();
+        let text = format!("{msgs:?}");
+        for i in 0..5 {
+            assert!(
+                text.contains(&format!("output {i}")),
+                "tool result {i} of the parallel batch must survive the live-chain filter"
+            );
+            assert!(
+                text.contains(&format!("echo {i}")),
+                "tool call {i} of the parallel batch must survive the live-chain filter"
+            );
+        }
+    }
+
+    #[test]
+    fn parallel_fan_rescue_still_excludes_an_abandoned_branch() {
+        // The rescue must not become "show everything": a rewound turn (its own
+        // requestId, never joined to the live chain) stays suppressed.
+        let tmp = env::temp_dir().join("tail-test-parallel-fan-abandoned");
+        std::fs::create_dir_all(&tmp).unwrap();
+        let path = tmp.join("session.jsonl");
+
+        let user = "{\"type\":\"user\",\"uuid\":\"u1\",\"parentUuid\":null,\"isSidechain\":false,\"timestamp\":\"2025-01-15T09:59:00Z\",\"message\":{\"role\":\"user\",\"content\":\"run five things\"}}\n";
+        // Abandoned turn: different requestId, and nothing downstream chains off it.
+        let dead = "{\"type\":\"assistant\",\"uuid\":\"dead1\",\"parentUuid\":\"u1\",\"requestId\":\"rDead\",\"isSidechain\":false,\"timestamp\":\"2025-01-15T09:59:30Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"ABANDONED DRAFT\"}]}}\n";
+        let next = "{\"type\":\"assistant\",\"uuid\":\"a9\",\"parentUuid\":\"res0\",\"requestId\":\"r2\",\"isSidechain\":false,\"timestamp\":\"2025-01-15T10:02:00Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"all done\"}]}}\n";
+        std::fs::write(
+            &path,
+            format!("{user}{dead}{}{next}", parallel_tool_fan("u1", 3)),
+        )
+        .unwrap();
+
+        let (msgs, _, _) = read_session_incremental(path.to_str().unwrap(), 0).unwrap();
+        let text = format!("{msgs:?}");
+        assert!(
+            !text.contains("ABANDONED DRAFT"),
+            "an abandoned branch must stay suppressed by the live-chain filter"
+        );
+        assert!(
+            text.contains("output 2"),
+            "the live fan must still be rescued"
+        );
+    }
+
+    #[test]
+    fn duplicate_tool_result_for_the_same_call_is_rescued_only_once() {
+        // A retried call can leave two results for one tool_use_id. Only the first
+        // may be rescued, or the detail view shows the output twice.
+        let mut entries = vec![
+            make_entry("u1", "", "", false),
+            Entry {
+                uuid: "a0".into(),
+                parent_uuid: "u1".into(),
+                request_id: "r1".into(),
+                message: EntryMessage {
+                    content: Some(serde_json::json!([
+                        {"type": "tool_use", "id": "t0", "name": "Bash", "input": {}}
+                    ])),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        ];
+        for uuid in ["resA", "resB"] {
+            entries.push(Entry {
+                uuid: uuid.into(),
+                parent_uuid: "a0".into(),
+                message: EntryMessage {
+                    content: Some(serde_json::json!([
+                        {"type": "tool_result", "tool_use_id": "t0", "content": "out"}
+                    ])),
+                    ..Default::default()
+                },
+                ..Default::default()
+            });
+        }
+        // Chain tip is resA, so resB is the off-chain duplicate.
+        entries.push(make_entry("a1", "resA", "", false));
+
+        let live = resolve_live_chain_uuids(&entries);
+        let rescued = rescue_parallel_tool_fan(&entries, &live);
+        assert!(live.contains("resA"));
+        assert!(
+            !rescued.contains("resB"),
+            "a second result for an already-answered call must not be rescued"
+        );
+    }
+
+    #[test]
+    fn live_chain_resumes_past_an_entry_missing_from_the_file() {
+        // A parentUuid can point at an entry the file does not contain — a hook hid the
+        // message, or the line failed to parse. Stopping there dropped every earlier
+        // message, so one bad line blanked a whole session.
+        let entries = vec![
+            make_entry("u1", "", "", false),
+            make_entry("a1", "u1", "", false),
+            // "gone" is referenced as a1's child's parent but never appears.
+            make_entry("u2", "gone", "", false),
+            make_entry("a2", "u2", "", false),
+        ];
+        let set = resolve_live_chain_uuids(&entries);
+        for uuid in ["u1", "a1", "u2", "a2"] {
+            assert!(
+                set.contains(uuid),
+                "{uuid} must stay live across the missing-entry gap; got {set:?}"
+            );
+        }
     }
 
     // --- Issue #60: forked session compat (v2.1.118+) ---
