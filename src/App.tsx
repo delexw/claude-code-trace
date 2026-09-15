@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useLayoutEffect, useCallback, useRef } from "react";
 import { invoke, ApiAuthError } from "./lib/invoke";
 import { onApiTokenChange } from "./lib/apiToken";
 import type { ViewState, SessionInfo, DisplayMessage } from "./types";
@@ -149,14 +149,26 @@ export function App() {
   // or `web-ui` may have been reissued from another client. The Vite plugin
   // pushes the new value over HMR, so re-run the bootstrap instead of leaving
   // a banner whose remedy (a restart) is no longer needed.
-  useEffect(() => {
-    if (!authError) return;
-    return onApiTokenChange((credential) => {
-      if (!credential) return;
-      setAuthError(null);
-      void discover();
-    });
-  }, [authError, discover]);
+  //
+  // Subscribed for the whole mount, not only while the banner is up. The
+  // banner's state lands from a rejected promise, so React may flush the
+  // passive effect that would subscribe a tick after the banner paints; a
+  // credential arriving in that gap found no listener and the banner stuck.
+  // The ref is written in a layout effect so the listener sees the banner
+  // state from the same commit that painted it, not a passive tick later.
+  const authErrorRef = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    authErrorRef.current = authError;
+  }, [authError]);
+  useEffect(
+    () =>
+      onApiTokenChange((credential) => {
+        if (!credential || !authErrorRef.current) return;
+        setAuthError(null);
+        void discover();
+      }),
+    [discover],
+  );
 
   // Sync session watcher's ongoing status to picker (avoids race condition
   // where picker watcher emits before session watcher updates).
