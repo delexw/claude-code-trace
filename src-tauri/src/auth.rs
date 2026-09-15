@@ -33,7 +33,7 @@ use axum::extract::{Request, State};
 use axum::http::{header, HeaderMap, HeaderValue, Method, StatusCode, Uri};
 use axum::middleware::Next;
 use axum::response::Response;
-use rand::RngCore;
+use rand::Rng;
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -142,7 +142,7 @@ pub fn builtin_credential_path(root: &Path, name: &str) -> PathBuf {
 /// 32 random bytes as 64 lowercase hex chars.
 pub fn generate_secret_hex() -> String {
     let mut buf = [0u8; 32];
-    rand::thread_rng().fill_bytes(&mut buf);
+    rand::rng().fill_bytes(&mut buf);
     buf.iter().map(|b| format!("{b:02x}")).collect()
 }
 
@@ -819,6 +819,14 @@ mod tests {
             .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
         assert_ne!(a, generate_secret_hex());
         assert_eq!(hex_to_bytes(&a).unwrap().len(), 32);
+    }
+
+    #[test]
+    fn the_signing_key_comes_from_a_csprng() {
+        // The signing key's only security property is that it is unguessable,
+        // and nothing else in the build checks that its source is cryptographic.
+        fn require_crypto<R: rand::CryptoRng>(_: &R) {}
+        require_crypto(&rand::rng());
     }
 
     #[test]
