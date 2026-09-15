@@ -112,23 +112,42 @@ describe("estimateCost", () => {
     expect(cost).toBeCloseTo(5.0);
   });
 
-  it("calculates cost for claude-opus-5 at $10/$50 rates", () => {
-    // claude-opus-5: input=10, output=50 per million
+  it("calculates cost for claude-opus-5 at $5/$25 (same as Opus 4.x)", () => {
     const inputCost = estimateCost(1_000_000, 0, 0, 0, "claude-opus-5");
-    expect(inputCost).toBeCloseTo(10.0);
+    expect(inputCost).toBeCloseTo(5.0);
     const outputCost = estimateCost(0, 1_000_000, 0, 0, "claude-opus-5");
-    expect(outputCost).toBeCloseTo(50.0);
+    expect(outputCost).toBeCloseTo(25.0);
   });
 
-  it("opus-4.x still uses old $5/$25 rates after opus-5 entry added", () => {
+  it("opus-4.x still uses $5/$25 rates", () => {
     const cost = estimateCost(1_000_000, 0, 0, 0, "claude-opus-4-7");
     expect(cost).toBeCloseTo(5.0);
+  });
+
+  it("calculates cost for claude-fable-5 at $10/$50 rates", () => {
+    expect(estimateCost(1_000_000, 0, 0, 0, "claude-fable-5")).toBeCloseTo(10.0);
+    expect(estimateCost(0, 1_000_000, 0, 0, "claude-fable-5")).toBeCloseTo(50.0);
+    expect(estimateCost(0, 0, 1_000_000, 0, "claude-fable-5")).toBeCloseTo(1.0);
+  });
+
+  it("uses 0.025x cache-read rate for fable-5-1", () => {
+    expect(estimateCost(0, 0, 1_000_000, 0, "claude-fable-5-1")).toBeCloseTo(0.25);
+    expect(estimateCost(1_000_000, 0, 0, 0, "claude-fable-5-1")).toBeCloseTo(10.0);
+  });
+
+  it("does not apply fable-5-1 cache rate to fable-5", () => {
+    expect(estimateCost(0, 0, 1_000_000, 0, "claude-fable-5")).toBeCloseTo(1.0);
   });
 
   it("calculates cost for sonnet model", () => {
     // sonnet: input=3, output=15
     const cost = estimateCost(0, 1_000_000, 0, 0, "claude-sonnet-4-6");
     expect(cost).toBeCloseTo(15.0);
+  });
+
+  it("calculates cost for sonnet-5 at $2/$10 rates", () => {
+    expect(estimateCost(1_000_000, 0, 0, 0, "claude-sonnet-5")).toBeCloseTo(2.0);
+    expect(estimateCost(0, 1_000_000, 0, 0, "claude-sonnet-5")).toBeCloseTo(10.0);
   });
 
   it("calculates cost for haiku model", () => {

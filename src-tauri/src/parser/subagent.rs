@@ -32,10 +32,26 @@ struct ModelPricing {
     cache_write: f64,
 }
 
+fn is_fable_or_mythos_51(m: &str) -> bool {
+    m.contains("fable-5-1")
+        || m.contains("fable-5.1")
+        || m.contains("mythos-5-1")
+        || m.contains("mythos-5.1")
+}
+
 fn pricing_for_model(model: &str) -> ModelPricing {
     let m = model.to_lowercase();
-    if m.contains("opus-5") {
-        // Claude Opus 5: $10/$50 per Mtok input/output.
+    // Official Anthropic list prices (platform.claude.com/docs/en/about-claude/pricing).
+    // More-specific family/version matches must come first.
+    if is_fable_or_mythos_51(&m) {
+        // Fable 5.1 / Mythos 5.1: same $10/$50 as Fable 5, cache hits at 0.025x.
+        ModelPricing {
+            input: 10.0,
+            output: 50.0,
+            cache_read: 0.25,
+            cache_write: 12.5,
+        }
+    } else if m.contains("fable") || m.contains("mythos") {
         ModelPricing {
             input: 10.0,
             output: 50.0,
@@ -43,6 +59,8 @@ fn pricing_for_model(model: &str) -> ModelPricing {
             cache_write: 12.5,
         }
     } else if m.contains("opus") {
+        // Opus 5 and 4.x share $5/$25. Fast-mode Opus is $10/$50 but is not
+        // distinguishable from the model id in session transcripts.
         ModelPricing {
             input: 5.0,
             output: 25.0,
@@ -57,8 +75,8 @@ fn pricing_for_model(model: &str) -> ModelPricing {
             cache_write: 1.25,
         }
     } else if m.contains("sonnet-5") {
-        // Sonnet 5 promotional pricing through Aug 31, 2026.
-        // Review after promotional period ends.
+        // Sonnet 5 $2/$10 is now the standard price (the scheduled Sep 2026
+        // bump to $3/$15 did not happen).
         ModelPricing {
             input: 2.0,
             output: 10.0,
@@ -2103,12 +2121,38 @@ mod tests {
     }
 
     #[test]
-    fn pricing_opus5_uses_new_rates() {
+    fn pricing_opus5_uses_standard_opus_rates() {
         let p = pricing_for_model("claude-opus-5");
+        assert_eq!(p.input, 5.0);
+        assert_eq!(p.output, 25.0);
+        assert_eq!(p.cache_read, 0.5);
+        assert_eq!(p.cache_write, 6.25);
+    }
+
+    #[test]
+    fn pricing_fable5_uses_frontier_rates() {
+        let p = pricing_for_model("claude-fable-5");
         assert_eq!(p.input, 10.0);
         assert_eq!(p.output, 50.0);
         assert_eq!(p.cache_read, 1.0);
         assert_eq!(p.cache_write, 12.5);
+    }
+
+    #[test]
+    fn pricing_fable51_uses_cheaper_cache_read() {
+        let p = pricing_for_model("claude-fable-5-1");
+        assert_eq!(p.input, 10.0);
+        assert_eq!(p.output, 50.0);
+        assert_eq!(p.cache_read, 0.25);
+        assert_eq!(p.cache_write, 12.5);
+    }
+
+    #[test]
+    fn pricing_mythos5_matches_fable5() {
+        let p = pricing_for_model("claude-mythos-5");
+        assert_eq!(p.input, 10.0);
+        assert_eq!(p.output, 50.0);
+        assert_eq!(p.cache_read, 1.0);
     }
 
     #[test]
