@@ -42,7 +42,7 @@ tauri-plugin-single-instance = { version = "2", optional = true }
 axum = { version = "0.8", features = ["json"] }
 tower-http = { version = "0.7", features = ["cors", "fs"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
-rand = "0.8"
+rand = "0.10"
 subtle = "2"
 hmac = "0.13"
 sha2 = "0.11"
