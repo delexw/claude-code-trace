@@ -24,6 +24,11 @@ updates:
       tower:
         patterns:
           - "tower*"
+      crypto:
+        patterns:
+          - "digest"
+          - "hmac"
+          - "sha2"
 
   - package-ecosystem: pip
     directory: /tui-py
