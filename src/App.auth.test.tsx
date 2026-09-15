@@ -64,6 +64,56 @@ describe("App client-verification banner", () => {
     expect(mockInvoke).toHaveBeenCalledWith("get_project_dirs");
   });
 
+  it("recovers from a credential that arrives the instant the banner paints", async () => {
+    // The listener must be live from mount: the banner state lands from a
+    // rejected promise, so its own passive effect may flush a tick after the
+    // DOM shows the alert. Fire the credential as soon as the alert exists,
+    // without letting any further work flush first.
+    let accepted = false;
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "get_settings") {
+        return accepted
+          ? Promise.resolve(SETTINGS)
+          : Promise.reject(new ApiAuthError("invalid or revoked client credential"));
+      }
+      if (cmd === "get_project_dirs") return Promise.resolve([]);
+      if (cmd === "discover_sessions") return Promise.resolve([]);
+      return Promise.resolve(undefined);
+    });
+    const { container } = render(<App />);
+
+    await new Promise<void>((resolve) => {
+      const observer = new MutationObserver(() => {
+        if (!container.querySelector(".app-auth-banner")) return;
+        observer.disconnect();
+        accepted = true;
+        setApiToken("eyJ.web-ui.sig");
+        resolve();
+      });
+      observer.observe(container, { childList: true, subtree: true });
+    });
+
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    await waitFor(() =>
+      expect(mockInvoke.mock.calls.filter(([c]) => c === "get_settings")).toHaveLength(2),
+    );
+  });
+
+  it("ignores a credential that arrives while no banner is up", async () => {
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "get_settings") return Promise.resolve(SETTINGS);
+      if (cmd === "get_project_dirs") return Promise.resolve([]);
+      return Promise.resolve(undefined);
+    });
+    render(<App />);
+    await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith("get_project_dirs"));
+    expect(screen.queryByRole("alert")).toBeNull();
+
+    act(() => setApiToken("eyJ.web-ui.sig"));
+    await act(async () => {});
+    expect(mockInvoke.mock.calls.filter(([c]) => c === "get_settings")).toHaveLength(1);
+  });
+
   it("ignores a credential being cleared while the banner is up", async () => {
     mockInvoke.mockImplementation((cmd: string) =>
       cmd === "get_settings"
