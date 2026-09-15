@@ -30,7 +30,7 @@ export function shortModel(m: string): string {
 }
 
 // Claude API pricing per million tokens (USD).
-// Model-specific rates; we pick by the model string prefix.
+// First matching prefix wins — more-specific version tags must come first.
 const MODEL_PRICING: {
   prefix: string;
   input: number;
@@ -38,9 +38,15 @@ const MODEL_PRICING: {
   cacheRead: number;
   cacheWrite: number;
 }[] = [
-  // opus-5 must appear before the generic "opus" entry so it matches first.
-  { prefix: "opus-5", input: 10, output: 50, cacheRead: 1.0, cacheWrite: 12.5 },
+  // Fable 5.1 / Mythos 5.1: $10/$50, cache hits at 0.025x ($0.25).
+  { prefix: "fable-5-1", input: 10, output: 50, cacheRead: 0.25, cacheWrite: 12.5 },
+  { prefix: "fable-5.1", input: 10, output: 50, cacheRead: 0.25, cacheWrite: 12.5 },
+  { prefix: "mythos-5-1", input: 10, output: 50, cacheRead: 0.25, cacheWrite: 12.5 },
+  { prefix: "mythos-5.1", input: 10, output: 50, cacheRead: 0.25, cacheWrite: 12.5 },
+  { prefix: "fable", input: 10, output: 50, cacheRead: 1.0, cacheWrite: 12.5 },
+  { prefix: "mythos", input: 10, output: 50, cacheRead: 1.0, cacheWrite: 12.5 },
   { prefix: "opus", input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
+  { prefix: "sonnet-5", input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
   { prefix: "sonnet", input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
   { prefix: "haiku", input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 },
 ];
