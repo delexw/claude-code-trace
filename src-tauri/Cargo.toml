@@ -36,7 +36,7 @@ lazy_static = "1.5"
 notify = "8"
 tokio = { version = "1", features = ["full"] }
 thiserror = "2"
-dirs = "6"
+dirs = "7"
 tauri-plugin-opener = { version = "2.5.4", optional = true }
 tauri-plugin-single-instance = { version = "2", optional = true }
 axum = { version = "0.8", features = ["json"] }
