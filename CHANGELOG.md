@@ -3,6 +3,101 @@
 All notable changes to claude-code-trace are documented here. Versions follow
 [semantic versioning](https://semver.org/).
 
+## [0.15.1] — 2026-09-16
+
+A reliability release. Three of these bugs could make a session look emptier than it really was —
+one unreadable field could blank a whole conversation, a turn that fired fourteen tools at once
+rendered one of them, and a live tail could quietly stop updating while the tab still looked
+connected. The rest tighten up what v0.14.0 and v0.15.0 introduced: the Docker UI holds on to its
+credential across a browser restart, the "not an accepted client" banner clears the moment a
+credential arrives, and Settings now spells out every way to send one. Costs for Fable, Mythos and
+Opus 5 sessions are also corrected.
+
+### Fixed
+
+- **One unreadable field no longer blanks an entire session**
+  ([`05f28d3`](https://github.com/delexw/claude-code-trace/commit/05f28d3)). serde only falls back
+  to a default when a key is missing, so a transcript line carrying `"field": null` on a
+  non-optional field failed to parse and the whole entry was thrown away. That punched a hole in
+  the `parentUuid` chain, the live-chain walk stopped at the hole, and the session came up empty in
+  the UI. Claude Code v2.1.266 triggered exactly this by writing `null` for `iterations`, `speed`
+  and `inference_geo` on synthetic assistant messages. Every non-optional field on `Entry`,
+  `EntryMessage`, `EntryUsage`, `CacheCreationUsage` and `IterationUsage` now reads `null` as its
+  default, and a test reads the struct definitions directly so a field added later without the
+  annotation fails the build rather than silently reintroducing the bug.
+
+- **A turn that runs tools in parallel now shows all of them**
+  ([`c936d08`](https://github.com/delexw/claude-code-trace/commit/c936d08)). When one turn fires
+  several tools at once, Claude Code writes each call as its own entry and parents each result to
+  the call that issued it, so the turn hangs off the conversation as a fan rather than sitting
+  along it. The backward walk followed a single path, kept one call and one result per batch, and
+  dropped every sibling as a dead end — a fourteen-call turn rendered one call. The siblings are
+  now re-added under two narrow rules, so rewound prompts and superseded retries stay hidden. The
+  walk also no longer stops dead when a `parentUuid` points at an entry the file doesn't contain;
+  it resumes from the nearest earlier entry, so a gap costs one entry instead of every message
+  before it. Checked against the 40 newest sessions on disk: 20 render differently and all 20
+  gained content, none lost any.
+
+- **The live tail no longer freezes after the browser gives up on a refused reconnect**
+  ([`35e7533`](https://github.com/delexw/claude-code-trace/commit/35e7533)). `/api/events` needs a
+  client credential, and a reconnect the browser makes on its own reuses whatever credential the
+  stream was opened with — so after a backend restart, a sleep/wake, or a suspended tab waking up
+  once the credential has changed, the reply is a 401. `EventSource` treats any non-200 as a failed
+  connection: it closes, fires one error and never retries. Nothing was listening for that error,
+  so the tab looked connected while no update ever arrived and the live tail and ongoing indicator
+  sat still. The stream is now reopened with the current credential and every registered listener,
+  backing off from 1s to 30s and resetting once a stream opens.
+
+- **Conversations stay scrollable at larger font sizes**
+  ([`f296346`](https://github.com/delexw/claude-code-trace/commit/f296346), @sy2002). At bigger
+  font scales you could not reach the end of a conversation. Two separate things caused it: the
+  message list could not shrink, so WKWebView never gave it a real scroll range, and the app shell
+  height ignored the root CSS zoom. Scaling is now applied before React mounts and the virtual list
+  is remeasured after a live font-size change, so rows are measured against the geometry actually
+  on screen. Fixes #297.
+
+- **Fable, Mythos and Opus 5 sessions are costed at the right rates**
+  ([`e119897`](https://github.com/delexw/claude-code-trace/commit/e119897), @guillermodrums-ui).
+  Fable and Mythos sessions fell through to Sonnet 4's $3/$15, undercounting cost by roughly 3x;
+  they now use the official $10/$50, with cache reads at $1 for the 5 models and $0.25 for 5.1.
+  Opus 5 drops to the standard Opus $5/$25 — the previous $10/$50 was fast-mode pricing, which a
+  transcript gives no way to tell apart. Sonnet 5's $2/$10 row was also missing from the frontend
+  table and now matches the backend.
+
+- **The Docker UI keeps its credential when you close and reopen the browser**
+  ([`9a2d4f5`](https://github.com/delexw/claude-code-trace/commit/9a2d4f5)). The same-origin UI
+  gets its credential as a session cookie attached to the HTML shell, but only a full 200 response
+  carried it. Once a browser had `index.html` cached it revalidated instead, and the resulting 304
+  — headers only, no content type — wasn't recognised as the shell, so no cookie rode along. The
+  tab sat on "Not an accepted client" while the same URL worked fine in a private window. The shell
+  is now recognised on a 304 by its request path and served `Cache-Control: no-cache` so the
+  browser always checks in; assets are untouched and stay cacheable.
+
+- **The "not an accepted client" banner clears as soon as a credential arrives**
+  ([`fc6af7c`](https://github.com/delexw/claude-code-trace/commit/fc6af7c)). The recovery path only
+  started listening for a new credential after the banner's error state had landed, which can be a
+  tick after the banner has already painted. A credential pushed in that gap found nobody
+  listening, so the banner stayed up and the app never retried its start-up. The listener is now
+  live for the whole mount.
+
+- **Settings names every way to send a credential, and dates you can read**
+  ([`061bcad`](https://github.com/delexw/claude-code-trace/commit/061bcad)). The Accepted-clients
+  note named `X-CCTrace-Token` as though it were the only accepted carrier, when
+  `Authorization: Bearer` works just as well, and called the credential "signed" without
+  mentioning it is a JWT. The Allowed-origins note didn't say that origins only apply to browsers
+  and grant nothing on their own, so adding one and still getting a 401 looked like a bug. The
+  **Since** column is now **Issued** and shows a named month, because the old format rendered
+  `08/09/2026` — two different dates depending on where you live.
+
+- **The Docker image builds again**
+  ([`ad3ad86`](https://github.com/delexw/claude-code-trace/commit/ad3ad86)). `vite.config.ts` loads
+  `bin/api-token.mjs` when the config is read, but the frontend build stage never copied `bin/`, so
+  `vite build` failed with `UNRESOLVED_IMPORT` even though the plugin only runs during development.
+  Nothing connected the config's imports to the stage's `COPY` lines, so this only ever broke
+  inside Docker; a test now reads both files and asserts every local import is covered.
+
+[0.15.1]: https://github.com/delexw/claude-code-trace/releases/tag/v0.15.1
+
 ## [0.15.0] — 2026-09-08
 
 A short release that finishes what v0.14.0 started. Locking the local API behind a single shared
