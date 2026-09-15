@@ -7,6 +7,7 @@ describe("useFontScale", () => {
   beforeEach(() => {
     localStorage.clear();
     document.documentElement.style.zoom = "";
+    document.documentElement.style.removeProperty("--app-viewport-height");
   });
 
   it("defaults to 100% and applies it to the document", () => {
@@ -20,6 +21,9 @@ describe("useFontScale", () => {
     const { result } = renderHook(() => useFontScale());
     expect(result.current[0]).toBe(1.5);
     expect(document.documentElement.style.zoom).toBe("1.5");
+    expect(document.documentElement.style.getPropertyValue("--app-viewport-height")).toBe(
+      `${100 / 1.5}vh`,
+    );
   });
 
   it("updates, persists, and re-applies on change", () => {

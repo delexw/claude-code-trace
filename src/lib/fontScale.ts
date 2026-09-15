@@ -7,6 +7,10 @@
  * built-in zoom — and is supported across the WebViews Tauri uses (WebKit,
  * WebView2, WebKitGTK) as well as plain browsers in web mode.
  *
+ * CSS zoom also scales viewport units, so applyFontScale exposes an inverse
+ * viewport height for the app shell. Without that compensation, a 150%-zoomed
+ * `100vh` shell is 150% as tall as the WebView and its bottom is unreachable.
+ *
  * The chosen scale is persisted in `localStorage` so it survives reloads and
  * applies on both desktop and web.
  */
@@ -50,7 +54,10 @@ export function storeFontScale(scale: number): void {
 /** Apply the zoom level to the document root. No-op when there is no DOM. */
 export function applyFontScale(scale: number): void {
   if (typeof document === "undefined") return;
-  document.documentElement.style.zoom = String(clampFontScale(scale));
+  const clamped = clampFontScale(scale);
+  const root = document.documentElement;
+  root.style.setProperty("--app-viewport-height", `${100 / clamped}vh`);
+  root.style.zoom = String(clamped);
 }
 
 /** Format a scale as a percentage label, e.g. `1.25` -> `"125%"`. */

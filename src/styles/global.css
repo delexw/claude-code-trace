@@ -82,6 +82,7 @@
   /* Misc */
   --scrollbar-thumb: #444466;
   --scrollbar-track: transparent;
+  --app-viewport-height: 100vh;
 }
 
 /* ---- Icon colors ---- */
@@ -215,7 +216,9 @@ body {
 .app {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  /* Root CSS zoom scales vh lengths too. applyFontScale sets the inverse
+   * height so the zoomed shell still ends at the physical WebView edge. */
+  height: var(--app-viewport-height);
   overflow: hidden;
 }
 
@@ -1225,6 +1228,9 @@ body {
 
 .message-list {
   flex: 1;
+  /* WKWebView otherwise keeps the flex item's content minimum height, so the
+   * parent clips the conversation instead of this element getting a scroll range. */
+  min-height: 0;
   overflow-y: auto;
   padding: 8px 0;
 }

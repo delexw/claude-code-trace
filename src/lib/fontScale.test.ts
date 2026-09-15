@@ -15,6 +15,7 @@ describe("fontScale", () => {
   beforeEach(() => {
     localStorage.clear();
     document.documentElement.style.zoom = "";
+    document.documentElement.style.removeProperty("--app-viewport-height");
   });
 
   describe("clampFontScale", () => {
@@ -70,8 +71,10 @@ describe("fontScale", () => {
     it("sets the document zoom, clamping out-of-range values", () => {
       applyFontScale(1.25);
       expect(document.documentElement.style.zoom).toBe("1.25");
+      expect(document.documentElement.style.getPropertyValue("--app-viewport-height")).toBe("80vh");
       applyFontScale(10);
       expect(document.documentElement.style.zoom).toBe(String(MAX_FONT_SCALE));
+      expect(document.documentElement.style.getPropertyValue("--app-viewport-height")).toBe("50vh");
     });
   });
 

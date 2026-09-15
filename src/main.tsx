@@ -1,8 +1,13 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { openUrl } from "./lib/openUrl";
+import { applyFontScale, readStoredFontScale } from "./lib/fontScale";
 import { App } from "./App";
 import "./styles/global.css";
+
+// Apply the persisted scale before React mounts. Virtualized lists measure
+// themselves during mount and must see the final zoom from their first frame.
+applyFontScale(readStoredFontScale());
 
 // Intercept all link clicks and open external URLs in the system browser
 document.addEventListener("click", (e) => {
