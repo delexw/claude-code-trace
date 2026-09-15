@@ -8,7 +8,7 @@
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use subtle::ConstantTimeEq;
@@ -116,6 +116,21 @@ mod tests {
     fn sign_then_verify_roundtrips() {
         let token = sign(&claims(), KEY);
         assert_eq!(verify(&token, KEY).unwrap(), claims());
+    }
+
+    #[test]
+    fn hmac_sha256_matches_the_published_vector() {
+        // `printf 'hello' | openssl dgst -sha256 -hmac secret` — an independent
+        // implementation. Credentials are re-signed to verify, never stored, so a
+        // change in this output silently invalidates every issued credential.
+        let hex: String = mac(b"secret", b"hello")
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        assert_eq!(
+            hex,
+            "88aab3ede8d3adf94d26ab90d3bafd4a2083070c3bcce9c014ee04a443847c0b"
+        );
     }
 
     #[test]
