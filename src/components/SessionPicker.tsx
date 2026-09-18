@@ -2,7 +2,7 @@ import { useRef, useMemo } from "react";
 import { useScrollToSelected } from "../hooks/useScrollToSelected";
 import { useVisibleSessions } from "../hooks/useVisibleSessions";
 import { useRegisterViewActions, type ViewActionsRef } from "../hooks/useViewActions";
-import type { SessionInfo } from "../types";
+import type { IndexProgress, SessionInfo } from "../types";
 import { OngoingDots } from "./OngoingDots";
 import {
   formatTokens,
@@ -21,6 +21,8 @@ import { TokensIcon, CostIcon, ForwardIcon } from "./Icons";
 
 interface SessionPickerProps {
   sessions: SessionInfo[];
+  /** How far the backend has got reading the project directories. */
+  index: IndexProgress;
   loading: boolean;
   searchQuery: string;
   selectedIndex: number;
@@ -47,6 +49,7 @@ interface SessionPickerProps {
 
 export function SessionPicker({
   sessions,
+  index,
   loading,
   searchQuery,
   selectedIndex,
@@ -120,7 +123,7 @@ export function SessionPicker({
           </div>
         )}
 
-        {!loading && sessions.length === 0 && (
+        {!loading && sessions.length === 0 && index.done && (
           <div className="picker__empty">
             {searchQuery ? "No matching sessions" : "No sessions found"}
           </div>

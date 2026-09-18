@@ -10,6 +10,14 @@ export function formatTokens(n: number): string {
   return String(n);
 }
 
+/** Formats a byte count: 3_700_000 -> "3.7 MB" */
+export function formatBytes(n: number): string {
+  if (n >= 1e9) return (n / 1e9).toFixed(1) + " GB";
+  if (n >= 1e6) return (n / 1e6).toFixed(1) + " MB";
+  if (n >= 1e3) return (n / 1e3).toFixed(1) + " KB";
+  return n + " B";
+}
+
 /** Formats USD cost: 1.5 -> "$1.50" */
 export function formatCost(usd: number): string {
   return "$" + usd.toFixed(2);

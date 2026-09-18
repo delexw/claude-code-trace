@@ -1024,6 +1024,17 @@ pub fn session_info_from_metadata(
     }
 }
 
+/// How far a walk of the project directories has got.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ScanCounts {
+    /// Session files finished so far.
+    pub files: usize,
+    /// Bytes covered so far, read or served from the cache. The honest measure of how
+    /// much work is left: session files vary by orders of magnitude in size, so a file
+    /// count can read nearly complete with most of the reading still ahead of it.
+    pub bytes: u64,
+}
+
 /// Discover sessions using a custom scan function (for caching).
 pub fn discover_project_sessions_with_scan<F>(
     project_dir: &str,
@@ -1032,35 +1043,102 @@ pub fn discover_project_sessions_with_scan<F>(
 where
     F: Fn(&str, std::time::SystemTime, u64) -> Option<SessionInfo>,
 {
-    let entries = fs::read_dir(project_dir).map_err(|e| format!("reading {project_dir}: {e}"))?;
+    let mut counts = ScanCounts::default();
+    discover_project_sessions_streaming(
+        project_dir,
+        |path, mod_time, size, _| scan(path, mod_time, size),
+        &mut |_, _| true,
+        &mut counts,
+    )
+    .map(|(sessions, _)| sessions)
+}
+
+/// [`discover_project_sessions_with_scan`], reporting each file as it goes.
+///
+/// A cold walk of a whole projects directory reads every session file, which is seconds
+/// to minutes depending on the machine — and until it finished the picker had nothing to
+/// show. `on_progress` is called after every file, and from inside the read of a large
+/// one; returning false from it stops the walk. Files are visited newest first, so the
+/// sessions someone opened the app for arrive before last year's.
+pub fn discover_project_sessions_streaming<F>(
+    project_dir: &str,
+    scan: F,
+    on_progress: &mut impl FnMut(&[SessionInfo], &ScanCounts) -> bool,
+    counts: &mut ScanCounts,
+) -> Result<(Vec<SessionInfo>, bool), String>
+where
+    F: Fn(&str, std::time::SystemTime, u64, &mut dyn FnMut(u64)) -> Option<SessionInfo>,
+{
+    let mut files = session_files_in(project_dir)?;
+    // Newest first, so a picker drawn mid-walk shows the rows a user actually came for.
+    files.sort_by_key(|f| std::cmp::Reverse(f.1));
 
     let mut sessions = Vec::new();
 
-    for entry in entries {
-        let entry = match entry {
-            Ok(e) => e,
-            Err(_) => continue,
+    for (path, mod_time, size) in files {
+        let covered_before = counts.bytes;
+        let mut stop = false;
+        let scanned = {
+            let mut read = 0u64;
+            let mut report = |delta: u64| {
+                read = (read + delta).min(size);
+                counts.bytes = covered_before + read;
+                stop = stop || !on_progress(&sessions, counts);
+            };
+            scan(&path, mod_time, size, &mut report)
         };
-        let name = entry.file_name().to_string_lossy().to_string();
-        if !is_session_file(&name, &entry) {
-            continue;
-        }
-
-        let metadata = match entry.metadata() {
-            Ok(m) => m,
-            Err(_) => continue,
-        };
-        let mod_time = metadata.modified().unwrap_or(std::time::SystemTime::now());
-        let size = metadata.len();
-
-        let path = entry.path().to_string_lossy().to_string();
-        if let Some(info) = scan(&path, mod_time, size) {
+        // A finished file counts as its whole size however much of it was actually read:
+        // a cache hit reads nothing at all, yet the ground is covered either way.
+        counts.bytes = covered_before + size;
+        counts.files += 1;
+        if let Some(info) = scanned {
             sessions.push(info);
+        }
+        if stop || !on_progress(&sessions, counts) {
+            sessions.sort_by_key(|b| std::cmp::Reverse(b.mod_time));
+            return Ok((sessions, false));
         }
     }
 
     sessions.sort_by_key(|b| std::cmp::Reverse(b.mod_time));
-    Ok(sessions)
+    Ok((sessions, true))
+}
+
+/// The session files in `project_dir`, with the modified time and size the walk needs,
+/// without opening any of them.
+fn session_files_in(
+    project_dir: &str,
+) -> Result<Vec<(String, std::time::SystemTime, u64)>, String> {
+    let entries = fs::read_dir(project_dir).map_err(|e| format!("reading {project_dir}: {e}"))?;
+    let mut files = Vec::new();
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !is_session_file(&name, &entry) {
+            continue;
+        }
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+        files.push((
+            entry.path().to_string_lossy().to_string(),
+            metadata.modified().unwrap_or(std::time::SystemTime::now()),
+            metadata.len(),
+        ));
+    }
+    Ok(files)
+}
+
+/// How many session files `project_dirs` hold and how many bytes they come to, without
+/// opening any of them. What a progress bar counts against.
+pub fn measure_session_files(project_dirs: &[String]) -> ScanCounts {
+    let mut counts = ScanCounts::default();
+    for dir in project_dirs {
+        for (_, _, size) in session_files_in(dir).unwrap_or_default() {
+            counts.files += 1;
+            counts.bytes += size;
+        }
+    }
+    counts
 }
 
 // Internal metadata scan result.
@@ -1114,6 +1192,19 @@ impl Default for SessionMetadata {
 }
 
 pub(crate) fn scan_session_metadata(path: &str) -> SessionMetadata {
+    scan_session_metadata_reporting(path, &mut |_| {})
+}
+
+/// How much of a file to read between calls to a scan's byte callback. Reporting only
+/// once a file is finished leaves a progress bar frozen for as long as the biggest
+/// session takes, and gives a throttle nothing to hold back in between.
+const SCAN_REPORT_BYTES: u64 = 4 * 1024 * 1024;
+
+/// [`scan_session_metadata`], telling the caller how many bytes it has read as it goes.
+pub(crate) fn scan_session_metadata_reporting(
+    path: &str,
+    on_bytes: &mut dyn FnMut(u64),
+) -> SessionMetadata {
     use super::classify::parse_timestamp;
     use super::patterns::RE_COMMAND_NAME;
     use super::sanitize::{extract_text, is_command_output, sanitize_content};
@@ -1153,11 +1244,19 @@ pub(crate) fn scan_session_metadata(path: &str) -> SessionMetadata {
     // main-chain entries seen so far, in file order.
     let mut seen_uuids: HashSet<String> = HashSet::new();
 
+    let mut unreported_bytes = 0u64;
     for line_result in reader.lines() {
         let line = match line_result {
             Ok(l) => l,
             Err(_) => continue, // unreadable line (e.g. invalid UTF-8) — skip and continue
         };
+        // Counted before anything else, so a run of lines this scan ignores still moves
+        // the bar and still earns the walk its pause.
+        unreported_bytes += line.len() as u64 + 1;
+        if unreported_bytes >= SCAN_REPORT_BYTES {
+            on_bytes(unreported_bytes);
+            unreported_bytes = 0;
+        }
         lines_read += 1;
 
         let raw: Value = match serde_json::from_str(&line) {
@@ -1535,6 +1634,10 @@ pub(crate) fn scan_session_metadata(path: &str) -> SessionMetadata {
     meta.output_tokens += fallback.output;
     meta.cache_read_tokens += fallback.cache_read;
     meta.cache_creation_tokens += fallback.cache_create;
+
+    if unreported_bytes > 0 {
+        on_bytes(unreported_bytes);
+    }
 
     // Finalize token totals: sum the last-seen usage per requestId.
     for snap in request_tokens.values() {
@@ -4755,5 +4858,242 @@ mod tests {
         );
 
         std::fs::remove_dir_all(&tmp).ok();
+    }
+    /// A session file with `lines` user messages, back-dated to `age_secs` ago.
+    fn write_session(dir: &std::path::Path, name: &str, lines: usize, age_secs: u64) -> String {
+        let path = dir.join(format!("{name}.jsonl"));
+        let line = "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"hi\"}}\n";
+        std::fs::write(&path, line.repeat(lines)).unwrap();
+        let when = std::time::SystemTime::now() - std::time::Duration::from_secs(age_secs);
+        filetime::set_file_mtime(&path, filetime::FileTime::from_system_time(when)).unwrap();
+        path.to_string_lossy().to_string()
+    }
+
+    /// A scan that reads nothing and reports nothing, standing in for the real one where
+    /// a test is about the walk rather than what a session file holds.
+    fn scan_ignoring_bytes(
+        path: &str,
+        mod_time: std::time::SystemTime,
+        _size: u64,
+        _on_bytes: &mut dyn FnMut(u64),
+    ) -> Option<SessionInfo> {
+        let mut info = make_info(path);
+        info.path = path.to_string();
+        info.mod_time = mod_time.into();
+        Some(info)
+    }
+
+    #[test]
+    fn measure_session_files_counts_without_opening_anything() {
+        let dir = tempfile::tempdir().unwrap();
+        write_session(dir.path(), "a", 3, 10);
+        write_session(dir.path(), "b", 7, 20);
+        std::fs::write(dir.path().join("notes.txt"), "not a session").unwrap();
+
+        let counts = measure_session_files(&[dir.path().to_string_lossy().to_string()]);
+
+        // Only the two .jsonl files, and their real sizes: the progress bar counts
+        // against this, so a stray file in the directory would skew it.
+        assert_eq!(counts.files, 2);
+        let on_disk: u64 = ["a", "b"]
+            .iter()
+            .map(|n| {
+                std::fs::metadata(dir.path().join(format!("{n}.jsonl")))
+                    .unwrap()
+                    .len()
+            })
+            .sum();
+        assert_eq!(counts.bytes, on_disk);
+    }
+
+    #[test]
+    fn measure_session_files_ignores_a_directory_that_is_not_there() {
+        let counts = measure_session_files(&["/no/such/projects/dir".to_string()]);
+
+        assert_eq!(counts.files, 0);
+        assert_eq!(counts.bytes, 0);
+    }
+
+    #[test]
+    fn streaming_walk_reports_after_every_file() {
+        let dir = tempfile::tempdir().unwrap();
+        write_session(dir.path(), "a", 2, 30);
+        write_session(dir.path(), "b", 2, 20);
+        write_session(dir.path(), "c", 2, 10);
+
+        let mut seen = Vec::new();
+        let mut counts = ScanCounts::default();
+        let (sessions, completed) = discover_project_sessions_streaming(
+            dir.path().to_str().unwrap(),
+            scan_ignoring_bytes,
+            &mut |found, counts| {
+                seen.push((found.len(), counts.files, counts.bytes));
+                true
+            },
+            &mut counts,
+        )
+        .unwrap();
+
+        assert!(completed);
+        assert_eq!(sessions.len(), 3);
+        assert_eq!(counts.files, 3);
+        // Never goes backwards: the bar would jump about if it did.
+        for pair in seen.windows(2) {
+            assert!(pair[1].1 >= pair[0].1, "files went backwards: {seen:?}");
+            assert!(pair[1].2 >= pair[0].2, "bytes went backwards: {seen:?}");
+        }
+        assert_eq!(seen.last().map(|s| s.1), Some(3));
+    }
+
+    #[test]
+    fn streaming_walk_visits_the_newest_session_first() {
+        let dir = tempfile::tempdir().unwrap();
+        write_session(dir.path(), "oldest", 1, 3000);
+        write_session(dir.path(), "newest", 1, 10);
+
+        let mut first_seen = None;
+        let mut counts = ScanCounts::default();
+        discover_project_sessions_streaming(
+            dir.path().to_str().unwrap(),
+            scan_ignoring_bytes,
+            &mut |found, _| {
+                if first_seen.is_none() {
+                    first_seen = found.first().map(|s| s.path.clone());
+                }
+                true
+            },
+            &mut counts,
+        )
+        .unwrap();
+
+        // Someone opens the app for what they were just working on, so that has to be
+        // on screen before last year's sessions are read.
+        assert!(
+            first_seen.unwrap_or_default().contains("newest"),
+            "the walk must read the newest session first"
+        );
+    }
+
+    #[test]
+    fn streaming_walk_stops_when_the_caller_says_so() {
+        let dir = tempfile::tempdir().unwrap();
+        for i in 0..5 {
+            write_session(dir.path(), &format!("s{i}"), 1, 100 - i);
+        }
+
+        let mut calls = 0;
+        let mut counts = ScanCounts::default();
+        let (_, completed) = discover_project_sessions_streaming(
+            dir.path().to_str().unwrap(),
+            scan_ignoring_bytes,
+            &mut |_, _| {
+                calls += 1;
+                false
+            },
+            &mut counts,
+        )
+        .unwrap();
+
+        // A superseded walk has to drop out on its first chance rather than reading
+        // the rest of the directory for an answer nobody wants.
+        assert!(!completed);
+        assert_eq!(calls, 1);
+        assert_eq!(counts.files, 1);
+    }
+
+    #[test]
+    fn streaming_walk_counts_the_whole_file_even_on_a_cache_hit() {
+        let dir = tempfile::tempdir().unwrap();
+        write_session(dir.path(), "a", 4, 10);
+        let size = std::fs::metadata(dir.path().join("a.jsonl")).unwrap().len();
+
+        let mut counts = ScanCounts::default();
+        discover_project_sessions_streaming(
+            dir.path().to_str().unwrap(),
+            // A cache hit reads nothing, so it reports no bytes at all.
+            |_, _, _, _| None,
+            &mut |_, _| true,
+            &mut counts,
+        )
+        .unwrap();
+
+        // The ground is covered either way, so the bar has to move: otherwise a run
+        // served entirely from cache would sit at zero and then jump to full.
+        assert_eq!(counts.bytes, size);
+        assert_eq!(counts.files, 1);
+    }
+
+    #[test]
+    fn streaming_walk_reports_bytes_from_inside_a_long_read() {
+        let dir = tempfile::tempdir().unwrap();
+        write_session(dir.path(), "big", 1, 10);
+        let size = std::fs::metadata(dir.path().join("big.jsonl"))
+            .unwrap()
+            .len();
+
+        let mut mid_file = Vec::new();
+        let mut counts = ScanCounts::default();
+        discover_project_sessions_streaming(
+            dir.path().to_str().unwrap(),
+            |_, _, _, on_bytes| {
+                // What a real scan of a multi-gigabyte session does as it reads.
+                on_bytes(10);
+                on_bytes(20);
+                None
+            },
+            &mut |_, counts| {
+                mid_file.push(counts.bytes);
+                true
+            },
+            &mut counts,
+        )
+        .unwrap();
+
+        // Without this the bar freezes for as long as the biggest file takes — minutes,
+        // on a real sessions directory.
+        assert_eq!(&mid_file[..2], &[10, 30]);
+        assert_eq!(counts.bytes, size);
+    }
+
+    #[test]
+    fn streaming_walk_never_reports_more_bytes_than_the_file_holds() {
+        let dir = tempfile::tempdir().unwrap();
+        write_session(dir.path(), "grew", 1, 10);
+        let size = std::fs::metadata(dir.path().join("grew.jsonl"))
+            .unwrap()
+            .len();
+
+        let mut highest = 0;
+        let mut counts = ScanCounts::default();
+        discover_project_sessions_streaming(
+            dir.path().to_str().unwrap(),
+            // A session being appended to while it is read: more bytes arrive than the
+            // size the walk measured up front.
+            |_, _, _, on_bytes| {
+                on_bytes(size * 10);
+                None
+            },
+            &mut |_, counts| {
+                highest = highest.max(counts.bytes);
+                true
+            },
+            &mut counts,
+        )
+        .unwrap();
+
+        assert_eq!(highest, size, "progress must not run past the total");
+    }
+
+    #[test]
+    fn scan_reports_the_bytes_it_read_even_for_a_one_line_session() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_session(dir.path(), "tiny", 1, 10);
+
+        let mut reported = 0u64;
+        let _ = scan_session_metadata_reporting(&path, &mut |n| reported += n);
+
+        // The first line is read before the reporting loop starts, so a session holding
+        // only that line used to report nothing at all.
+        assert!(reported > 0, "a one-line session reported no bytes");
     }
 }

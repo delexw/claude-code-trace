@@ -64,10 +64,20 @@ function makeSession(overrides: Partial<SessionInfo> = {}): SessionInfo {
   };
 }
 
+/** A finished walk: the bar is hidden, as it is for every test that is not about it. */
+const indexed = {
+  files_read: 1,
+  total_files: 1,
+  bytes_read: 1,
+  total_bytes: 1,
+  done: true,
+};
+
 describe("SessionPicker", () => {
   it("shows loading spinner when loading", () => {
     render(
       <SessionPicker
+        index={indexed}
         sessions={[]}
         loading={true}
         searchQuery=""
@@ -82,6 +92,7 @@ describe("SessionPicker", () => {
   it("shows 'No sessions found' when empty and no search", () => {
     render(
       <SessionPicker
+        index={indexed}
         sessions={[]}
         loading={false}
         searchQuery=""
@@ -96,6 +107,7 @@ describe("SessionPicker", () => {
   it("shows 'No matching sessions' when empty and searching", () => {
     render(
       <SessionPicker
+        index={indexed}
         sessions={[]}
         loading={false}
         searchQuery="xyz"
@@ -111,6 +123,7 @@ describe("SessionPicker", () => {
     const sessions = [makeSession()];
     render(
       <SessionPicker
+        index={indexed}
         sessions={sessions}
         loading={false}
         searchQuery=""
@@ -128,6 +141,7 @@ describe("SessionPicker", () => {
     const sessions = [makeSession({ name: "valkey-admin-contribution" })];
     render(
       <SessionPicker
+        index={indexed}
         sessions={sessions}
         loading={false}
         searchQuery=""
@@ -148,6 +162,7 @@ describe("SessionPicker", () => {
     const sessions = [makeSession({ name: null })];
     render(
       <SessionPicker
+        index={indexed}
         sessions={sessions}
         loading={false}
         searchQuery=""
@@ -165,6 +180,7 @@ describe("SessionPicker", () => {
     ];
     render(
       <SessionPicker
+        index={indexed}
         sessions={sessions}
         loading={false}
         searchQuery=""
@@ -185,6 +201,7 @@ describe("SessionPicker", () => {
     ];
     render(
       <SessionPicker
+        index={indexed}
         sessions={sessions}
         loading={false}
         searchQuery=""
@@ -208,6 +225,7 @@ describe("SessionPicker", () => {
     ];
     render(
       <SessionPicker
+        index={indexed}
         sessions={sessions}
         loading={false}
         searchQuery=""
@@ -234,6 +252,7 @@ describe("SessionPicker", () => {
     ];
     render(
       <SessionPicker
+        index={indexed}
         sessions={sessions}
         loading={false}
         searchQuery=""
@@ -261,6 +280,7 @@ describe("SessionPicker", () => {
     ];
     render(
       <SessionPicker
+        index={indexed}
         sessions={sessions}
         loading={false}
         searchQuery=""
@@ -281,6 +301,7 @@ describe("SessionPicker", () => {
     const sessions = [makeSession({ dirs: ["/Users/me/repos/sso-server"] })];
     render(
       <SessionPicker
+        index={indexed}
         sessions={sessions}
         loading={false}
         searchQuery=""
@@ -301,6 +322,7 @@ describe("SessionPicker", () => {
     ];
     render(
       <SessionPicker
+        index={indexed}
         sessions={sessions}
         loading={false}
         searchQuery=""
@@ -319,6 +341,7 @@ describe("SessionPicker", () => {
     const sessions = [makeSession({ integrity_warning: null })];
     render(
       <SessionPicker
+        index={indexed}
         sessions={sessions}
         loading={false}
         searchQuery=""
@@ -334,6 +357,7 @@ describe("SessionPicker", () => {
     const sessions = [makeSession({ is_ongoing: true })];
     render(
       <SessionPicker
+        index={indexed}
         sessions={sessions}
         loading={false}
         searchQuery=""
@@ -356,6 +380,7 @@ describe("SessionPicker", () => {
     ];
     render(
       <SessionPicker
+        index={indexed}
         sessions={sessions}
         loading={false}
         searchQuery=""
@@ -376,6 +401,7 @@ describe("SessionPicker", () => {
     const onSearchChange = vi.fn();
     render(
       <SessionPicker
+        index={indexed}
         sessions={[]}
         loading={false}
         searchQuery=""
@@ -393,6 +419,7 @@ describe("SessionPicker", () => {
     const sessions = [makeSession()];
     render(
       <SessionPicker
+        index={indexed}
         sessions={sessions}
         loading={false}
         searchQuery=""
@@ -410,6 +437,7 @@ describe("SessionPicker", () => {
     const sessions = [makeSession()];
     render(
       <SessionPicker
+        index={indexed}
         sessions={sessions}
         loading={false}
         searchQuery=""
@@ -425,6 +453,7 @@ describe("SessionPicker", () => {
   it("does not show loading spinner when not loading", () => {
     render(
       <SessionPicker
+        index={indexed}
         sessions={[makeSession()]}
         loading={false}
         searchQuery=""
@@ -454,6 +483,7 @@ describe("SessionPicker", () => {
       ];
       render(
         <SessionPicker
+          index={indexed}
           sessions={sessions}
           loading={false}
           searchQuery=""
@@ -480,6 +510,7 @@ describe("SessionPicker", () => {
       expect(() =>
         render(
           <SessionPicker
+            index={indexed}
             sessions={sessions}
             loading={false}
             searchQuery=""
@@ -502,6 +533,7 @@ describe("SessionPicker", () => {
 
       render(
         <SessionPicker
+          index={indexed}
           sessions={sessions}
           loading={false}
           searchQuery=""
@@ -524,5 +556,32 @@ describe("SessionPicker", () => {
       act(() => viewActionsRef.current.scrollToTop?.());
       expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: "smooth" });
     });
+  });
+});
+
+describe("SessionPicker indexing progress", () => {
+  it("does not say there are no sessions while the walk is still running", () => {
+    render(
+      <SessionPicker
+        sessions={[]}
+        index={{
+          files_read: 120,
+          total_files: 3375,
+          bytes_read: 3_700_000,
+          total_bytes: 10_000_000,
+          done: false,
+        }}
+        loading={false}
+        searchQuery=""
+        selectedIndex={0}
+        onSelect={vi.fn()}
+        onSearchChange={vi.fn()}
+      />,
+    );
+
+    // The bar itself lives in the strip along the bottom; all the picker does with the
+    // progress is hold its tongue until the walk has actually finished.
+    expect(screen.queryByText("No sessions found")).not.toBeInTheDocument();
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
   });
 });

@@ -1,6 +1,10 @@
 import type { ViewState } from "../types";
+import type { IndexProgress } from "../types";
+import { IndexProgressBar } from "./IndexProgressBar";
 
 interface KeybindBarProps {
+  /** How far the backend has got reading the project directories. */
+  index: IndexProgress;
   view: ViewState;
   hasTeams: boolean;
   showHints?: boolean;
@@ -65,6 +69,7 @@ function getKeys(view: ViewState, hasTeams: boolean): KeyHint[] {
 }
 
 export function KeybindBar({
+  index,
   view,
   hasTeams,
   showHints = true,
@@ -75,29 +80,32 @@ export function KeybindBar({
 
   return (
     <div className="keybind-bar">
-      {showHints &&
-        keys.map((hint) => {
-          const action = actions?.[hint.label];
-          return (
-            <span
-              key={hint.key}
-              className={`keybind-bar__item${action ? " keybind-bar__item--clickable" : ""}`}
-              onClick={action}
-            >
-              <span className="keybind-bar__key">{hint.key}</span>
-              <span className="keybind-bar__label">{hint.label}</span>
-            </span>
-          );
-        })}
-      {onToggle && (
-        <button
-          className="keybind-bar__toggle"
-          onClick={onToggle}
-          title={showHints ? "Hide keybinds" : "Show keybinds"}
-        >
-          ?
-        </button>
-      )}
+      <IndexProgressBar progress={index} />
+      <div className="keybind-bar__hints">
+        {showHints &&
+          keys.map((hint) => {
+            const action = actions?.[hint.label];
+            return (
+              <span
+                key={hint.key}
+                className={`keybind-bar__item${action ? " keybind-bar__item--clickable" : ""}`}
+                onClick={action}
+              >
+                <span className="keybind-bar__key">{hint.key}</span>
+                <span className="keybind-bar__label">{hint.label}</span>
+              </span>
+            );
+          })}
+        {onToggle && (
+          <button
+            className="keybind-bar__toggle"
+            onClick={onToggle}
+            title={showHints ? "Hide keybinds" : "Show keybinds"}
+          >
+            ?
+          </button>
+        )}
+      </div>
     </div>
   );
 }

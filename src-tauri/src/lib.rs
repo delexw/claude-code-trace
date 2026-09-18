@@ -5,6 +5,7 @@ mod clients;
 mod commands;
 mod convert;
 mod http_api;
+mod indexer;
 mod jwt;
 mod parser;
 mod process;
@@ -118,6 +119,28 @@ fn run_desktop(args: &[String]) {
         .setup(move |app| {
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(http_api::start_http_server(handle));
+
+            // Start reading the project directories before anything asks for them.
+            // Waiting for the first `discover_sessions` to kick the walk off wasted the
+            // seconds the window spends starting up. The same list the frontend would
+            // send, so this is the walk it joins rather than a rival one.
+            let state: Arc<state::AppState> = app.state::<Arc<state::AppState>>().inner().clone();
+            let project_dirs = {
+                let settings = state.settings.lock();
+                match settings {
+                    Ok(settings) => wsl::collect_project_dirs(
+                        settings.projects_dir.as_deref(),
+                        &settings.wsl_distros,
+                    ),
+                    Err(_) => Vec::new(),
+                }
+            };
+            indexer::Indexer::start(
+                &state.indexer,
+                Arc::clone(&state.session_cache),
+                project_dirs,
+                Some(app.handle().clone()),
+            );
 
             if web_only {
                 if no_open {

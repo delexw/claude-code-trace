@@ -16,4 +16,5 @@ export type {
   GitInfo,
   DebugEntry,
   ViewState,
+  IndexProgress,
 } from "../../shared/types";

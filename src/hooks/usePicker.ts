@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { invoke } from "../lib/invoke";
-import type { SessionInfo } from "../types";
+import type { IndexProgress, SessionInfo } from "../types";
 import { useTauriEvent } from "./useTauriEvent";
 import { projectKey } from "../../shared/format";
 import { resolveForkRoot } from "../../shared/projectTree";
@@ -9,6 +9,32 @@ interface PickerState {
   sessions: SessionInfo[];
   loading: boolean;
   searchQuery: string;
+  /** How far the backend has got through the project directories. */
+  index: IndexProgress;
+}
+
+/** Nothing is being walked, so the bar stays hidden. */
+const indexNotStarted: IndexProgress = {
+  files_read: 0,
+  total_files: 0,
+  bytes_read: 0,
+  total_bytes: 0,
+  done: true,
+};
+
+/**
+ * Whether two progress reports say the same thing. Bytes are part of it: a single huge
+ * session file reports its bytes as it is read while the file count stands still, and
+ * dropping those would freeze the bar for as long as that file takes.
+ */
+function sameProgress(a: IndexProgress, b: IndexProgress): boolean {
+  return (
+    a.files_read === b.files_read &&
+    a.total_files === b.total_files &&
+    a.bytes_read === b.bytes_read &&
+    a.total_bytes === b.total_bytes &&
+    a.done === b.done
+  );
 }
 
 export function usePicker(selectedProject: string | null = null) {
@@ -16,6 +42,7 @@ export function usePicker(selectedProject: string | null = null) {
     sessions: [],
     loading: false,
     searchQuery: "",
+    index: indexNotStarted,
   });
 
   // Track the most recent project dirs so picker-refresh signals can re-fetch
@@ -93,6 +120,14 @@ export function usePicker(selectedProject: string | null = null) {
     }
   });
 
+  // How far the backend has got walking the project directories, several times a second
+  // while it runs. Only the bar moves on these: the walk sends a `picker-refresh` of its
+  // own whenever it has actually read more sessions, so fetching the list here too would
+  // put every visible session on the wire four times a second for minutes.
+  useTauriEvent<IndexProgress>("index-progress", (progress) => {
+    setState((prev) => (sameProgress(prev.index, progress) ? prev : { ...prev, index: progress }));
+  });
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -125,6 +160,7 @@ export function usePicker(selectedProject: string | null = null) {
   return {
     sessions: filteredSessions,
     allSessions: state.sessions,
+    index: state.index,
     loading: state.loading,
     searchQuery: state.searchQuery,
     setSearchQuery,

@@ -204,3 +204,15 @@ export interface DebugEntry {
 }
 
 export type ViewState = "picker" | "list" | "detail" | "team" | "debug";
+
+/**
+ * How far the background walk has got through the project directories.
+ * Mirrors `IndexProgress` in src-tauri/src/indexer.rs.
+ */
+export interface IndexProgress {
+  files_read: number;
+  total_files: number;
+  bytes_read: number;
+  total_bytes: number;
+  done: boolean;
+}
