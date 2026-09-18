@@ -853,13 +853,19 @@ body {
 
 .keybind-bar {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px 12px;
+  flex-direction: column;
+  gap: 4px;
   padding: 4px 16px;
   background: var(--bg-surface);
   border-top: 1px solid var(--border);
   flex-shrink: 0;
   font-size: 11px;
+}
+
+.keybind-bar__hints {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
 }
 
 .keybind-bar__item {
@@ -1015,6 +1021,37 @@ body {
 
 .picker__search::placeholder {
   color: var(--text-muted);
+}
+
+/* Indexing progress - shown in the strip along the bottom while the backend is still
+   reading the project dirs. The box keeps its height whether a walk is running or not,
+   so the strip never changes size and nothing above it jumps. */
+.index-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 14px;
+  flex-shrink: 0;
+}
+.index-progress__track {
+  flex: 1;
+  height: 4px;
+  min-width: 0;
+  border-radius: 2px;
+  background: var(--bg-hover);
+  overflow: hidden;
+}
+.index-progress__fill {
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent);
+  transition: width 200ms linear;
+}
+.index-progress__count {
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .picker__list {

@@ -1,13 +1,16 @@
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 use tokio::sync::broadcast;
 
 use std::collections::HashMap;
 
+use crate::AppHandle;
+
 use crate::auth::{AuthMode, ClientIdentity, ResolvedAuth};
 use crate::clients::{self, Client, ClientRegistry};
 use crate::convert::{DisplayMessage, LoadResult};
+use crate::indexer::Indexer;
 use crate::jwt::Claims;
 use crate::parser::cache::SessionCache;
 use crate::parser::session::{Liveness, LivenessCache, SessionInfo, SessionNamesCache};
@@ -63,7 +66,7 @@ struct CachedLight {
 pub struct AppState {
     pub session_watcher: Mutex<Option<WatcherHandle>>,
     pub picker_watcher: Mutex<Option<WatcherHandle>>,
-    pub session_cache: Mutex<SessionCache>,
+    pub session_cache: Arc<Mutex<SessionCache>>,
     pub settings: Mutex<Settings>,
     /// Live client-verification mode (see `crate::auth`), read on every request.
     pub auth: RwLock<AuthMode>,
@@ -81,8 +84,8 @@ pub struct AppState {
     pub watched_session_ongoing: Mutex<Option<(String, bool)>>,
     /// Broadcast channel for SSE — watchers send events here, HTTP clients subscribe.
     pub event_tx: broadcast::Sender<SseEvent>,
-    /// 2-second TTL cache for the picker session list.
-    sessions_cache: Mutex<Option<SessionsCache>>,
+    /// The background walk of the project directories, and what it has read so far.
+    pub indexer: Arc<Indexer>,
     /// Short-TTL cache for the live `/rename` session-name registry, shared by
     /// all concurrent `discover_sessions_cached` callers.
     session_names_cache: Mutex<SessionNamesCache>,
@@ -119,10 +122,11 @@ impl AppState {
     /// construction itself never touches the filesystem.
     pub fn new(resolved: ResolvedAuth) -> Self {
         let (event_tx, _) = broadcast::channel(64);
+        let event_tx_for_indexer = event_tx.clone();
         Self {
             session_watcher: Mutex::new(None),
             picker_watcher: Mutex::new(None),
-            session_cache: Mutex::new(SessionCache::new()),
+            session_cache: Arc::new(Mutex::new(SessionCache::new())),
             settings: Mutex::new(crate::settings::load_settings()),
             auth: RwLock::new(resolved.mode),
             clients: RwLock::new(resolved.registry),
@@ -130,7 +134,7 @@ impl AppState {
             config_root: RwLock::new(resolved.config_root),
             watched_session_ongoing: Mutex::new(None),
             event_tx,
-            sessions_cache: Mutex::new(None),
+            indexer: Arc::new(Indexer::new(event_tx_for_indexer)),
             session_names_cache: Mutex::new(SessionNamesCache::new()),
             liveness_cache: Mutex::new(LivenessCache::new()),
             session_light_cache: Mutex::new(None),
@@ -515,32 +519,23 @@ impl AppState {
         }
     }
 
-    /// Discover sessions across `project_dirs`, returning a cached result if
-    /// fresh enough. Multiple concurrent callers within the TTL window share
-    /// one disk scan.
+    /// Discover sessions across `project_dirs`.
+    ///
+    /// Never waits for the directories to be read: the background walk owns that, and
+    /// this returns whatever it has so far plus the live joins below. Reading every
+    /// session file before the first row could be drawn is what left the window blank
+    /// on launch.
     pub fn discover_sessions_cached(
-        &self,
+        state: &Arc<Self>,
         project_dirs: &[String],
+        app: Option<AppHandle>,
     ) -> Result<Vec<SessionInfo>, String> {
-        let mut cache = self.sessions_cache.lock().map_err(|e| e.to_string())?;
-        let fresh = cache
-            .as_ref()
-            .is_some_and(|c| c.dirs == project_dirs && c.cached_at.elapsed() < SESSIONS_CACHE_TTL);
-        let mut sessions = if fresh {
-            cache.as_ref().unwrap().sessions.clone()
-        } else {
-            let session_cache = self.session_cache.lock().map_err(|e| e.to_string())?;
-            let sessions = session_cache.discover_all_project_sessions(project_dirs)?;
-            *cache = Some(SessionsCache {
-                dirs: project_dirs.to_vec(),
-                cached_at: Instant::now(),
-                sessions: sessions.clone(),
-            });
-            sessions
-        };
-        // Release the cache lock before the filesystem work below, so concurrent
-        // callers don't serialize behind it.
-        drop(cache);
+        let (mut sessions, _) = Indexer::snapshot(
+            &state.indexer,
+            Arc::clone(&state.session_cache),
+            project_dirs,
+            app,
+        );
         // Join the live `/rename` names on every call. Names live in the pid-keyed
         // `~/.claude/sessions/*.json` registry, which the transcript-file cache does
         // not track (a rename never touches the JSONL), so the join runs after the
@@ -549,7 +544,7 @@ impl AppState {
         // the broadcast fan-out share one disk scan.
         crate::parser::session::apply_session_names(
             &mut sessions,
-            &self.live_session_names_cached(),
+            &state.live_session_names_cached(),
         );
         // Liveness reads the same registry directory but needs the richer
         // per-entry data (status/pid), not just names, so it joins through its
@@ -558,7 +553,7 @@ impl AppState {
         // per-entry `is_pid_alive` ("kill -0") checks, so a burst of refreshes
         // and the broadcast fan-out share one round of liveness checks.
         if let Some(dir) = crate::parser::session::live_session_names_dir() {
-            let liveness = self.live_liveness_cached(&dir);
+            let liveness = state.live_liveness_cached(&dir);
             crate::parser::session::apply_liveness_map(&mut sessions, &liveness);
         }
         Ok(sessions)

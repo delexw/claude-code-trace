@@ -12,9 +12,10 @@ use crate::watcher::start_picker_watcher;
 #[tauri::command]
 pub async fn discover_sessions(
     project_dirs: Vec<String>,
+    app: AppHandle,
     state: State<'_, Arc<AppState>>,
 ) -> Result<Vec<SessionInfo>, String> {
-    let mut sessions = state.discover_sessions_cached(&project_dirs)?;
+    let mut sessions = AppState::discover_sessions_cached(state.inner(), &project_dirs, Some(app))?;
     // The session watcher has the most accurate ongoing detection, so apply
     // its verdict over the picker's lightweight metadata scan.
     state.apply_watched_ongoing(&mut sessions);

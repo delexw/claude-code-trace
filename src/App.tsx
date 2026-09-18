@@ -441,6 +441,7 @@ export function App() {
         return (
           <SessionPicker
             sessions={picker.sessions}
+            index={picker.index}
             loading={picker.loading}
             searchQuery={picker.searchQuery}
             selectedIndex={pickerSelectedIndex}
@@ -588,6 +589,7 @@ export function App() {
 
       {/* Keybind bar */}
       <KeybindBar
+        index={picker.index}
         view={view}
         hasTeams={session.teams.length > 0}
         showHints={showKeybinds}

@@ -498,10 +498,11 @@ async fn api_discover_sessions(
     Json(body): Json<DiscoverBody>,
 ) -> Response {
     let app_state = app_state(&state);
-    let mut sessions = match app_state.discover_sessions_cached(&body.dirs) {
-        Ok(s) => s,
-        Err(e) => return err_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e),
-    };
+    let mut sessions =
+        match AppState::discover_sessions_cached(&state.app_state, &body.dirs, state.app.clone()) {
+            Ok(s) => s,
+            Err(e) => return err_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e),
+        };
     app_state.apply_watched_ongoing(&mut sessions);
     ok_json(&sessions)
 }

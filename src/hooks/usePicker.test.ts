@@ -175,3 +175,75 @@ describe("usePicker", () => {
     expect(result.current.allSessions).toBe(before);
   });
 });
+
+const progress = (over: Record<string, unknown> = {}) => ({
+  files_read: 120,
+  total_files: 3375,
+  bytes_read: 500,
+  total_bytes: 9000,
+  done: false,
+  ...over,
+});
+
+describe("indexing progress", () => {
+  async function pickerWith(sessions: unknown[]) {
+    mockInvoke.mockReset();
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "discover_sessions") return Promise.resolve(sessions);
+      if (cmd === "get_project_dirs") return Promise.resolve(["/projects"]);
+      return Promise.resolve();
+    });
+    const { result } = renderHook(() => usePicker());
+    await act(async () => {
+      await result.current.discoverSessions(["/projects"]);
+    });
+    return result;
+  }
+
+  it("starts with the bar hidden, before any walk has reported", async () => {
+    const result = await pickerWith([]);
+    expect(result.current.index.done).toBe(true);
+  });
+
+  it("follows the walk without asking for the list again", async () => {
+    const result = await pickerWith([session("/a.jsonl", false)]);
+    const before = mockInvoke.mock.calls.length;
+
+    act(() => emit("index-progress", progress()));
+
+    expect(result.current.index).toEqual(progress());
+    // The walk sends its own picker-refresh once it has read more sessions; a fetch per
+    // progress tick would put every visible session on the wire four times a second.
+    expect(mockInvoke.mock.calls).toHaveLength(before);
+  });
+
+  it("follows a big file being read even while the file count stands still", async () => {
+    const result = await pickerWith([]);
+
+    act(() => emit("index-progress", progress({ bytes_read: 500 })));
+    act(() => emit("index-progress", progress({ bytes_read: 4500 })));
+
+    // One 22GB session reports its bytes as it is read. Ignoring those would freeze the
+    // bar for as long as that file takes.
+    expect(result.current.index.bytes_read).toBe(4500);
+  });
+
+  it("holds the same state object when a tick repeats itself", async () => {
+    const result = await pickerWith([]);
+
+    act(() => emit("index-progress", progress()));
+    const first = result.current.index;
+    act(() => emit("index-progress", progress()));
+
+    expect(result.current.index).toBe(first);
+  });
+
+  it("hides the bar once the walk says it is done", async () => {
+    const result = await pickerWith([]);
+
+    act(() => emit("index-progress", progress()));
+    act(() => emit("index-progress", progress({ done: true })));
+
+    expect(result.current.index.done).toBe(true);
+  });
+});
