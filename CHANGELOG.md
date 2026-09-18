@@ -3,6 +3,35 @@
 All notable changes to claude-code-trace are documented here. Versions follow
 [semantic versioning](https://semver.org/).
 
+## [0.17.0] — 2026-09-18
+
+Opening the picker on a large projects directory used to mean waiting — sometimes minutes of a
+blank list while every session file was read, with a core pinned for the duration. That reading
+now happens on a background thread that publishes what it has as it goes, so the list fills in
+from the newest session down and a progress bar along the bottom says how much is still to come.
+
+### Added
+
+- **Background session indexing**
+  ([`aa32566`](https://github.com/delexw/claude-code-trace/commit/aa32566)). The picker no longer
+  blocks while your sessions are read. A background walk works through the projects directory on
+  its own thread and publishes sessions as it finds them, newest first, so the list is usable
+  straight away instead of blank until the last file is done. The walk rests between slices of
+  work and holds itself to about a fifth of a core, so indexing a large directory no longer
+  competes with whatever else you are running. The first request for a set of directories waits
+  up to 400ms on the walk: a small directory finishes inside that and comes back complete, rather
+  than arriving empty and staying empty until something else happened to ask.
+
+- **Indexing progress bar**
+  ([`aa32566`](https://github.com/delexw/claude-code-trace/commit/aa32566)). The strip along the
+  bottom now shows how far the walk has got, as a bar plus a session count and a byte total.
+  Progress is measured in bytes rather than files, so one multi-gigabyte session sitting beside
+  thousands of small ones cannot show a bar near full with most of the reading still to do, and
+  the walk reports from inside each read so a single large file does not freeze it. The bar keeps
+  its box whether a walk is running or not, so the strip never changes height under you.
+
+[0.17.0]: https://github.com/delexw/claude-code-trace/releases/tag/v0.17.0
+
 ## [0.16.0] — 2026-09-18
 
 Installing on macOS no longer involves a terminal workaround. The app is unsigned, so every
