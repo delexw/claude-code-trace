@@ -547,7 +547,7 @@ dependencies = [
 
 [[package]]
 name = "claude-code-trace"
-version = "0.15.1"
+version = "0.16.0"
 dependencies = [
  "axum",
  "base64 0.23.1",

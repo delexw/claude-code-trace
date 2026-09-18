@@ -3,6 +3,37 @@
 All notable changes to claude-code-trace are documented here. Versions follow
 [semantic versioning](https://semver.org/).
 
+## [0.16.0] — 2026-09-18
+
+Installing on macOS no longer involves a terminal workaround. The app is unsigned, so every
+`.dmg` downloaded through a browser arrived tagged as quarantined, and macOS refused to open it
+until you cleared that flag with `xattr -cr` by hand. There is now a one-line installer that
+sidesteps the problem entirely, and the `.dmg` that caused it is no longer published.
+
+### Added
+
+- **One-line macOS install**
+  ([`96d5aaf`](https://github.com/delexw/claude-code-trace/commit/96d5aaf)). Running
+  `curl -fsSL https://raw.githubusercontent.com/delexw/claude-code-trace/main/script/install-macos.sh | bash`
+  downloads the latest release and puts **Claude Code Trace.app** into `/Applications`, ready to
+  open from Spotlight. No clone, no Rust or Node toolchain, and no quarantine step: the quarantine
+  flag is applied by whatever downloads a file rather than baked into the artifact, and `curl`
+  never sets it, so the app launches the way a normal app does. Set `CCTRACE_VERSION` to pin a
+  release or `CCTRACE_INSTALL_DIR` to install somewhere else. Apple Silicon only, as before — the
+  installer asks the kernel whether it is running under Rosetta so an Apple Silicon Mac in an
+  Intel shell still resolves correctly, and points a genuine Intel Mac at a source build instead
+  of failing on a download that was never published.
+
+### Removed
+
+- **The macOS `.dmg`** ([`96d5aaf`](https://github.com/delexw/claude-code-trace/commit/96d5aaf)).
+  `Claude.Code.Trace_aarch64.app.tar.gz` is now the only macOS artifact. The `.dmg` looked like an
+  ordinary installer, which made it both the most likely thing to download and the most likely
+  thing to be blocked on arrival; dropping it leaves the one-line install as the path people
+  actually meet. Linux and Windows artifacts are unchanged.
+
+[0.16.0]: https://github.com/delexw/claude-code-trace/releases/tag/v0.16.0
+
 ## [0.15.1] — 2026-09-16
 
 A reliability release. Three of these bugs could make a session look emptier than it really was —
