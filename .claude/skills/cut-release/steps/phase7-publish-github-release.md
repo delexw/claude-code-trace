@@ -49,9 +49,10 @@ gh release view "v$NEXT_VERSION" --json isDraft,isPrerelease,url,publishedAt,ass
   --jq '{isDraft,isPrerelease,url,publishedAt,assets:[.assets[]|.name]}'
 ```
 
-Expect `"isDraft": false`, `"isPrerelease": false`, a published timestamp, and 7 asset
-filenames stamped with `$NEXT_VERSION` (macOS aarch64 dmg + app.tar.gz, Linux rpm /
-AppImage / deb, Windows exe / msi).
+Expect `"isDraft": false`, `"isPrerelease": false`, a published timestamp, and 6 assets:
+`Claude.Code.Trace_aarch64.app.tar.gz` for macOS (unversioned by Tauri, and the only
+macOS artifact — no `.dmg`, see `.github/workflows/release.yml`), plus five filenames
+stamped with `$NEXT_VERSION` (Linux rpm / AppImage / deb, Windows exe / msi).
 
 ## Step 7.3 — Verify the body matches the CHANGELOG
 

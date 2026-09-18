@@ -13,6 +13,10 @@
 [![Textual](https://img.shields.io/badge/textual-8.2%2B-5A4FCF?logo=textualize&logoColor=white)](https://textual.textualize.io/)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-blue)](https://github.com/delexw/claude-code-trace/releases)
 
+<p align="center">
+  <strong><a href="#install">⬇&#65039; Install Claude Code Trace</a></strong>
+</p>
+
 **Claude Code Trace** is a **Claude Code session log viewer** for local JSONL files stored in `~/.claude/projects/`.
 
 Browse, tail, and inspect Claude Code conversations in real time. Claude Code Trace renders Claude Code JSONL session files as readable conversations with expandable tool calls, token counts, timestamps, MCP tool call detection, and live log tailing. It also helps you find sessions by user message. It runs as a **GUI app** for macOS, Linux, and Windows, a **Web app** or a **TUI**.
@@ -57,22 +61,41 @@ Claude Code Trace is especially useful when building personal AI harnesses and l
 
 ## Install
 
-### Download pre-built app
+### macOS — one-line install
+
+> [!TIP]
+> **No clone. No build tools. No `xattr`.** Paste this into your terminal:
+>
+> ```bash
+> curl -fsSL https://raw.githubusercontent.com/delexw/claude-code-trace/main/script/install-macos.sh | bash
+> ```
+>
+> This downloads the latest release and installs **Claude Code Trace.app** into
+> `/Applications`, ready to open from Spotlight.
+>
+> macOS blocks unsigned apps that were flagged as downloaded, and `curl` never
+> sets that flag — so the app just opens, with no quarantine workaround. That is
+> why macOS releases ship a `.app.tar.gz` and no `.dmg`. Apple Silicon only.
+
+Pin a specific version, or install somewhere else, with:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/delexw/claude-code-trace/main/script/install-macos.sh \
+  | CCTRACE_VERSION=v0.15.1 CCTRACE_INSTALL_DIR=~/Applications bash
+```
+
+### Download pre-built app — Linux and Windows
 
 Grab the latest release from [Releases](https://github.com/delexw/claude-code-trace/releases):
 
 | Platform | File                        |
 | -------- | --------------------------- |
-| macOS    | `.dmg`                      |
 | Linux    | `.deb`, `.rpm`, `.AppImage` |
 | Windows  | `.msi`, `.exe`              |
 
-> [!IMPORTANT]
-> **macOS:** The app is unsigned. After installing, remove the quarantine attribute:
->
-> ```bash
-> xattr -cr /Applications/Claude\ Code\ Trace.app
-> ```
+On macOS, use the [one-line install](#macos--one-line-install) above. Downloading the
+macOS build by hand is not supported — the app is unsigned, so anything a browser
+downloads is quarantined and refuses to open until you clear the flag yourself.
 
 ### Build from source
 
@@ -142,11 +165,11 @@ Select a session to view the conversation. Click messages to expand tool calls, 
 
 In desktop mode, click **Open in Browser** in the toolbar to switch to browser mode. This opens `http://localhost:1420` in your default browser and hides the desktop window.
 
-If you installed the pre-built `.dmg`, `.deb`, or `.msi`, you can also launch the desktop app directly and pass `--web` to the binary:
+If you installed the pre-built `.app`, `.deb`, or `.msi`, you can also launch the desktop app directly and pass `--web` to the binary:
 
 ```bash
 # macOS
-/Applications/Claude\ Code\ Trace.app/Contents/MacOS/Claude\ Code\ Trace --web
+/Applications/Claude\ Code\ Trace.app/Contents/MacOS/claude-code-trace --web
 ```
 
 ### API access

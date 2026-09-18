@@ -120,11 +120,17 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Bundle the .app only, no .dmg. The app is unsigned, so a browser-
+      # downloaded .dmg is quarantined by Gatekeeper and will not open without
+      # `xattr -cr`. script/install-macos.sh fetches the .app.tar.gz with curl,
+      # which never sets the quarantine flag, so that is the install path we
+      # support. tauri-action drops the missing .dmg artifact and tars the .app.
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
+          args: --bundles app
           tagName: ${{ github.ref_name }}
           releaseName: ${{ github.ref_name }}
           releaseBody: ${{ needs.notes.outputs.body }}

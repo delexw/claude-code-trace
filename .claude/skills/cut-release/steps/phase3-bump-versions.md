@@ -16,7 +16,7 @@ Use the Edit tool with precise `old_string`/`new_string` (not sed):
 
 All three must end up at `$NEXT_VERSION`. `tauri.conf.json` is the one `tauri-action`
 reads when stamping artifact filenames at build time
-(`Claude.Code.Trace_<version>_*.dmg`, etc.). Skipping it produces a release whose
+(`Claude.Code.Trace_<version>_*.deb`, etc.). Skipping it produces a release whose
 artifacts are stamped with the previous version.
 
 ## Step 3.2 — TUI package (currently no version manifest)
