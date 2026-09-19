@@ -3,6 +3,8 @@ import { invoke } from "../lib/invoke";
 import { setApiToken as setLiveApiToken } from "../lib/apiToken";
 import { PopoutModal } from "./PopoutModal";
 import { FONT_SCALE_PRESETS, formatFontScale } from "../lib/fontScale";
+import { AnalyticsSettings } from "./AnalyticsSettings";
+import { BetaBadge } from "./BetaBadge";
 
 interface SettingsResponse {
   projects_dir: string | null;
@@ -67,7 +69,10 @@ interface SettingsModalProps {
   recapPreview: boolean;
   /** Toggle recap preview (persisted by the caller). */
   onRecapPreviewChange: (on: boolean) => void;
+  initialTab?: SettingsTab;
 }
+
+type SettingsTab = "general" | "appearance" | "api" | "analytics";
 
 /** Merge detected distros with already-configured ones so configured-but-offline
  * distros still appear (and stay toggleable) even when WSL isn't reporting them. */
@@ -93,7 +98,9 @@ export function SettingsModal({
   onFontScaleChange,
   recapPreview,
   onRecapPreviewChange,
+  initialTab = "general",
 }: SettingsModalProps) {
+  const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
   const [projectsDir, setProjectsDir] = useState("");
   const [defaultDir, setDefaultDir] = useState("");
   const [effectiveDir, setEffectiveDir] = useState("");
@@ -319,292 +326,328 @@ export function SettingsModal({
       initialHeight={560}
     >
       <div className="settings-modal">
-        <label className="settings-modal__label" htmlFor="projects-dir">
-          Projects Directory
-        </label>
-        <input
-          id="projects-dir"
-          className="settings-modal__input"
-          type="text"
-          value={projectsDir}
-          onChange={(e) => {
-            setProjectsDir(e.target.value);
-            setError("");
-          }}
-          onKeyDown={handleKeyDown}
-          placeholder={defaultDir + " (default)"}
-          spellCheck={false}
-          autoFocus
-        />
-        <p className="settings-modal__hint">Default: {defaultDir}</p>
-        {effectiveDir && (
-          <p
-            className={
-              effectiveDirExists
-                ? "settings-modal__hint settings-modal__hint--effective"
-                : "settings-modal__hint settings-modal__hint--missing"
-            }
-          >
-            {effectiveDirExists ? "✓ Active:" : "✗ Not found:"} {effectiveDir}
-          </p>
-        )}
-
-        <label className="settings-modal__label settings-modal__label--section">WSL Distros</label>
-        {distros.length === 0 ? (
-          <p className="settings-modal__hint">
-            No WSL distributions detected. Sessions created inside WSL appear here once a distro is
-            installed.
-          </p>
-        ) : (
-          <>
-            <p className="settings-modal__hint">
-              Include projects from Claude Code running inside these distributions.
-            </p>
-            <div className="settings-modal__wsl">
-              {distros.map((name) => (
-                <label key={name} className="settings-modal__wsl-item">
-                  <input
-                    type="checkbox"
-                    checked={selectedDistros.has(name)}
-                    onChange={() => toggleDistro(name)}
-                  />
-                  <span>{name}</span>
-                </label>
-              ))}
-            </div>
-          </>
-        )}
-
-        <label
-          className="settings-modal__label settings-modal__label--section"
-          htmlFor="allowed-origins"
-        >
-          Allowed Origins (CORS)
-        </label>
-        <p className="settings-modal__hint">
-          Browsers only. Add the origin of any page that calls the API from a different host or
-          port, such as a reverse proxy. Clients still need a token. One per line.
-        </p>
-        <textarea
-          id="allowed-origins"
-          className="settings-modal__textarea"
-          value={allowedOriginsText}
-          onChange={(e) => {
-            setAllowedOriginsText(e.target.value);
-            setError("");
-          }}
-          placeholder="https://cctrace.example.com"
-          spellCheck={false}
-          rows={3}
-        />
-
-        <label className="settings-modal__label settings-modal__label--section">
-          Accepted clients
-        </label>
-        {authSource === "disabled" ? (
-          <p className="settings-modal__hint">
-            Client verification is off (CCTRACE_API_AUTH=off): any local process can call the HTTP
-            API. Unset the variable to require a registered client again.
-          </p>
-        ) : (
-          <>
-            <p className="settings-modal__hint">
-              Every client needs its own signed token (a JWT) to call the local HTTP API. Send it as
-              an <code>Authorization: Bearer</code> or <code>X-CCTrace-Token</code> header. The
-              bundled web UI and TUI register themselves; add a client below for any script or tool
-              of your own.
-            </p>
-            {authSource === "ephemeral" && (
-              <p className="settings-modal__hint settings-modal__hint--missing">
-                The signing key could not be written at startup, so credentials issued now stop
-                working when the app restarts and the TUI cannot read its own (see the server log).
-                Fix the config directory and restart.
-              </p>
-            )}
-            <table className="settings-modal__clients" aria-label="Accepted clients">
-              <thead>
-                <tr>
-                  <th>Client</th>
-                  <th>Issued</th>
-                  <th>Status</th>
-                  <th aria-label="Actions" />
-                </tr>
-              </thead>
-              <tbody>
-                {clients.map((client) => {
-                  const revoked = client.revoked_at != null;
-                  const busy = busyClient === client.id;
-                  const armed = pending?.id === client.id ? pending.kind : null;
-                  return (
-                    <tr key={client.id} data-client={client.name}>
-                      <td>
-                        <span className="settings-modal__client-name">{client.name}</span>
-                        {client.builtin && (
-                          <span className="settings-modal__client-badge">built-in</span>
-                        )}
-                      </td>
-                      <td>{formatDate(client.created_at)}</td>
-                      <td
-                        className={
-                          revoked
-                            ? "settings-modal__client-status settings-modal__client-status--revoked"
-                            : "settings-modal__client-status"
-                        }
-                      >
-                        {revoked ? "Revoked" : "Active"}
-                      </td>
-                      <td className="settings-modal__client-actions">
-                        <button
-                          type="button"
-                          className="settings-modal__btn"
-                          onClick={() => void handleReissue(client)}
-                          disabled={busy}
-                          aria-label={`Reissue ${client.name}`}
-                          aria-pressed={armed === "reissue"}
-                        >
-                          {armed === "reissue" ? "Confirm reissue?" : "Reissue"}
-                        </button>
-                        <button
-                          type="button"
-                          className="settings-modal__btn"
-                          onClick={() => void handleRevoke(client)}
-                          disabled={busy || revoked}
-                          aria-label={`Revoke ${client.name}`}
-                          aria-pressed={armed === "revoke"}
-                        >
-                          {armed === "revoke" ? "Confirm revoke?" : "Revoke"}
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-            <div className="settings-modal__credential-row">
-              <input
-                className="settings-modal__input"
-                type="text"
-                value={newClientName}
-                onChange={(e) => {
-                  setNewClientName(e.target.value);
-                  setError("");
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    void handleRegister();
-                  }
-                }}
-                placeholder="New client name (e.g. ci-script)"
-                aria-label="New client name"
-                spellCheck={false}
-                maxLength={64}
-              />
-              <button
-                type="button"
-                className="settings-modal__btn"
-                onClick={() => void handleRegister()}
-                disabled={busyClient === "new" || !newClientName.trim()}
-              >
-                Add client
-              </button>
-            </div>
-            {issued && (
-              <>
-                <p className="settings-modal__hint">
-                  Credential for <strong>{issued.client.name}</strong> — store it now, it is not
-                  kept:
-                </p>
-                <div className="settings-modal__credential-row">
-                  <input
-                    className="settings-modal__input settings-modal__input--credential"
-                    type="text"
-                    value={issued.credential}
-                    readOnly
-                    aria-label="New client credential"
-                    spellCheck={false}
-                    onFocus={(e) => e.currentTarget.select()}
-                  />
-                  <button
-                    type="button"
-                    className="settings-modal__btn"
-                    onClick={handleCopyCredential}
-                  >
-                    Copy
-                  </button>
-                  <button
-                    type="button"
-                    className="settings-modal__btn"
-                    onClick={() => setIssued(null)}
-                    aria-label="Dismiss credential"
-                  >
-                    Done
-                  </button>
-                </div>
-              </>
-            )}
-            {clientNotice && (
-              <p className="settings-modal__hint settings-modal__hint--effective">{clientNotice}</p>
-            )}
-          </>
-        )}
-
-        <label className="settings-modal__label settings-modal__label--section">Font Size</label>
-        <p className="settings-modal__hint">Zoom the whole interface in or out.</p>
-        <div className="settings-modal__font-scale" role="group" aria-label="Font size">
-          {FONT_SCALE_PRESETS.map((preset) => (
+        <div className="settings-modal__tabs" role="tablist" aria-label="Settings sections">
+          {(["general", "appearance", "api", "analytics"] as SettingsTab[]).map((tab) => (
             <button
-              key={preset}
+              key={tab}
               type="button"
-              className={
-                preset === fontScale
-                  ? "settings-modal__font-scale-btn settings-modal__font-scale-btn--active"
-                  : "settings-modal__font-scale-btn"
-              }
-              aria-pressed={preset === fontScale}
-              onClick={() => onFontScaleChange(preset)}
+              role="tab"
+              aria-selected={activeTab === tab}
+              className={`settings-modal__tab${activeTab === tab ? " settings-modal__tab--active" : ""}`}
+              onClick={() => setActiveTab(tab)}
             >
-              {formatFontScale(preset)}
+              {tab[0].toUpperCase() + tab.slice(1)} {tab === "analytics" && <BetaBadge />}
             </button>
           ))}
         </div>
+        {activeTab === "general" && (
+          <>
+            <label className="settings-modal__label" htmlFor="projects-dir">
+              Projects Directory
+            </label>
+            <input
+              id="projects-dir"
+              className="settings-modal__input"
+              type="text"
+              value={projectsDir}
+              onChange={(e) => {
+                setProjectsDir(e.target.value);
+                setError("");
+              }}
+              onKeyDown={handleKeyDown}
+              placeholder={defaultDir + " (default)"}
+              spellCheck={false}
+              autoFocus
+            />
+            <p className="settings-modal__hint">Default: {defaultDir}</p>
+            {effectiveDir && (
+              <p
+                className={
+                  effectiveDirExists
+                    ? "settings-modal__hint settings-modal__hint--effective"
+                    : "settings-modal__hint settings-modal__hint--missing"
+                }
+              >
+                {effectiveDirExists ? "✓ Active:" : "✗ Not found:"} {effectiveDir}
+              </p>
+            )}
 
-        <label className="settings-modal__label settings-modal__label--section">
-          Session Preview
-        </label>
-        <p className="settings-modal__hint">
-          Show a session's end-of-session recap as its list preview, when the recap is the latest
-          entry.
-        </p>
-        <button
-          type="button"
-          role="switch"
-          aria-checked={recapPreview}
-          aria-label="Recap preview"
-          className={`settings-modal__toggle${recapPreview ? " settings-modal__toggle--on" : ""}`}
-          onClick={() => onRecapPreviewChange(!recapPreview)}
-        >
-          <span className="settings-modal__toggle-knob" />
-          <span className="settings-modal__toggle-label">{recapPreview ? "On" : "Off"}</span>
-        </button>
+            <label className="settings-modal__label settings-modal__label--section">
+              WSL Distros
+            </label>
+            {distros.length === 0 ? (
+              <p className="settings-modal__hint">
+                No WSL distributions detected. Sessions created inside WSL appear here once a distro
+                is installed.
+              </p>
+            ) : (
+              <>
+                <p className="settings-modal__hint">
+                  Include projects from Claude Code running inside these distributions.
+                </p>
+                <div className="settings-modal__wsl">
+                  {distros.map((name) => (
+                    <label key={name} className="settings-modal__wsl-item">
+                      <input
+                        type="checkbox"
+                        checked={selectedDistros.has(name)}
+                        onChange={() => toggleDistro(name)}
+                      />
+                      <span>{name}</span>
+                    </label>
+                  ))}
+                </div>
+              </>
+            )}
+          </>
+        )}
 
-        {error && <p className="settings-modal__error">{error}</p>}
-        <div className="settings-modal__actions">
-          <button
-            className="settings-modal__btn settings-modal__btn--secondary"
-            onClick={handleReset}
-            disabled={saving}
-          >
-            Reset to Default
-          </button>
-          <button
-            className="settings-modal__btn settings-modal__btn--primary"
-            onClick={handleSave}
-            disabled={saving}
-          >
-            Save
-          </button>
-        </div>
+        {(activeTab === "general" || activeTab === "api") && (
+          <>
+            <label
+              className="settings-modal__label settings-modal__label--section"
+              htmlFor="allowed-origins"
+            >
+              Allowed Origins (CORS)
+            </label>
+            <p className="settings-modal__hint">
+              Browsers only. Add the origin of any page that calls the API from a different host or
+              port, such as a reverse proxy. Clients still need a token. One per line.
+            </p>
+            <textarea
+              id="allowed-origins"
+              className="settings-modal__textarea"
+              value={allowedOriginsText}
+              onChange={(e) => {
+                setAllowedOriginsText(e.target.value);
+                setError("");
+              }}
+              placeholder="https://cctrace.example.com"
+              spellCheck={false}
+              rows={3}
+            />
+
+            <label className="settings-modal__label settings-modal__label--section">
+              Accepted clients
+            </label>
+            {authSource === "disabled" ? (
+              <p className="settings-modal__hint">
+                Client verification is off (CCTRACE_API_AUTH=off): any local process can call the
+                HTTP API. Unset the variable to require a registered client again.
+              </p>
+            ) : (
+              <>
+                <p className="settings-modal__hint">
+                  Every client needs its own signed token (a JWT) to call the local HTTP API. Send
+                  it as an <code>Authorization: Bearer</code> or <code>X-CCTrace-Token</code>{" "}
+                  header. The bundled web UI and TUI register themselves; add a client below for any
+                  script or tool of your own.
+                </p>
+                {authSource === "ephemeral" && (
+                  <p className="settings-modal__hint settings-modal__hint--missing">
+                    The signing key could not be written at startup, so credentials issued now stop
+                    working when the app restarts and the TUI cannot read its own (see the server
+                    log). Fix the config directory and restart.
+                  </p>
+                )}
+                <table className="settings-modal__clients" aria-label="Accepted clients">
+                  <thead>
+                    <tr>
+                      <th>Client</th>
+                      <th>Issued</th>
+                      <th>Status</th>
+                      <th aria-label="Actions" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {clients.map((client) => {
+                      const revoked = client.revoked_at != null;
+                      const busy = busyClient === client.id;
+                      const armed = pending?.id === client.id ? pending.kind : null;
+                      return (
+                        <tr key={client.id} data-client={client.name}>
+                          <td>
+                            <span className="settings-modal__client-name">{client.name}</span>
+                            {client.builtin && (
+                              <span className="settings-modal__client-badge">built-in</span>
+                            )}
+                          </td>
+                          <td>{formatDate(client.created_at)}</td>
+                          <td
+                            className={
+                              revoked
+                                ? "settings-modal__client-status settings-modal__client-status--revoked"
+                                : "settings-modal__client-status"
+                            }
+                          >
+                            {revoked ? "Revoked" : "Active"}
+                          </td>
+                          <td className="settings-modal__client-actions">
+                            <button
+                              type="button"
+                              className="settings-modal__btn"
+                              onClick={() => void handleReissue(client)}
+                              disabled={busy}
+                              aria-label={`Reissue ${client.name}`}
+                              aria-pressed={armed === "reissue"}
+                            >
+                              {armed === "reissue" ? "Confirm reissue?" : "Reissue"}
+                            </button>
+                            <button
+                              type="button"
+                              className="settings-modal__btn"
+                              onClick={() => void handleRevoke(client)}
+                              disabled={busy || revoked}
+                              aria-label={`Revoke ${client.name}`}
+                              aria-pressed={armed === "revoke"}
+                            >
+                              {armed === "revoke" ? "Confirm revoke?" : "Revoke"}
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                <div className="settings-modal__credential-row">
+                  <input
+                    className="settings-modal__input"
+                    type="text"
+                    value={newClientName}
+                    onChange={(e) => {
+                      setNewClientName(e.target.value);
+                      setError("");
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        void handleRegister();
+                      }
+                    }}
+                    placeholder="New client name (e.g. ci-script)"
+                    aria-label="New client name"
+                    spellCheck={false}
+                    maxLength={64}
+                  />
+                  <button
+                    type="button"
+                    className="settings-modal__btn"
+                    onClick={() => void handleRegister()}
+                    disabled={busyClient === "new" || !newClientName.trim()}
+                  >
+                    Add client
+                  </button>
+                </div>
+                {issued && (
+                  <>
+                    <p className="settings-modal__hint">
+                      Credential for <strong>{issued.client.name}</strong> — store it now, it is not
+                      kept:
+                    </p>
+                    <div className="settings-modal__credential-row">
+                      <input
+                        className="settings-modal__input settings-modal__input--credential"
+                        type="text"
+                        value={issued.credential}
+                        readOnly
+                        aria-label="New client credential"
+                        spellCheck={false}
+                        onFocus={(e) => e.currentTarget.select()}
+                      />
+                      <button
+                        type="button"
+                        className="settings-modal__btn"
+                        onClick={handleCopyCredential}
+                      >
+                        Copy
+                      </button>
+                      <button
+                        type="button"
+                        className="settings-modal__btn"
+                        onClick={() => setIssued(null)}
+                        aria-label="Dismiss credential"
+                      >
+                        Done
+                      </button>
+                    </div>
+                  </>
+                )}
+                {clientNotice && (
+                  <p className="settings-modal__hint settings-modal__hint--effective">
+                    {clientNotice}
+                  </p>
+                )}
+              </>
+            )}
+          </>
+        )}
+
+        {(activeTab === "general" || activeTab === "appearance") && (
+          <>
+            <label className="settings-modal__label settings-modal__label--section">
+              Font Size
+            </label>
+            <p className="settings-modal__hint">Zoom the whole interface in or out.</p>
+            <div className="settings-modal__font-scale" role="group" aria-label="Font size">
+              {FONT_SCALE_PRESETS.map((preset) => (
+                <button
+                  key={preset}
+                  type="button"
+                  className={
+                    preset === fontScale
+                      ? "settings-modal__font-scale-btn settings-modal__font-scale-btn--active"
+                      : "settings-modal__font-scale-btn"
+                  }
+                  aria-pressed={preset === fontScale}
+                  onClick={() => onFontScaleChange(preset)}
+                >
+                  {formatFontScale(preset)}
+                </button>
+              ))}
+            </div>
+
+            <label className="settings-modal__label settings-modal__label--section">
+              Session Preview
+            </label>
+            <p className="settings-modal__hint">
+              Show a session's end-of-session recap as its list preview, when the recap is the
+              latest entry.
+            </p>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={recapPreview}
+              aria-label="Recap preview"
+              className={`settings-modal__toggle${recapPreview ? " settings-modal__toggle--on" : ""}`}
+              onClick={() => onRecapPreviewChange(!recapPreview)}
+            >
+              <span className="settings-modal__toggle-knob" />
+              <span className="settings-modal__toggle-label">{recapPreview ? "On" : "Off"}</span>
+            </button>
+          </>
+        )}
+
+        {activeTab === "analytics" && <AnalyticsSettings />}
+
+        {activeTab !== "analytics" && error && <p className="settings-modal__error">{error}</p>}
+        {activeTab !== "analytics" && (
+          <div className="settings-modal__actions">
+            <button
+              className="settings-modal__btn settings-modal__btn--secondary"
+              onClick={handleReset}
+              disabled={saving}
+            >
+              Reset to Default
+            </button>
+            <button
+              className="settings-modal__btn settings-modal__btn--primary"
+              onClick={handleSave}
+              disabled={saving}
+            >
+              Save
+            </button>
+          </div>
+        )}
       </div>
     </PopoutModal>
   );

@@ -191,6 +191,33 @@ fn build_router(state: Arc<HttpState>, static_dir: Option<String>) -> Router {
         .route("/api/settings/dir", post(api_set_projects_dir))
         .route("/api/settings/origins", post(api_set_allowed_origins))
         .route(
+            "/api/analytics/settings",
+            get(api_get_analytics_settings).post(api_set_analytics_settings),
+        )
+        .route("/api/analytics/jev/test", post(api_test_jev_connection))
+        .route(
+            "/api/analytics/recommendation/test",
+            post(api_test_recommendation_provider),
+        )
+        .route(
+            "/api/efficiency/prepare",
+            post(api_prepare_efficiency_payload),
+        )
+        .route("/api/efficiency/start", post(api_start_efficiency_analysis))
+        .route("/api/efficiency/jobs", get(api_list_efficiency_jobs))
+        .route(
+            "/api/efficiency/job/{id}/cancel",
+            post(api_cancel_efficiency_analysis),
+        )
+        .route(
+            "/api/efficiency/result",
+            get(api_get_session_efficiency).delete(api_delete_session_efficiency),
+        )
+        .route(
+            "/api/efficiency/summaries",
+            get(api_list_efficiency_summaries),
+        )
+        .route(
             "/api/clients",
             get(api_list_clients).post(api_register_client),
         )
@@ -362,6 +389,156 @@ async fn api_set_allowed_origins(
         &app_state.auth_snapshot(),
         app_state.clients_snapshot(),
     ))
+}
+
+// ---------------------------------------------------------------------------
+// Analytics / Jev efficiency analysis
+// ---------------------------------------------------------------------------
+
+async fn api_get_analytics_settings() -> Response {
+    match crate::commands::efficiency::get_analytics_settings_impl() {
+        Ok(settings) => ok_json(&settings),
+        Err(error) => err_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, error),
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AnalyticsSettingsBody {
+    default_payload_mode: crate::efficiency::settings::PayloadMode,
+    recommendation_provider: crate::efficiency::settings::RecommendationProvider,
+}
+
+async fn api_set_analytics_settings(Json(body): Json<AnalyticsSettingsBody>) -> Response {
+    if let Err(error) =
+        crate::efficiency::settings::ensure_web_provider_supported(&body.recommendation_provider)
+    {
+        return err_response(axum::http::StatusCode::BAD_REQUEST, error);
+    }
+    match crate::commands::efficiency::set_analytics_settings_impl(
+        body.default_payload_mode,
+        body.recommendation_provider,
+    ) {
+        Ok(settings) => ok_json(&settings),
+        Err(error) => err_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, error),
+    }
+}
+
+async fn api_test_jev_connection() -> Response {
+    let key = match crate::credentials::api_tokens::resolve(
+        crate::credentials::api_tokens::ApiToken::Jev,
+    ) {
+        Ok(Some(key)) => key,
+        Ok(None) => {
+            return err_response(
+                axum::http::StatusCode::BAD_REQUEST,
+                "Jev API key required".to_string(),
+            )
+        }
+        Err(error) => return err_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, error),
+    };
+    match crate::efficiency::jev::test_connection(&key).await {
+        Ok(()) => ok_json(&serde_json::json!({ "status": "connected" })),
+        Err(error) => err_response(axum::http::StatusCode::BAD_GATEWAY, error),
+    }
+}
+
+#[derive(Deserialize)]
+struct RecommendationProviderBody {
+    provider: crate::efficiency::settings::RecommendationProvider,
+}
+
+async fn api_test_recommendation_provider(
+    Json(body): Json<RecommendationProviderBody>,
+) -> Response {
+    if let Err(error) = crate::efficiency::settings::ensure_web_provider_supported(&body.provider) {
+        return err_response(axum::http::StatusCode::BAD_REQUEST, error);
+    }
+    match crate::commands::efficiency::test_recommendation_provider_impl(body.provider).await {
+        Ok(()) => ok_json(&serde_json::json!({ "status": "connected" })),
+        Err(error) => err_response(axum::http::StatusCode::BAD_GATEWAY, error),
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PrepareEfficiencyBody {
+    path: String,
+    payload_mode: Option<crate::efficiency::settings::PayloadMode>,
+}
+
+async fn api_prepare_efficiency_payload(Json(body): Json<PrepareEfficiencyBody>) -> Response {
+    match crate::commands::efficiency::prepare_session_efficiency_payload_impl(
+        &body.path,
+        body.payload_mode,
+    ) {
+        Ok(payload) => ok_json(&payload),
+        Err(error) => err_response(axum::http::StatusCode::BAD_REQUEST, error),
+    }
+}
+
+#[derive(Deserialize)]
+struct StartEfficiencyBody {
+    path: String,
+    payload: crate::efficiency::PreparedEfficiencyPayload,
+}
+
+async fn api_start_efficiency_analysis(
+    State(state): State<Arc<HttpState>>,
+    Json(body): Json<StartEfficiencyBody>,
+) -> Response {
+    match crate::commands::efficiency::start_session_efficiency_analysis_impl(
+        state.app_state.clone(),
+        state.app.clone(),
+        body.path,
+        body.payload,
+    ) {
+        Ok(job) => ok_json(&job),
+        Err(error) => err_response(axum::http::StatusCode::BAD_REQUEST, error),
+    }
+}
+
+async fn api_list_efficiency_jobs(State(state): State<Arc<HttpState>>) -> Response {
+    match crate::commands::efficiency::list_efficiency_analysis_jobs_impl(&state.app_state) {
+        Ok(jobs) => ok_json(&jobs),
+        Err(error) => err_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, error),
+    }
+}
+
+async fn api_cancel_efficiency_analysis(
+    State(state): State<Arc<HttpState>>,
+    UrlPath(id): UrlPath<String>,
+) -> Response {
+    match crate::commands::efficiency::cancel_efficiency_analysis_impl(&state.app_state, &id) {
+        Ok(()) => ok_json(&serde_json::json!({ "cancelled": true })),
+        Err(error) => err_response(axum::http::StatusCode::NOT_FOUND, error),
+    }
+}
+
+#[derive(Deserialize)]
+struct EfficiencyPathQuery {
+    path: String,
+}
+
+async fn api_get_session_efficiency(Query(query): Query<EfficiencyPathQuery>) -> Response {
+    match crate::efficiency::cache::read(&query.path) {
+        Ok(analysis) => ok_json(&analysis),
+        Err(error) => err_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, error),
+    }
+}
+
+async fn api_delete_session_efficiency(Query(query): Query<EfficiencyPathQuery>) -> Response {
+    match crate::efficiency::cache::delete(&query.path) {
+        Ok(()) => ok_json(&serde_json::json!({ "deleted": true })),
+        Err(error) => err_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, error),
+    }
+}
+
+async fn api_list_efficiency_summaries() -> Response {
+    match crate::efficiency::cache::list_summaries() {
+        Ok(summaries) => ok_json(&summaries),
+        Err(error) => err_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, error),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1245,6 +1422,29 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn api_token_mutation_routes_are_not_exposed_over_http() {
+        let router = api_router(AuthMode::Disabled);
+        let routes = [
+            (Method::POST, "/api/analytics/jev/key"),
+            (Method::DELETE, "/api/analytics/jev/key"),
+            (Method::POST, "/api/analytics/recommendation/key"),
+            (Method::DELETE, "/api/analytics/recommendation/key"),
+        ];
+
+        for (method, path) in routes {
+            let request = Request::builder()
+                .method(method)
+                .uri(path)
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"key":"must-not-cross-http"}"#))
+                .unwrap();
+            let response = router.clone().oneshot(request).await.unwrap();
+
+            assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
+        }
     }
 
     #[tokio::test]

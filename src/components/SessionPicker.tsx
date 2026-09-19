@@ -2,7 +2,12 @@ import { useRef, useMemo } from "react";
 import { useScrollToSelected } from "../hooks/useScrollToSelected";
 import { useVisibleSessions } from "../hooks/useVisibleSessions";
 import { useRegisterViewActions, type ViewActionsRef } from "../hooks/useViewActions";
-import type { IndexProgress, SessionInfo } from "../types";
+import type {
+  EfficiencyAnalysisJob,
+  EfficiencySummary,
+  IndexProgress,
+  SessionInfo,
+} from "../types";
 import { OngoingDots } from "./OngoingDots";
 import {
   formatTokens,
@@ -18,6 +23,28 @@ import { getModelColor } from "../lib/theme";
 import { mergeRefs } from "../lib/mergeRefs";
 import { BsClaude } from "react-icons/bs";
 import { TokensIcon, CostIcon, ForwardIcon } from "./Icons";
+import { BetaBadge } from "./BetaBadge";
+
+const NO_EFFICIENCY_JOBS = new Map<string, EfficiencyAnalysisJob>();
+const NO_EFFICIENCY_SUMMARIES = new Map<string, EfficiencySummary>();
+
+function SessionAnalysisProgress({ progress }: { progress: number }) {
+  return (
+    <div
+      className="picker__analysis-progress"
+      role="progressbar"
+      aria-label="Jev analysis progress"
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={progress}
+    >
+      <div className="picker__analysis-progress-track">
+        <span style={{ width: `${progress}%` }} />
+      </div>
+      <span className="picker__analysis-progress-value">{progress}%</span>
+    </div>
+  );
+}
 
 interface SessionPickerProps {
   sessions: SessionInfo[];
@@ -45,6 +72,10 @@ interface SessionPickerProps {
    * scroll its own list; without it the toolbar's scroll buttons are inert here.
    */
   viewActionsRef?: ViewActionsRef;
+  efficiencyJobs?: Map<string, EfficiencyAnalysisJob>;
+  efficiencySummaries?: Map<string, EfficiencySummary>;
+  onAnalyse?: (path: string) => void;
+  onOpenEfficiencyDashboard?: (session: SessionInfo) => void;
 }
 
 export function SessionPicker({
@@ -59,6 +90,10 @@ export function SessionPicker({
   onVisiblePathsChange,
   recapPreview = false,
   viewActionsRef,
+  efficiencyJobs = NO_EFFICIENCY_JOBS,
+  efficiencySummaries = NO_EFFICIENCY_SUMMARIES,
+  onAnalyse,
+  onOpenEfficiencyDashboard,
 }: SessionPickerProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const selectedRef = useScrollToSelected(selectedIndex);
@@ -139,6 +174,21 @@ export function SessionPicker({
               const modelClr = getModelColor(session.model);
               const sessionCost = session.cost_usd;
               const showRecap = recapPreview && !!session.recap;
+              const efficiencyJob = efficiencyJobs.get(session.path);
+              const efficiencySummary = efficiencySummaries.get(session.path);
+              const analysisRunning =
+                efficiencyJob &&
+                !["completed", "failed", "cancelled"].includes(efficiencyJob.status);
+              const analysisProgress = efficiencyJob?.progress ?? 0;
+              const efficiencyTone = efficiencySummary
+                ? efficiencySummary.score >= 87
+                  ? "ok"
+                  : efficiencySummary.score >= 65
+                    ? "accent"
+                    : efficiencySummary.score >= 40
+                      ? "warn"
+                      : "critical"
+                : null;
 
               return (
                 <div
@@ -162,6 +212,52 @@ export function SessionPicker({
                         <OngoingDots count={1} />
                         ACTIVE
                       </span>
+                    )}
+                    {efficiencySummary && (
+                      <>
+                        <button
+                          type="button"
+                          className={`picker__efficiency-score picker__efficiency-score--${efficiencyTone}`}
+                          title={`Open efficiency dashboard with score ${efficiencySummary.score}`}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onOpenEfficiencyDashboard?.(session);
+                          }}
+                        >
+                          Dashboard · {efficiencySummary.score}
+                          {efficiencySummary.stale ? " · stale" : ""}
+                        </button>
+                        {analysisRunning ? (
+                          <SessionAnalysisProgress progress={analysisProgress} />
+                        ) : onAnalyse ? (
+                          <button
+                            type="button"
+                            className="picker__analyse"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onAnalyse(session.path);
+                            }}
+                          >
+                            Re-analyse <BetaBadge />
+                          </button>
+                        ) : null}
+                      </>
+                    )}
+                    {!efficiencySummary && analysisRunning && (
+                      <SessionAnalysisProgress progress={analysisProgress} />
+                    )}
+                    {!efficiencySummary && !analysisRunning && onAnalyse && (
+                      <button
+                        type="button"
+                        className="picker__analyse"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onAnalyse(session.path);
+                        }}
+                      >
+                        {efficiencyJob?.status === "failed" ? "Retry analysis" : "Analyse"}{" "}
+                        <BetaBadge />
+                      </button>
                     )}
                     <button
                       className="message__detail-btn"

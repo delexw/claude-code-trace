@@ -15,6 +15,7 @@ crate-type = ["cdylib", "rlib"]
 # Tauri/webkit dependency — suitable for containers and web/TUI deployments.
 default = ["desktop"]
 desktop = [
+  "dep:fix-path-env",
   "dep:tauri",
   "dep:tauri-build",
   "dep:tauri-plugin-fs",
@@ -48,6 +49,18 @@ hmac = "0.13"
 sha2 = "0.11"
 base64 = "0.23"
 uuid = { version = "1", features = ["v4", "serde"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+keyring-core = "1"
+fix-path-env = { git = "https://github.com/tauri-apps/fix-path-env-rs", rev = "c4c45d503ea115a839aae718d02f79e7c7f0f673", optional = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+apple-native-keyring-store = { version = "1", features = ["keychain"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-native-keyring-store = "1"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus-secret-service-keyring-store = { version = "1", features = ["crypto-rust"] }
 
 [lints.clippy]
 all = { level = "warn", priority = -1 }

@@ -1,7 +1,16 @@
-import { useState, useEffect, useLayoutEffect, useCallback, useRef } from "react";
+import { lazy, Suspense, useState, useEffect, useLayoutEffect, useCallback, useRef } from "react";
 import { invoke, ApiAuthError } from "./lib/invoke";
 import { onApiTokenChange } from "./lib/apiToken";
-import type { ViewState, SessionInfo, DisplayMessage } from "./types";
+import type {
+  ViewState,
+  SessionInfo,
+  DisplayMessage,
+  AnalyticsSettings,
+  EfficiencyAnalysisJob,
+  EfficiencyFinding,
+  PreparedEfficiencyPayload,
+  SessionEfficiencyAnalysis,
+} from "./types";
 import { useSession } from "./hooks/useSession";
 import { usePicker } from "./hooks/usePicker";
 import { useToggleSet } from "./hooks/useToggleSet";
@@ -9,6 +18,8 @@ import { useKeyboard } from "./hooks/useKeyboard";
 import { useViewActionsRef, useViewActionCallbacks } from "./hooks/useViewActions";
 import { useFontScale } from "./hooks/useFontScale";
 import { useRecapPreview } from "./hooks/useRecapPreview";
+import { useEfficiencyJobs } from "./hooks/useEfficiencyJobs";
+import { useCompletedEfficiencyDashboard } from "./hooks/useCompletedEfficiencyDashboard";
 import { SessionPicker } from "./components/SessionPicker";
 import { MessageList } from "./components/MessageList";
 import { MessageDetail } from "./components/MessageDetail";
@@ -20,12 +31,27 @@ import { ViewToolbar } from "./components/ViewToolbar";
 import { ProjectTree, useProjectKeys, useProjectItems } from "./components/ProjectTree";
 import { ResizeHandle } from "./components/ResizeHandle";
 import { SettingsModal } from "./components/SettingsModal";
+import { BetaBadge } from "./components/BetaBadge";
+import { EfficiencyPrivacyModal } from "./components/EfficiencyPrivacyModal";
+import { JevKeyRequiredModal } from "./components/JevKeyRequiredModal";
 import {
   shouldRecycle,
   saveRestoreState,
   takeRestoreState,
   reloadWebview,
 } from "./lib/webviewRecycle";
+
+const EfficiencyPanel = lazy(() =>
+  import("./components/EfficiencyPanel").then((module) => ({
+    default: module.EfficiencyPanel,
+  })),
+);
+
+const EfficiencyDashboardModal = lazy(() =>
+  import("./components/EfficiencyDashboardModal").then((module) => ({
+    default: module.EfficiencyDashboardModal,
+  })),
+);
 
 export function App() {
   const [view, setView] = useState<ViewState>("picker");
@@ -37,6 +63,9 @@ export function App() {
   const [sidebarFocused, setSidebarFocused] = useState(false);
   const [sidebarHighlight, setSidebarHighlight] = useState(0); // index in project list (0 = "All")
   const [showSettings, setShowSettings] = useState(false);
+  const [settingsInitialTab, setSettingsInitialTab] = useState<
+    "general" | "appearance" | "api" | "analytics"
+  >("general");
   const [collapsedKeys, setCollapsedKeys] = useState<Set<string>>(new Set());
   const [fontScale, setFontScale] = useFontScale();
   const [recapPreview, setRecapPreview] = useRecapPreview();
@@ -44,7 +73,22 @@ export function App() {
   // list only holds lightened messages.
   const [detailMessage, setDetailMessage] = useState<DisplayMessage | null>(null);
   const [detailError, setDetailError] = useState(false);
+  const [preparedEfficiencyPayload, setPreparedEfficiencyPayload] =
+    useState<PreparedEfficiencyPayload | null>(null);
+  const [startingEfficiency, setStartingEfficiency] = useState(false);
+  const [showJevKeyRequired, setShowJevKeyRequired] = useState(false);
+  const [efficiencyError, setEfficiencyError] = useState("");
+  const [efficiencyAnalysis, setEfficiencyAnalysis] = useState<SessionEfficiencyAnalysis | null>(
+    null,
+  );
+  const [efficiencyDashboard, setEfficiencyDashboard] = useState<{
+    session: SessionInfo;
+    analysis: SessionEfficiencyAnalysis | null;
+    error: string;
+  } | null>(null);
   const detailReqRef = useRef(0);
+  const efficiencyDashboardReqRef = useRef(0);
+  const preparedAnalysisOpensDashboardRef = useRef(false);
   // Counts session opens this page lifetime, to periodically recycle the
   // webview (see lib/webviewRecycle.ts for why).
   const switchCountRef = useRef(0);
@@ -70,6 +114,7 @@ export function App() {
 
   const session = useSession();
   const picker = usePicker(selectedProject);
+  const efficiencyJobs = useEfficiencyJobs();
   // The open session's full SessionInfo (liveness, session_id), looked up from
   // the picker's list by path — useSession's meta only carries cwd/branch/mode.
   const selectedSessionInfo =
@@ -138,6 +183,10 @@ export function App() {
 
   // Auto-discover sessions on mount (once, even under StrictMode's double effect).
   const discoveredRef = useRef(false);
+  const efficiencySummaryRevision = session.sessionPath
+    ? efficiencyJobs.summariesBySession.get(session.sessionPath)?.analyzedAt
+    : undefined;
+
   useEffect(() => {
     if (discoveredRef.current) return;
     discoveredRef.current = true;
@@ -191,6 +240,121 @@ export function App() {
     },
     [loadSession, clearExpanded],
   );
+
+  const requestEfficiencyAnalysis = useCallback(async (path: string, openDashboard = false) => {
+    setEfficiencyError("");
+    try {
+      const settings = await invoke<AnalyticsSettings>("get_analytics_settings");
+      if (!settings.jev.configured) {
+        preparedAnalysisOpensDashboardRef.current = false;
+        setShowJevKeyRequired(true);
+        return;
+      }
+      const payload = await invoke<PreparedEfficiencyPayload>(
+        "prepare_session_efficiency_payload",
+        { path, payloadMode: settings.defaultPayloadMode },
+      );
+      preparedAnalysisOpensDashboardRef.current = openDashboard;
+      setPreparedEfficiencyPayload(payload);
+    } catch (error) {
+      preparedAnalysisOpensDashboardRef.current = false;
+      setEfficiencyError(String(error));
+    }
+  }, []);
+
+  const closeEfficiencyDashboard = useCallback(() => {
+    efficiencyDashboardReqRef.current += 1;
+    setEfficiencyDashboard(null);
+  }, []);
+
+  const openEfficiencyDashboard = useCallback(async (sessionInfo: SessionInfo) => {
+    const requestId = ++efficiencyDashboardReqRef.current;
+    setEfficiencyDashboard({ session: sessionInfo, analysis: null, error: "" });
+    try {
+      const analysis = await invoke<SessionEfficiencyAnalysis | null>("get_session_efficiency", {
+        path: sessionInfo.path,
+      });
+      if (requestId !== efficiencyDashboardReqRef.current) return;
+      setEfficiencyDashboard({
+        session: sessionInfo,
+        analysis,
+        error: analysis ? "" : "No completed efficiency analysis was found for this session.",
+      });
+    } catch (error) {
+      if (requestId !== efficiencyDashboardReqRef.current) return;
+      setEfficiencyDashboard({ session: sessionInfo, analysis: null, error: String(error) });
+    }
+  }, []);
+
+  const openCompletedPickerDashboard = useCallback(
+    (completedSessionPath: string) => {
+      const sessionInfo = picker.allSessions.find(
+        (candidate) => candidate.path === completedSessionPath,
+      );
+      if (sessionInfo) void openEfficiencyDashboard(sessionInfo);
+    },
+    [openEfficiencyDashboard, picker.allSessions],
+  );
+  const openDashboardWhenAnalysisCompletes = useCompletedEfficiencyDashboard(
+    efficiencyJobs.jobs,
+    openCompletedPickerDashboard,
+  );
+
+  const confirmEfficiencyAnalysis = useCallback(async () => {
+    if (!preparedEfficiencyPayload) return;
+    setStartingEfficiency(true);
+    setEfficiencyError("");
+    try {
+      const job = await invoke<EfficiencyAnalysisJob>("start_session_efficiency_analysis", {
+        path: preparedEfficiencyPayload.sessionPath,
+        payload: preparedEfficiencyPayload,
+      });
+      if (preparedAnalysisOpensDashboardRef.current) {
+        openDashboardWhenAnalysisCompletes(job);
+      }
+      preparedAnalysisOpensDashboardRef.current = false;
+      setPreparedEfficiencyPayload(null);
+      await efficiencyJobs.refresh();
+    } catch (error) {
+      preparedAnalysisOpensDashboardRef.current = false;
+      setEfficiencyError(String(error));
+    } finally {
+      setStartingEfficiency(false);
+    }
+  }, [preparedEfficiencyPayload, efficiencyJobs, openDashboardWhenAnalysisCompletes]);
+
+  useEffect(() => {
+    if (!session.sessionPath) {
+      // oxlint-disable-next-line react/set-state-in-effect -- synchronizing cached backend analysis with selected session
+      setEfficiencyAnalysis(null);
+      return;
+    }
+    let disposed = false;
+    void invoke<SessionEfficiencyAnalysis | null>("get_session_efficiency", {
+      path: session.sessionPath,
+    })
+      .then((analysis) => {
+        if (
+          !disposed &&
+          (efficiencySummaryRevision === undefined ||
+            analysis === null ||
+            analysis.analyzedAt === efficiencySummaryRevision)
+        ) {
+          setEfficiencyAnalysis(analysis);
+        }
+      })
+      .catch((error) => {
+        if (!disposed) setEfficiencyError(String(error));
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [session.sessionPath, efficiencySummaryRevision]);
+
+  const jumpToEfficiencyFinding = useCallback((finding: EfficiencyFinding) => {
+    setSelectedMessage(finding.startMessageIndex);
+    setView("list");
+  }, []);
 
   // Restore whichever session was open right before a memory-driven webview
   // reload (see lib/webviewRecycle.ts), so the reload isn't disruptive.
@@ -439,19 +603,25 @@ export function App() {
     switch (view) {
       case "picker":
         return (
-          <SessionPicker
-            sessions={picker.sessions}
-            index={picker.index}
-            loading={picker.loading}
-            searchQuery={picker.searchQuery}
-            selectedIndex={pickerSelectedIndex}
-            onSelect={handleSelectSession}
-            onSearchChange={picker.setSearchQuery}
-            onSelectIndex={setPickerSelectedIndex}
-            onVisiblePathsChange={picker.refresh}
-            recapPreview={recapPreview}
-            viewActionsRef={viewActionsRef}
-          />
+          <div className="picker-dashboard">
+            <SessionPicker
+              sessions={picker.sessions}
+              index={picker.index}
+              loading={picker.loading}
+              searchQuery={picker.searchQuery}
+              selectedIndex={pickerSelectedIndex}
+              onSelect={handleSelectSession}
+              onSearchChange={picker.setSearchQuery}
+              onSelectIndex={setPickerSelectedIndex}
+              onVisiblePathsChange={picker.refresh}
+              recapPreview={recapPreview}
+              viewActionsRef={viewActionsRef}
+              efficiencyJobs={efficiencyJobs.jobsBySession}
+              efficiencySummaries={efficiencyJobs.summariesBySession}
+              onAnalyse={(path) => void requestEfficiencyAnalysis(path, true)}
+              onOpenEfficiencyDashboard={(sessionInfo) => void openEfficiencyDashboard(sessionInfo)}
+            />
+          </div>
         );
 
       case "list":
@@ -466,22 +636,55 @@ export function App() {
         // Root CSS zoom invalidates Virtuoso's cached row geometry. Remount at
         // the new scale so its first measurements all use one coordinate space.
         return (
-          <MessageList
-            key={fontScale}
-            count={session.count}
-            getMessage={session.getMessage}
-            roles={session.roles}
-            selectedIndex={selectedMessage}
-            expandedSet={expandedMessages}
-            ongoing={session.ongoing}
-            onRangeChange={session.ensureRange}
-            onSelect={setSelectedMessage}
-            onToggle={toggleMessage}
-            onOpenDetail={openDetail}
-            viewActionsRef={viewActionsRef}
-            onExpandAll={listExpandAll}
-            onCollapseAll={clearExpanded}
-          />
+          <div className="session-view">
+            <div className="session-efficiency-action">
+              {efficiencyAnalysis ? (
+                <Suspense fallback={<span className="braille-spinner" />}>
+                  <EfficiencyPanel
+                    analysis={efficiencyAnalysis}
+                    currentTurns={session.count}
+                    onReanalyse={() =>
+                      session.sessionPath && void requestEfficiencyAnalysis(session.sessionPath)
+                    }
+                    onJumpToFinding={jumpToEfficiencyFinding}
+                  />
+                </Suspense>
+              ) : (
+                <button
+                  type="button"
+                  className="settings-modal__btn"
+                  onClick={() =>
+                    session.sessionPath && void requestEfficiencyAnalysis(session.sessionPath)
+                  }
+                  disabled={
+                    !session.sessionPath ||
+                    !["completed", "failed", "cancelled", undefined].includes(
+                      efficiencyJobs.jobsBySession.get(session.sessionPath)?.status,
+                    )
+                  }
+                >
+                  Analyse efficiency <BetaBadge />
+                </button>
+              )}
+            </div>
+            <MessageList
+              key={fontScale}
+              count={session.count}
+              getMessage={session.getMessage}
+              roles={session.roles}
+              selectedIndex={selectedMessage}
+              expandedSet={expandedMessages}
+              ongoing={session.ongoing}
+              onRangeChange={session.ensureRange}
+              onSelect={setSelectedMessage}
+              onToggle={toggleMessage}
+              onOpenDetail={openDetail}
+              viewActionsRef={viewActionsRef}
+              onExpandAll={listExpandAll}
+              onCollapseAll={clearExpanded}
+              findings={efficiencyAnalysis?.findings}
+            />
+          </div>
         );
 
       case "detail": {
@@ -564,7 +767,10 @@ export function App() {
         onOpenTeams={openTeams}
         onOpenDebug={openDebug}
         onBackToList={backToList}
-        onOpenSettings={() => setShowSettings(true)}
+        onOpenSettings={() => {
+          setSettingsInitialTab("general");
+          setShowSettings(true);
+        }}
       />
 
       <div className="app-body">
@@ -605,7 +811,67 @@ export function App() {
           onFontScaleChange={setFontScale}
           recapPreview={recapPreview}
           onRecapPreviewChange={setRecapPreview}
+          initialTab={settingsInitialTab}
         />
+      )}
+      {preparedEfficiencyPayload && (
+        <EfficiencyPrivacyModal
+          payload={preparedEfficiencyPayload}
+          busy={startingEfficiency}
+          onCancel={() => {
+            preparedAnalysisOpensDashboardRef.current = false;
+            setPreparedEfficiencyPayload(null);
+          }}
+          onConfirm={() => void confirmEfficiencyAnalysis()}
+        />
+      )}
+      {efficiencyDashboard && (
+        <Suspense fallback={null}>
+          <EfficiencyDashboardModal
+            sessionName={
+              efficiencyDashboard.session.name ||
+              efficiencyDashboard.session.first_message ||
+              efficiencyDashboard.session.session_id
+            }
+            currentTurns={efficiencyDashboard.session.turn_count}
+            analysis={efficiencyDashboard.analysis}
+            error={efficiencyDashboard.error}
+            onClose={closeEfficiencyDashboard}
+            onReanalyse={() => {
+              const path = efficiencyDashboard.session.path;
+              closeEfficiencyDashboard();
+              void requestEfficiencyAnalysis(path, true);
+            }}
+            onJumpToFinding={(finding) => {
+              const sessionInfo = efficiencyDashboard.session;
+              closeEfficiencyDashboard();
+              handleSelectSession(sessionInfo);
+              jumpToEfficiencyFinding(finding);
+            }}
+          />
+        </Suspense>
+      )}
+      {showJevKeyRequired && (
+        <JevKeyRequiredModal
+          onCancel={() => setShowJevKeyRequired(false)}
+          onOpenSettings={() => {
+            setShowJevKeyRequired(false);
+            setSettingsInitialTab("analytics");
+            setShowSettings(true);
+          }}
+        />
+      )}
+      {efficiencyError && (
+        <div className="efficiency-error" role="alert">
+          {efficiencyError}
+          <button
+            type="button"
+            onClick={() => setEfficiencyError("")}
+            aria-label="Dismiss efficiency error"
+          >
+            ×
+          </button>
+        </div>
       )}
     </div>
   );

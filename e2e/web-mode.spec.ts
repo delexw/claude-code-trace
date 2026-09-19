@@ -33,6 +33,33 @@ test("Vite plugin serves the web-ui credential, sent as a header", async ({ page
   await expect(page.getByText(FIXTURE_FIRST_MESSAGE)).toBeVisible();
 });
 
+test("opens a cached efficiency dashboard from the picker without opening the session", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await expect(page.getByText(FIXTURE_FIRST_MESSAGE)).toBeVisible();
+
+  await page.getByRole("button", { name: "Dashboard · 82" }).click();
+
+  await expect(page.getByRole("dialog", { name: "Efficiency Dashboard" })).toBeVisible();
+  await expect(page.getByText("SESSION EFFICIENCY")).toBeVisible();
+  await Promise.all(
+    [
+      "Progress",
+      "Useful tool calls",
+      "Avoided repeated work",
+      "Proportionate exploration",
+      "Avoided thrashing",
+      "Effective recovery",
+      "Efficient token use",
+      "Useful subagents",
+      "Task completion",
+    ].map((metric) => expect(page.getByText(metric, { exact: true })).toBeVisible()),
+  );
+  await expect(page.getByText(FIXTURE_FIRST_MESSAGE).first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "Detail" })).toBeVisible();
+});
+
 test("SSE stream carries the credential as a query parameter", async ({ page }) => {
   const sse = page.waitForRequest((r) => r.url().startsWith(`${api}/api/events`));
   await page.goto("/");

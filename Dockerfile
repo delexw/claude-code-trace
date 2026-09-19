@@ -23,6 +23,7 @@
 #   CCTRACE_HTTP_HOST   bind host    (default: 0.0.0.0 in this image)
 #   CCTRACE_HTTP_PORT   bind port    (default: 1421 in this image)
 #   CCTRACE_STATIC_DIR  static dist  (default: /app/dist in this image)
+#   JEV_API_KEY_FILE    Jev key file (optional; Compose uses /run/secrets/jev_api_key)
 # =============================================================================
 
 ARG RUST_IMAGE=rust:latest
@@ -116,6 +117,7 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 ENV CCTRACE_HTTP_HOST=0.0.0.0 \
     CCTRACE_HTTP_PORT=1421 \
     CCTRACE_STATIC_DIR=/app/dist \
+    CCTRACE_RUNTIME=docker \
     XDG_CONFIG_HOME=/home/app/.config \
     XDG_DATA_HOME=/home/app/.local/share
 

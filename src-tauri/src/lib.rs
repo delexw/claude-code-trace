@@ -4,6 +4,8 @@ mod auth;
 mod clients;
 mod commands;
 mod convert;
+mod credentials;
+mod efficiency;
 mod http_api;
 mod indexer;
 mod jwt;
@@ -64,6 +66,12 @@ fn run_headless() {
 /// and just points a browser at it). Requires the `desktop` feature.
 #[cfg(feature = "desktop")]
 fn run_desktop(args: &[String]) {
+    // GUI apps do not reliably inherit the user's shell PATH. Restore it before
+    // any command can launch subscription-backed CLIs such as Codex or Claude.
+    if let Err(error) = fix_path_env::fix() {
+        eprintln!("Could not restore the shell PATH for desktop commands: {error}");
+    }
+
     let web_only = args.iter().any(|a| a == "--web");
     let no_open = args.iter().any(|a| a == "--no-open");
     let desktop = !web_only;
@@ -113,6 +121,21 @@ fn run_desktop(args: &[String]) {
             commands::clients::register_client,
             commands::clients::reissue_client,
             commands::clients::revoke_client,
+            commands::efficiency::get_analytics_settings,
+            commands::efficiency::set_analytics_settings,
+            commands::efficiency::set_jev_api_key,
+            commands::efficiency::clear_jev_api_key,
+            commands::efficiency::test_jev_connection,
+            commands::efficiency::set_recommendation_provider_api_key,
+            commands::efficiency::clear_recommendation_provider_api_key,
+            commands::efficiency::test_recommendation_provider,
+            commands::efficiency::prepare_session_efficiency_payload,
+            commands::efficiency::start_session_efficiency_analysis,
+            commands::efficiency::list_efficiency_analysis_jobs,
+            commands::efficiency::get_session_efficiency,
+            commands::efficiency::list_efficiency_summaries,
+            commands::efficiency::delete_session_efficiency,
+            commands::efficiency::cancel_efficiency_analysis,
             commands::terminal::focus_session_window,
             switch_to_browser,
         ])

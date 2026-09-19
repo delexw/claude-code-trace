@@ -74,6 +74,99 @@ const indexed = {
 };
 
 describe("SessionPicker", () => {
+  it("starts analysis without opening the session card", () => {
+    const session = makeSession();
+    const onSelect = vi.fn();
+    const onAnalyse = vi.fn();
+    render(
+      <SessionPicker
+        index={indexed}
+        sessions={[session]}
+        loading={false}
+        searchQuery=""
+        selectedIndex={0}
+        onSelect={onSelect}
+        onSearchChange={vi.fn()}
+        onAnalyse={onAnalyse}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Analyse/i }));
+    expect(onAnalyse).toHaveBeenCalledWith(session.path);
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("shows only inline progress and a percentage while analysing", () => {
+    const session = makeSession();
+    render(
+      <SessionPicker
+        index={indexed}
+        sessions={[session]}
+        loading={false}
+        searchQuery=""
+        selectedIndex={0}
+        onSelect={vi.fn()}
+        onSearchChange={vi.fn()}
+        onAnalyse={vi.fn()}
+        efficiencyJobs={
+          new Map([
+            [
+              session.path,
+              {
+                analysisId: "analysis-1",
+                sessionId: session.session_id,
+                sessionPath: session.path,
+                sessionName: session.first_message,
+                status: "analysing",
+                progress: 60,
+                message: "Analysing session behaviour",
+                updatedAt: "2026-09-19T04:00:00.000Z",
+              },
+            ],
+          ])
+        }
+      />,
+    );
+
+    expect(screen.getByRole("progressbar", { name: "Jev analysis progress" })).toHaveAttribute(
+      "aria-valuenow",
+      "60",
+    );
+    expect(screen.getByText("60%")).toBeInTheDocument();
+    expect(screen.queryByText("Analysis running")).not.toBeInTheDocument();
+    expect(screen.queryByText("Analysing session behaviour")).not.toBeInTheDocument();
+  });
+
+  it("opens cached efficiency in the dashboard without opening the session", () => {
+    const session = makeSession();
+    const onSelect = vi.fn();
+    const onAnalyse = vi.fn();
+    const onOpenEfficiencyDashboard = vi.fn();
+    render(
+      <SessionPicker
+        index={indexed}
+        sessions={[session]}
+        loading={false}
+        searchQuery=""
+        selectedIndex={0}
+        onSelect={onSelect}
+        onSearchChange={vi.fn()}
+        onAnalyse={onAnalyse}
+        onOpenEfficiencyDashboard={onOpenEfficiencyDashboard}
+        efficiencySummaries={
+          new Map([
+            [
+              session.path,
+              { sessionPath: session.path, score: 82, analyzedAt: "now", stale: false },
+            ],
+          ])
+        }
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Dashboard · 82" }));
+    expect(onOpenEfficiencyDashboard).toHaveBeenCalledWith(session);
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(onAnalyse).not.toHaveBeenCalled();
+  });
   it("shows loading spinner when loading", () => {
     render(
       <SessionPicker

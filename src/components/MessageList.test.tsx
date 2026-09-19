@@ -106,6 +106,50 @@ function defaultProps(
 }
 
 describe("MessageList", () => {
+  it("renders Jev finding annotations at the matching message range", () => {
+    render(
+      <MessageList
+        {...defaultProps({
+          messages: [makeMessage({ content: "Investigating" })],
+          findings: [
+            {
+              type: "excessive-exploration",
+              probability: 0.91,
+              startMessageIndex: 0,
+              endMessageIndex: 0,
+            },
+          ],
+        })}
+      />,
+    );
+    expect(screen.getByText("⚠ EXCESSIVE EXPLORATION 91%")).toBeInTheDocument();
+  });
+
+  it("renders one annotation for overlapping duplicate findings", () => {
+    render(
+      <MessageList
+        {...defaultProps({
+          messages: [makeMessage(), makeMessage(), makeMessage({ content: "Recovered" })],
+          findings: [
+            {
+              type: "recovery",
+              probability: 0.75,
+              startMessageIndex: 2,
+              endMessageIndex: 2,
+            },
+            {
+              type: "recovery",
+              probability: 0.78,
+              startMessageIndex: 2,
+              endMessageIndex: 2,
+            },
+          ],
+        })}
+      />,
+    );
+
+    expect(screen.getAllByText("★ RECOVERY 78%")).toHaveLength(1);
+  });
   it("shows 'No messages loaded' when empty", () => {
     render(<MessageList {...defaultProps()} />);
     expect(screen.getByText("No messages loaded")).toBeInTheDocument();

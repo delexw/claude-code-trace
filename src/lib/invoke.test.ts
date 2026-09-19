@@ -150,6 +150,21 @@ describe("invoke (web/HTTP mode)", () => {
     const { invoke } = await import("./invoke");
     await expect(invoke("nonexistent_cmd")).rejects.toThrow('Unknown command "nonexistent_cmd"');
   });
+
+  it.each([
+    "set_jev_api_key",
+    "clear_jev_api_key",
+    "set_recommendation_provider_api_key",
+    "clear_recommendation_provider_api_key",
+  ])("%s is native-only and never sends a browser request", async (command) => {
+    const fetchFn = mockFetch({});
+    const { invoke } = await import("./invoke");
+
+    await expect(invoke(command, { key: "must-not-cross-http" })).rejects.toThrow(
+      `Unknown command "${command}"`,
+    );
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
 });
 
 describe("invoke (web/HTTP mode) — API client token", () => {

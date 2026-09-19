@@ -16,6 +16,20 @@ single HTTP port, and reads your Claude Code sessions from a mounted volume.
 
 ## Quick start
 
+The recommended deployment command is interactive:
+
+```bash
+./script/redeploy.sh
+```
+
+After building the image, it asks whether to configure or update the Jev API key. If you answer
+**Yes**, the script reads the key without echoing it and writes it to the dedicated
+`claude-code-trace-secrets` Docker volume. The running container mounts that volume read-only and
+loads the key server-side; the browser never sends or receives it. Answer **No** to preserve an
+existing key or to run without Jev analysis.
+
+The following manual commands do not prompt for an API key:
+
 ```bash
 # Build
 docker build -t claude-code-trace .
@@ -56,14 +70,32 @@ All runtime knobs are environment variables, so you can override them with
 | `CCTRACE_HTTP_HOST`       | `0.0.0.0`   | Bind host for the HTTP server                                                            |
 | `CCTRACE_HTTP_PORT`       | `1421`      | Bind port for the HTTP server                                                            |
 | `CCTRACE_STATIC_DIR`      | `/app/dist` | Directory of static frontend assets to serve                                             |
+| `CCTRACE_RUNTIME`         | `docker`    | Marks the shipped container runtime so host subscription CLI providers stay unavailable  |
 | `CCTRACE_ALLOWED_ORIGINS` | (unset)     | Extra CORS origins, comma-separated (see below)                                          |
 | `CCTRACE_API_AUTH`        | (unset)     | `off` disables client verification (see "API access" below)                              |
 | `CCTRACE_CONFIG_DIR`      | (unset)     | Relocate `settings.json` + client secrets (default `$XDG_CONFIG_HOME/claude-code-trace`) |
+| `JEV_API_KEY_FILE`        | (unset)     | Server-side file containing the Jev API key; Compose uses `/run/secrets/jev_api_key`     |
 
 Outside Docker (i.e. the normal desktop/web app) these variables are not
 set, and the server falls back to the historical defaults
 (`127.0.0.1:11423`, no static assets). So adding these vars has no effect on
 native installations.
+
+The Docker image does not bundle or authenticate the Codex or Claude Code CLIs, so their
+subscription-backed recommendation providers are hidden and rejected in this runtime. Configure an
+OpenAI-compatible endpoint instead. Native installations and ordinary web mode keep the subscription
+provider choices because their backend runs directly on the authenticated host.
+
+The browser never submits a recommendation-provider API key. In web and Docker modes,
+OpenAI-compatible providers are restricted to loopback HTTP(S) URLs (`localhost`, `127.0.0.0/8`, or
+`::1`) without URL credentials, query parameters, or fragments. Use the desktop app when a remote
+provider requires a securely stored API token.
+
+The shipped Compose configuration sets `JEV_API_KEY_FILE` and mounts the
+`claude-code-trace-secrets` volume at `/run/secrets`. Use `./script/redeploy.sh` to populate or
+update it. Docker administrators can still read container-managed secrets, so protect access to
+the Docker daemon; the key is not exposed through the web API, browser storage, Compose
+environment, or tracked files.
 
 In the default Compose setup, the frontend and API are served same-origin
 (both on port 1421 via `CCTRACE_STATIC_DIR`), so `CCTRACE_ALLOWED_ORIGINS`
