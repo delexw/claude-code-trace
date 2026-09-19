@@ -3015,6 +3015,37 @@ body {
   color: var(--context-crit);
 }
 
+.picker__analysis-progress {
+  display: flex;
+  width: 150px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 7px;
+  margin-left: auto;
+}
+
+.picker__analysis-progress-track {
+  height: 5px;
+  flex: 1;
+  overflow: hidden;
+  background: var(--bg-elevated);
+}
+
+.picker__analysis-progress-track span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.2s ease;
+}
+
+.picker__analysis-progress-value {
+  width: 34px;
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
 .efficiency-progress {
   flex: 0 0 auto;
   padding: 8px 12px;

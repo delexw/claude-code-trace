@@ -194,7 +194,7 @@ pub fn start_session_efficiency_analysis_impl(
             &app,
             &analysis_id,
             EfficiencyJobStatus::Analysing,
-            None,
+            Some(60),
             "Analysing session behaviour",
         ) {
             return;
@@ -383,7 +383,7 @@ async fn run_cli_connection_test(
     let output = tokio::time::timeout(Duration::from_secs(60), command.output())
         .await
         .map_err(|_| format!("{cli_name} connection test timed out"))?
-        .map_err(|error| format!("Could not start {cli_name}: {error}"))?;
+        .map_err(|error| cli_start_failure_message(cli_name, &error))?;
     output
         .status
         .success()
@@ -406,7 +406,10 @@ fn cli_failure_message(cli_name: &str, output: &Output) -> String {
             })
     });
     match detail {
-        Some(detail) => format!("{cli_name} connection test failed: {detail}"),
+        Some(detail) => {
+            let message = format!("{cli_name} connection test failed: {detail}");
+            append_upgrade_guidance(cli_name, message, &detail)
+        }
         None => format!(
             "{cli_name} connection test failed. Run `{}` in a terminal for details.",
             if cli_name == "Codex" {
@@ -415,6 +418,41 @@ fn cli_failure_message(cli_name: &str, output: &Output) -> String {
                 "claude auth status"
             }
         ),
+    }
+}
+
+fn cli_start_failure_message(cli_name: &str, error: &std::io::Error) -> String {
+    let message = format!("Could not start {cli_name}: {error}");
+    if error.kind() == std::io::ErrorKind::NotFound {
+        format!(
+            "{message}. Install or upgrade {cli_name} to the latest version with `{}`, then restart Claude Code Trace.",
+            cli_upgrade_command(cli_name)
+        )
+    } else {
+        message
+    }
+}
+
+fn append_upgrade_guidance(cli_name: &str, message: String, detail: &str) -> String {
+    let normalized = detail.to_ascii_lowercase();
+    let needs_upgrade = normalized.contains("upgrade")
+        || normalized.contains("outdated")
+        || normalized.contains("newer version")
+        || (normalized.contains("update") && normalized.contains("version"));
+    if !needs_upgrade {
+        return message;
+    }
+    format!(
+        "{message} To upgrade {cli_name}, run `{}`, then restart Claude Code Trace.",
+        cli_upgrade_command(cli_name)
+    )
+}
+
+fn cli_upgrade_command(cli_name: &str) -> &'static str {
+    if cli_name == "Codex" {
+        "npm install --global @openai/codex@latest"
+    } else {
+        "claude update"
     }
 }
 
@@ -586,8 +624,32 @@ mod tests {
 
         assert_eq!(
             cli_failure_message("Codex", &output),
-            "Codex connection test failed: Please upgrade to the latest Codex CLI."
+            "Codex connection test failed: Please upgrade to the latest Codex CLI. To upgrade Codex, run `npm install --global @openai/codex@latest`, then restart Claude Code Trace."
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn claude_version_failure_includes_its_native_upgrade_command() {
+        let output = failed_output(
+            r#"ERROR: {"type":"error","status":400,"error":{"message":"This model requires a newer version of Claude Code."}}"#,
+        );
+
+        assert_eq!(
+            cli_failure_message("Claude Code", &output),
+            "Claude Code connection test failed: This model requires a newer version of Claude Code. To upgrade Claude Code, run `claude update`, then restart Claude Code Trace."
+        );
+    }
+
+    #[test]
+    fn a_missing_cli_includes_install_or_upgrade_guidance() {
+        let error = std::io::Error::from(std::io::ErrorKind::NotFound);
+        let message = cli_start_failure_message("Codex", &error);
+
+        assert!(message.starts_with("Could not start Codex:"));
+        assert!(message.contains(
+            "Install or upgrade Codex to the latest version with `npm install --global @openai/codex@latest`, then restart Claude Code Trace."
+        ));
     }
 
     #[cfg(unix)]

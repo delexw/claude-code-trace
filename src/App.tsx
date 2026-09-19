@@ -31,7 +31,6 @@ import { ResizeHandle } from "./components/ResizeHandle";
 import { SettingsModal } from "./components/SettingsModal";
 import { BetaBadge } from "./components/BetaBadge";
 import { EfficiencyPrivacyModal } from "./components/EfficiencyPrivacyModal";
-import { EfficiencyAnalysisProgress } from "./components/EfficiencyAnalysisProgress";
 import { JevKeyRequiredModal } from "./components/JevKeyRequiredModal";
 import {
   shouldRecycle,
@@ -298,14 +297,6 @@ export function App() {
       setEfficiencyDashboard({ session: sessionInfo, analysis: null, error: String(error) });
     }
   }, []);
-
-  const openEfficiencyDashboardByPath = useCallback(
-    (path: string) => {
-      const sessionInfo = picker.allSessions.find((candidate) => candidate.path === path);
-      if (sessionInfo) void openEfficiencyDashboard(sessionInfo);
-    },
-    [openEfficiencyDashboard, picker.allSessions],
-  );
 
   useEffect(() => {
     if (!session.sessionPath) {
@@ -588,12 +579,6 @@ export function App() {
       case "picker":
         return (
           <div className="picker-dashboard">
-            <EfficiencyAnalysisProgress
-              jobs={efficiencyJobs.jobs}
-              onOpenSession={openSessionByPath}
-              onOpenDashboard={openEfficiencyDashboardByPath}
-              onCancel={(analysisId) => void efficiencyJobs.cancel(analysisId)}
-            />
             <SessionPicker
               sessions={picker.sessions}
               index={picker.index}

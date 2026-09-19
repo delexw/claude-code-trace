@@ -28,6 +28,24 @@ import { BetaBadge } from "./BetaBadge";
 const NO_EFFICIENCY_JOBS = new Map<string, EfficiencyAnalysisJob>();
 const NO_EFFICIENCY_SUMMARIES = new Map<string, EfficiencySummary>();
 
+function SessionAnalysisProgress({ progress }: { progress: number }) {
+  return (
+    <div
+      className="picker__analysis-progress"
+      role="progressbar"
+      aria-label="Jev analysis progress"
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={progress}
+    >
+      <div className="picker__analysis-progress-track">
+        <span style={{ width: `${progress}%` }} />
+      </div>
+      <span className="picker__analysis-progress-value">{progress}%</span>
+    </div>
+  );
+}
+
 interface SessionPickerProps {
   sessions: SessionInfo[];
   /** How far the backend has got reading the project directories. */
@@ -161,6 +179,7 @@ export function SessionPicker({
               const analysisRunning =
                 efficiencyJob &&
                 !["completed", "failed", "cancelled"].includes(efficiencyJob.status);
+              const analysisProgress = efficiencyJob?.progress ?? 0;
               const efficiencyTone = efficiencySummary
                 ? efficiencySummary.score >= 87
                   ? "ok"
@@ -208,36 +227,35 @@ export function SessionPicker({
                           Dashboard · {efficiencySummary.score}
                           {efficiencySummary.stale ? " · stale" : ""}
                         </button>
-                        {onAnalyse && (
+                        {analysisRunning ? (
+                          <SessionAnalysisProgress progress={analysisProgress} />
+                        ) : onAnalyse ? (
                           <button
                             type="button"
                             className="picker__analyse"
-                            disabled={Boolean(analysisRunning)}
                             onClick={(event) => {
                               event.stopPropagation();
                               onAnalyse(session.path);
                             }}
                           >
-                            {analysisRunning ? "Analysis running" : "Re-analyse"} <BetaBadge />
+                            Re-analyse <BetaBadge />
                           </button>
-                        )}
+                        ) : null}
                       </>
                     )}
-                    {!efficiencySummary && onAnalyse && (
+                    {!efficiencySummary && analysisRunning && (
+                      <SessionAnalysisProgress progress={analysisProgress} />
+                    )}
+                    {!efficiencySummary && !analysisRunning && onAnalyse && (
                       <button
                         type="button"
                         className="picker__analyse"
-                        disabled={Boolean(analysisRunning)}
                         onClick={(event) => {
                           event.stopPropagation();
                           onAnalyse(session.path);
                         }}
                       >
-                        {analysisRunning
-                          ? "Analysis running"
-                          : efficiencyJob?.status === "failed"
-                            ? "Retry analysis"
-                            : "Analyse"}{" "}
+                        {efficiencyJob?.status === "failed" ? "Retry analysis" : "Analyse"}{" "}
                         <BetaBadge />
                       </button>
                     )}
