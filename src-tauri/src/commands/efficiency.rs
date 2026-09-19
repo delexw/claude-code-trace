@@ -33,6 +33,7 @@ pub fn set_analytics_settings_impl(
     default_payload_mode: PayloadMode,
     recommendation_provider: RecommendationProvider,
 ) -> Result<AnalyticsSettingsResponse, String> {
+    crate::efficiency::settings::ensure_provider_supported(&recommendation_provider)?;
     crate::efficiency::settings::save(&AnalyticsConfiguration {
         default_payload_mode,
         recommendation_provider,
@@ -319,6 +320,7 @@ pub fn cancel_efficiency_analysis_impl(state: &AppState, analysis_id: &str) -> R
 pub async fn test_recommendation_provider_impl(
     provider: RecommendationProvider,
 ) -> Result<(), String> {
+    crate::efficiency::settings::ensure_provider_supported(&provider)?;
     match provider {
         RecommendationProvider::CodexSubscription { model } => {
             let mut command = tokio::process::Command::new("codex");

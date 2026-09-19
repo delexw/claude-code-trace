@@ -117,6 +117,7 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 ENV CCTRACE_HTTP_HOST=0.0.0.0 \
     CCTRACE_HTTP_PORT=1421 \
     CCTRACE_STATIC_DIR=/app/dist \
+    CCTRACE_RUNTIME=docker \
     XDG_CONFIG_HOME=/home/app/.config \
     XDG_DATA_HOME=/home/app/.local/share
 

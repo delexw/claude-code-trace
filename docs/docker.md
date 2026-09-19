@@ -70,6 +70,7 @@ All runtime knobs are environment variables, so you can override them with
 | `CCTRACE_HTTP_HOST`       | `0.0.0.0`   | Bind host for the HTTP server                                                            |
 | `CCTRACE_HTTP_PORT`       | `1421`      | Bind port for the HTTP server                                                            |
 | `CCTRACE_STATIC_DIR`      | `/app/dist` | Directory of static frontend assets to serve                                             |
+| `CCTRACE_RUNTIME`         | `docker`    | Marks the shipped container runtime so host subscription CLI providers stay unavailable  |
 | `CCTRACE_ALLOWED_ORIGINS` | (unset)     | Extra CORS origins, comma-separated (see below)                                          |
 | `CCTRACE_API_AUTH`        | (unset)     | `off` disables client verification (see "API access" below)                              |
 | `CCTRACE_CONFIG_DIR`      | (unset)     | Relocate `settings.json` + client secrets (default `$XDG_CONFIG_HOME/claude-code-trace`) |
@@ -79,6 +80,16 @@ Outside Docker (i.e. the normal desktop/web app) these variables are not
 set, and the server falls back to the historical defaults
 (`127.0.0.1:11423`, no static assets). So adding these vars has no effect on
 native installations.
+
+The Docker image does not bundle or authenticate the Codex or Claude Code CLIs, so their
+subscription-backed recommendation providers are hidden and rejected in this runtime. Configure an
+OpenAI-compatible endpoint instead. Native installations and ordinary web mode keep the subscription
+provider choices because their backend runs directly on the authenticated host.
+
+The browser never submits a recommendation-provider API key. In web and Docker modes,
+OpenAI-compatible providers are restricted to loopback HTTP(S) URLs (`localhost`, `127.0.0.0/8`, or
+`::1`) without URL credentials, query parameters, or fragments. Use the desktop app when a remote
+provider requires a securely stored API token.
 
 The shipped Compose configuration sets `JEV_API_KEY_FILE` and mounts the
 `claude-code-trace-secrets` volume at `/run/secrets`. Use `./script/redeploy.sh` to populate or

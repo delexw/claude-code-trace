@@ -11,12 +11,8 @@ vi.mock("../lib/isTauri", () => ({ isTauri: false }));
 const webSettings = {
   jev: { configured: false, source: null, status: "not_configured" },
   defaultPayloadMode: "minimized",
-  recommendationProvider: {
-    type: "openai-compatible",
-    baseUrl: "http://localhost:1234/v1",
-    model: "example-model",
-    apiKeyConfigured: false,
-  },
+  recommendationProvider: { type: "codex-subscription", model: null },
+  subscriptionProvidersAvailable: false,
 };
 
 describe("AnalyticsSettings in a browser", () => {
@@ -34,7 +30,21 @@ describe("AnalyticsSettings in a browser", () => {
 
     expect(screen.queryByLabelText("Jev API key")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("API key (optional)")).not.toBeInTheDocument();
-    expect(screen.getByRole("note")).toHaveTextContent("JEV_API_KEY");
+    expect(screen.getAllByRole("note")[0]).toHaveTextContent("JEV_API_KEY");
+    expect(screen.getAllByRole("note")[0]).toHaveTextContent(
+      "local, unauthenticated OpenAI-compatible endpoint",
+    );
+    expect(screen.getByLabelText("Provider")).toHaveValue("openai-compatible");
+    expect(screen.queryByRole("option", { name: "Codex Subscription" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("option", { name: "Claude Code Subscription" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getAllByRole("note")[1]).toHaveTextContent(
+      "Subscription providers are unavailable in Docker",
+    );
+    expect(screen.getAllByRole("note")[2]).toHaveTextContent(
+      "API keys, URL credentials, and token query parameters are not accepted",
+    );
     expect(mockInvoke).toHaveBeenCalledTimes(1);
     expect(mockInvoke).toHaveBeenCalledWith("get_analytics_settings");
   });

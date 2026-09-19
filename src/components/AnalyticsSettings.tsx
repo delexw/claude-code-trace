@@ -14,7 +14,25 @@ const defaultSettings: AnalyticsSettingsValue = {
   jev: { configured: false, source: null, status: "not_configured" },
   defaultPayloadMode: "minimized",
   recommendationProvider: { type: "codex-subscription", model: null },
+  subscriptionProvidersAvailable: true,
 };
+
+const defaultOpenAiCompatibleProvider: RecommendationProvider = {
+  type: "openai-compatible",
+  baseUrl: "http://localhost:1234/v1",
+  model: "",
+  apiKeyConfigured: false,
+};
+
+function settingsForAvailableProviders(settings: AnalyticsSettingsValue): AnalyticsSettingsValue {
+  if (
+    !settings.subscriptionProvidersAvailable &&
+    settings.recommendationProvider.type !== "openai-compatible"
+  ) {
+    return { ...settings, recommendationProvider: defaultOpenAiCompatibleProvider };
+  }
+  return settings;
+}
 
 function statusLabel(status: string): string {
   return status.replaceAll("_", " ").replace(/^./, (first) => first.toUpperCase());
@@ -38,7 +56,7 @@ export function AnalyticsSettings() {
 
   useEffect(() => {
     void invoke<AnalyticsSettingsValue>("get_analytics_settings")
-      .then(setSettings)
+      .then((loadedSettings) => setSettings(settingsForAvailableProviders(loadedSettings)))
       .catch((loadError) =>
         setOperationResult({ kind: "error", message: errorMessage(loadError) }),
       );
@@ -81,9 +99,7 @@ export function AnalyticsSettings() {
 
   const setProviderType = (type: RecommendationProvider["type"]) => {
     const recommendationProvider: RecommendationProvider =
-      type === "openai-compatible"
-        ? { type, baseUrl: "http://localhost:1234/v1", model: "", apiKeyConfigured: false }
-        : { type, model: null };
+      type === "openai-compatible" ? defaultOpenAiCompatibleProvider : { type, model: null };
     const next = { ...settings, recommendationProvider };
     setSettings(next);
     void saveConfiguration(next);
@@ -106,7 +122,8 @@ export function AnalyticsSettings() {
               The web API does not accept token-saving or token-clearing requests. Set{" "}
               <code>JEV_API_KEY</code> before starting web mode, or use the desktop app to store
               provider tokens in your operating system credential store. The browser can use an
-              existing server-side token but never receives it.
+              existing server-side token but never receives it. Improvement recommendations in web
+              mode accept only a local, unauthenticated OpenAI-compatible endpoint.
             </p>
           </div>
         </div>
@@ -238,13 +255,30 @@ export function AnalyticsSettings() {
             setProviderType(event.target.value as RecommendationProvider["type"])
           }
         >
-          <option value="codex-subscription">Codex Subscription</option>
-          <option value="claude-code-subscription">Claude Code Subscription</option>
+          {settings.subscriptionProvidersAvailable && (
+            <>
+              <option value="codex-subscription">Codex Subscription</option>
+              <option value="claude-code-subscription">Claude Code Subscription</option>
+            </>
+          )}
           <option value="openai-compatible">OpenAI-Compatible Endpoint</option>
         </select>
+        {!settings.subscriptionProvidersAvailable && (
+          <p className="settings-modal__hint" role="note">
+            Subscription providers are unavailable in Docker because the container does not include
+            or authenticate the Codex and Claude Code CLIs. Use a local, unauthenticated
+            OpenAI-compatible endpoint.
+          </p>
+        )}
 
         {provider.type === "openai-compatible" ? (
           <>
+            {!isTauri && (
+              <p className="settings-modal__hint" role="note">
+                Web mode accepts only a loopback endpoint such as localhost or 127.0.0.1. API keys,
+                URL credentials, and token query parameters are not accepted by the HTTP API.
+              </p>
+            )}
             <label className="settings-modal__label" htmlFor="provider-base-url">
               Base URL
             </label>

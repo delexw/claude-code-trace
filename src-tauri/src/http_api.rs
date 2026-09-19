@@ -410,6 +410,11 @@ struct AnalyticsSettingsBody {
 }
 
 async fn api_set_analytics_settings(Json(body): Json<AnalyticsSettingsBody>) -> Response {
+    if let Err(error) =
+        crate::efficiency::settings::ensure_web_provider_supported(&body.recommendation_provider)
+    {
+        return err_response(axum::http::StatusCode::BAD_REQUEST, error);
+    }
     match crate::commands::efficiency::set_analytics_settings_impl(
         body.default_payload_mode,
         body.recommendation_provider,
@@ -446,6 +451,9 @@ struct RecommendationProviderBody {
 async fn api_test_recommendation_provider(
     Json(body): Json<RecommendationProviderBody>,
 ) -> Response {
+    if let Err(error) = crate::efficiency::settings::ensure_web_provider_supported(&body.provider) {
+        return err_response(axum::http::StatusCode::BAD_REQUEST, error);
+    }
     match crate::commands::efficiency::test_recommendation_provider_impl(body.provider).await {
         Ok(()) => ok_json(&serde_json::json!({ "status": "connected" })),
         Err(error) => err_response(axum::http::StatusCode::BAD_GATEWAY, error),

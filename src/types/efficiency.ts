@@ -9,6 +9,7 @@ export interface AnalyticsSettings {
   jev: { configured: boolean; source: "environment" | "secure-storage" | null; status: string };
   defaultPayloadMode: PayloadMode;
   recommendationProvider: RecommendationProvider;
+  subscriptionProvidersAvailable: boolean;
 }
 
 export interface EfficiencyAction {

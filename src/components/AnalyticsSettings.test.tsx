@@ -12,6 +12,7 @@ const settings = {
   jev: { configured: false, source: null, status: "not_configured" },
   defaultPayloadMode: "minimized",
   recommendationProvider: { type: "codex-subscription", model: null },
+  subscriptionProvidersAvailable: true,
 };
 
 describe("AnalyticsSettings", () => {
