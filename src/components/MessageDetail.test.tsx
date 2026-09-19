@@ -44,6 +44,7 @@ function makeItem(overrides: Partial<DisplayItem> = {}): DisplayItem {
     hook_source_agent_name: "",
     hook_requesting_agent_uuid: "",
     advisor_model: "",
+    tool_denial_kind: "",
     ...overrides,
   };
 }

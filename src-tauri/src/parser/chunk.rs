@@ -55,6 +55,10 @@ pub struct DisplayItem {
     pub hook_requesting_agent_uuid: String,
     /// For the advisor tool call: the model that produced the advice (e.g. "claude-opus-4-8").
     pub advisor_model: String,
+    /// Why the tool call's result is a denial/interruption rather than a real outcome (e.g.
+    /// "interrupted", "automode-blocked", "permission-rule", "user-rejected"). Empty for a
+    /// genuine tool success/failure. See ContentBlock::tool_denial_kind (issue #313).
+    pub tool_denial_kind: String,
 }
 
 impl Default for DisplayItem {
@@ -86,6 +90,7 @@ impl Default for DisplayItem {
             hook_source_agent_name: String::new(),
             hook_requesting_agent_uuid: String::new(),
             advisor_model: String::new(),
+            tool_denial_kind: String::new(),
         }
     }
 }
@@ -270,6 +275,7 @@ fn resolve_tool_result(
         items[p.index].tool_result = b.content.clone();
         items[p.index].tool_result_json = b.content_json.clone();
         items[p.index].tool_error = b.is_error;
+        items[p.index].tool_denial_kind = b.tool_denial_kind.clone();
         if !b.advisor_model.is_empty() {
             items[p.index].advisor_model = b.advisor_model.clone();
         }
@@ -831,6 +837,48 @@ mod tests {
             read.tool_result, "read output",
             "each call must keep its own result"
         );
+    }
+
+    // --- Issue #313: v2.1.265 confirmed via a real kill -9 mid-tool-call + `claude --resume`
+    // capture — the synthetic tool_result appended on resume carries the original tool_use's
+    // id, so it resolves the pending call (not is_deferred) and its tool_denial_kind must
+    // survive onto the final DisplayItem. ---
+
+    #[test]
+    fn interrupted_tool_result_resolves_call_and_carries_denial_kind() {
+        let tool_id = "toolu_interrupted";
+        let mut result = tool_result_block(tool_id, "[Request interrupted by user for tool use]");
+        result.is_error = true;
+        result.tool_denial_kind = "interrupted".to_string();
+        let msgs = vec![
+            ClassifiedMsg::AI(make_ai_msg(vec![tool_use_block(tool_id, "Bash")], false)),
+            ClassifiedMsg::AI(make_ai_msg(vec![result], true)),
+        ];
+        let chunks = build_chunks(&msgs);
+        assert_eq!(chunks.len(), 1);
+        let items = &chunks[0].items;
+        assert_eq!(items.len(), 1);
+        assert!(
+            !items[0].is_deferred,
+            "an interrupted call with a synthetic result must not be deferred"
+        );
+        assert!(items[0].tool_error);
+        assert_eq!(items[0].tool_denial_kind, "interrupted");
+    }
+
+    #[test]
+    fn regular_tool_result_leaves_denial_kind_empty() {
+        let tool_id = "toolu_ok";
+        let msgs = vec![
+            ClassifiedMsg::AI(make_ai_msg(vec![tool_use_block(tool_id, "Bash")], false)),
+            ClassifiedMsg::AI(make_ai_msg(
+                vec![tool_result_block(tool_id, "output")],
+                true,
+            )),
+        ];
+        let chunks = build_chunks(&msgs);
+        let items = &chunks[0].items;
+        assert_eq!(items[0].tool_denial_kind, "");
     }
 
     #[test]

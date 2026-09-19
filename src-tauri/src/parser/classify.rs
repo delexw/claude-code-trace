@@ -49,6 +49,10 @@ pub struct ContentBlock {
     pub hook_requesting_agent_uuid: String,
     /// For the advisor tool's call/result blocks: the model that produced the advice.
     pub advisor_model: String,
+    /// For tool_result blocks: why the tool never produced a real result (e.g. "interrupted",
+    /// "automode-blocked", "permission-rule", "user-rejected"). Empty for a genuine tool
+    /// success/failure. See Entry::tool_denial_kind (issue #313).
+    pub tool_denial_kind: String,
 }
 
 /// Classified message types.
@@ -629,7 +633,12 @@ pub fn classify(e: Entry) -> Option<ClassifiedMsg> {
     }
 
     // Fallback: entries with an unrecognised type but a message role -> meta AI message.
-    let blocks = extract_meta_blocks(&e.message.content, &content_str, &e.tool_use_result);
+    let blocks = extract_meta_blocks(
+        &e.message.content,
+        &content_str,
+        &e.tool_use_result,
+        &e.tool_denial_kind,
+    );
     Some(ClassifiedMsg::AI(AIMsg {
         timestamp: ts,
         model: String::new(),
@@ -934,6 +943,7 @@ fn extract_meta_blocks(
     content: &Option<Value>,
     text_fallback: &str,
     tool_use_result: &Option<Value>,
+    tool_denial_kind: &str,
 ) -> Vec<ContentBlock> {
     let blocks = match content {
         Some(Value::Array(arr)) => arr,
@@ -1005,6 +1015,7 @@ fn extract_meta_blocks(
                 content,
                 is_error,
                 content_json,
+                tool_denial_kind: tool_denial_kind.to_string(),
                 ..Default::default()
             })
         })
@@ -2516,6 +2527,75 @@ mod tests {
                 assert_eq!(ai.blocks.len(), 1);
                 assert!(!ai.blocks[0].is_error);
                 assert!(ai.blocks[0].content_json.is_none());
+            }
+            other => panic!("Expected meta AI, got {other:?}"),
+        }
+    }
+
+    // --- Issue #313: v2.1.265 confirmed (via a real kill -9 mid-tool-call + `claude --resume`
+    // capture) that a synthetic tool_result written for a tool call that never completed
+    // carries a top-level `toolDenialKind` field (e.g. "interrupted"). classify() must surface
+    // it on the ContentBlock so callers can distinguish a denial/interruption from a genuine
+    // tool failure instead of treating every is_error:true result the same way. ---
+
+    #[test]
+    fn classify_tool_result_captures_interrupted_denial_kind() {
+        let mut e = Entry {
+            entry_type: "user".to_string(),
+            uuid: "uuid-interrupted".to_string(),
+            timestamp: "2026-09-19T22:28:17.660Z".to_string(),
+            message: super::super::entry::EntryMessage {
+                role: "user".to_string(),
+                content: Some(json!([{
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_01RH4JxjicfwBfmDkdvRNGUX",
+                    "content": "[Request interrupted by user for tool use]",
+                    "is_error": true
+                }])),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        e.tool_use_result = Some(json!("[Request interrupted by user for tool use]"));
+        e.tool_denial_kind = "interrupted".to_string();
+
+        match classify(e) {
+            Some(ClassifiedMsg::AI(ai)) => {
+                assert_eq!(ai.blocks.len(), 1);
+                let b = &ai.blocks[0];
+                assert!(b.is_error);
+                assert_eq!(b.tool_denial_kind, "interrupted");
+            }
+            other => panic!("Expected meta AI with denial kind, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_regular_tool_result_has_empty_denial_kind() {
+        let e = Entry {
+            entry_type: "user".to_string(),
+            uuid: "uuid-regular".to_string(),
+            timestamp: "2026-09-19T22:28:17.660Z".to_string(),
+            message: super::super::entry::EntryMessage {
+                role: "user".to_string(),
+                content: Some(json!([{
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_regular",
+                    "content": "output",
+                    "is_error": false
+                }])),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        match classify(e) {
+            Some(ClassifiedMsg::AI(ai)) => {
+                assert_eq!(ai.blocks.len(), 1);
+                assert_eq!(
+                    ai.blocks[0].tool_denial_kind, "",
+                    "a normal tool_result must not carry a denial kind"
+                );
             }
             other => panic!("Expected meta AI, got {other:?}"),
         }

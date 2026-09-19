@@ -70,6 +70,11 @@ export interface DisplayItem {
   hook_requesting_agent_uuid: string;
   /** For the advisor tool call: the model that produced the advice (e.g. "claude-opus-4-8"). */
   advisor_model: string;
+  /** Why the tool call's result is a denial/interruption rather than a real outcome — e.g.
+   *  "interrupted" (Claude Code 2.1.265+: process died mid-tool-call, resume keeps the
+   *  original tool_use and appends this instead of rewriting the prompt), "automode-blocked",
+   *  "permission-rule", "user-rejected". Empty for a genuine tool success/failure. */
+  tool_denial_kind: string;
 }
 
 export interface LastOutput {
