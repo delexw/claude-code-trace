@@ -3,6 +3,94 @@
 All notable changes to claude-code-trace are documented here. Versions follow
 [semantic versioning](https://semver.org/).
 
+## [0.18.0] — 2026-09-20
+
+Claude Code Trace can now tell you how well an agent session went, not just what happened in it.
+Pick a session and it sends a redacted summary of the trace to [Jev, TypeSafe AI's System One
+model](https://typesafe.ai/blog/introducing-system-one-models-and-jev), which answers a fixed set
+of questions about the run as probabilities rather than prose. Back comes a score out of 100 across
+six dimensions, plus findings like repeated work or thrashing that each link straight to the
+messages that caused them. Nothing leaves your machine until you have seen the exact payload and
+said yes. The whole feature is optional, marked beta, and off until you configure a key.
+
+### Added
+
+- **Jev-powered efficiency analysis**
+  ([`0757a16`](https://github.com/delexw/claude-code-trace/commit/0757a16)). Choosing **Analyse
+  efficiency** on a session extracts the behavioural shape of the run — turns, tool calls,
+  failures, repeated calls, subagent count, context growth — and asks Jev nine typed questions
+  about it. The answers arrive as probabilities and become six scores: progress, tool use, focus,
+  exploration, recovery and token use, weighted into a single number out of 100. Because the model
+  returns typed decisions instead of generated text, the same transcript scores the same way twice.
+  The dashboard shows the exact question behind each metric, so a number is always traceable to
+  what was asked. Token efficiency weighs total tokens, context growth, turns and tool activity,
+  and deliberately says nothing about money.
+
+- **Findings that link back into the trace**
+  ([`0757a16`](https://github.com/delexw/claude-code-trace/commit/0757a16)). Six kinds of finding
+  come back — repeated work, possible thrashing, repeated exploration, failed retries, effective
+  recovery and useful subagent — each with a likelihood and a range of messages. Clicking one in
+  the dashboard jumps the conversation to the messages behind it, and the message list grows an
+  inline marker above the first message of every finding, so simply scrolling the trace shows where
+  the agent got stuck or dug itself out. Overlapping findings of the same kind are merged, so one
+  rough patch no longer produces a wall of near-identical entries.
+
+- **Scores and live progress in the session picker**
+  ([`0757a16`](https://github.com/delexw/claude-code-trace/commit/0757a16)). Every analysed session
+  carries a **Dashboard · NN** badge, coloured by how good the score is and labelled `stale` once
+  the transcript has moved on past the analysis; clicking it opens the dashboard without leaving
+  the picker. A session mid-analysis shows a progress bar in that spot instead, one that failed
+  offers **Retry analysis**, and one never analysed offers **Analyse**. A separate strip tracks
+  every running analysis across sessions and lets you cancel one or jump to its result when it
+  lands.
+
+- **A privacy review before anything is sent**
+  ([`0757a16`](https://github.com/delexw/claude-code-trace/commit/0757a16)). The payload is
+  redacted locally first — bearer tokens, named secrets, private key blocks, secret-shaped
+  environment assignments, credentials in URLs and your home directory path are all replaced — and
+  then the confirmation dialog shows you the exact redacted JSON that would leave the machine,
+  along with where it is going. The default **minimized** mode sends the extracted signals plus
+  selected excerpts; **full transcript** mode is there for runs that need more context. There is no
+  way to send without confirming.
+
+- **API tokens held in the operating system credential store**
+  ([`0757a16`](https://github.com/delexw/claude-code-trace/commit/0757a16)). The desktop app saves
+  Jev and provider keys to the macOS Keychain, Windows Credential Manager or the Linux Secret
+  Service, never to `settings.json`. Web mode reads `JEV_API_KEY` from the server environment
+  instead, and the HTTP API has no route for saving or clearing a token at all, so a browser cannot
+  write one. In Docker, `./script/redeploy.sh` asks for the key without echoing it, writes it to a
+  dedicated `claude-code-trace-secrets` volume and mounts that read-only into the container — the
+  browser neither sends nor receives it.
+
+- **Cached results that know when they are out of date**
+  ([`0757a16`](https://github.com/delexw/claude-code-trace/commit/0757a16)). One latest result per
+  session is stored under the config directory, stamped with a SHA-256 fingerprint of the
+  transcript and with the analysis, decision-set and score-formula versions. Reopening a session
+  shows the stored result straight away; when the transcript grows or the scoring changes
+  underneath it, the result is marked stale rather than quietly presented as current. Re-analysing
+  replaces it.
+
+### Changed
+
+- **Rust 1.88 is now the minimum for building from source**
+  ([`0757a16`](https://github.com/delexw/claude-code-trace/commit/0757a16)). The platform
+  credential-store crates require it. Pre-built releases are unaffected — this only matters if you
+  compile the app yourself.
+
+- **Recommendation providers are restricted when configured from a browser**
+  ([`0757a16`](https://github.com/delexw/claude-code-trace/commit/0757a16)). Web and Docker modes
+  accept OpenAI-compatible endpoints only on loopback (`localhost`, `127.0.0.0/8` or `::1`), with
+  no credentials, query string or fragment in the URL, because a browser is not a safe place to
+  hand over a remote provider's key — use the desktop app for that. Docker also hides the Codex and
+  Claude Code subscription providers, since the image bundles and authenticates neither CLI.
+  Desktop keeps the full set.
+
+> **Credit:** Jev is developed by [TypeSafe AI](https://typesafe.ai/). This integration was built
+> in Claude Code Trace, which is an independent open-source project and not an official TypeSafe AI
+> integration.
+
+[0.18.0]: https://github.com/delexw/claude-code-trace/releases/tag/v0.18.0
+
 ## [0.17.0] — 2026-09-18
 
 Opening the picker on a large projects directory used to mean waiting — sometimes minutes of a

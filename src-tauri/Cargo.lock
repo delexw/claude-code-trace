@@ -603,7 +603,7 @@ dependencies = [
 
 [[package]]
 name = "claude-code-trace"
-version = "0.17.0"
+version = "0.18.0"
 dependencies = [
  "apple-native-keyring-store",
  "axum",
