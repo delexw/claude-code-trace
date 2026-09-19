@@ -18,3 +18,18 @@ export type {
   ViewState,
   IndexProgress,
 } from "../../shared/types";
+
+export type {
+  AnalyticsSettings,
+  EfficiencyAction,
+  EfficiencyAnalysisJob,
+  EfficiencyFinding,
+  EfficiencyFindingType,
+  EfficiencyInput,
+  EfficiencyJobStatus,
+  EfficiencySummary,
+  PayloadMode,
+  PreparedEfficiencyPayload,
+  RecommendationProvider,
+  SessionEfficiencyAnalysis,
+} from "./efficiency";

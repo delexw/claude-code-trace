@@ -74,6 +74,55 @@ const indexed = {
 };
 
 describe("SessionPicker", () => {
+  it("starts analysis without opening the session card", () => {
+    const session = makeSession();
+    const onSelect = vi.fn();
+    const onAnalyse = vi.fn();
+    render(
+      <SessionPicker
+        index={indexed}
+        sessions={[session]}
+        loading={false}
+        searchQuery=""
+        selectedIndex={0}
+        onSelect={onSelect}
+        onSearchChange={vi.fn()}
+        onAnalyse={onAnalyse}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Analyse/i }));
+    expect(onAnalyse).toHaveBeenCalledWith(session.path);
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("opens cached efficiency without creating a new request", () => {
+    const session = makeSession();
+    const onSelect = vi.fn();
+    const onAnalyse = vi.fn();
+    render(
+      <SessionPicker
+        index={indexed}
+        sessions={[session]}
+        loading={false}
+        searchQuery=""
+        selectedIndex={0}
+        onSelect={onSelect}
+        onSearchChange={vi.fn()}
+        onAnalyse={onAnalyse}
+        efficiencySummaries={
+          new Map([
+            [
+              session.path,
+              { sessionPath: session.path, score: 82, analyzedAt: "now", stale: false },
+            ],
+          ])
+        }
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "82 Efficiency" }));
+    expect(onSelect).toHaveBeenCalledWith(session);
+    expect(onAnalyse).not.toHaveBeenCalled();
+  });
   it("shows loading spinner when loading", () => {
     render(
       <SessionPicker

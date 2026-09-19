@@ -14,7 +14,7 @@ import { authHeaders } from "./apiToken";
 // ---------------------------------------------------------------------------
 
 interface Route {
-  method?: "POST";
+  method?: "POST" | "DELETE";
   path: string | ((args: Record<string, unknown>) => string);
   body?: (args: Record<string, unknown>) => unknown;
 }
@@ -22,6 +22,59 @@ interface Route {
 /** Declarative mapping from Tauri command names to HTTP endpoints. */
 const routes: Record<string, Route> = {
   get_settings: { path: "/api/settings" },
+  get_analytics_settings: { path: "/api/analytics/settings" },
+  set_analytics_settings: {
+    method: "POST",
+    path: "/api/analytics/settings",
+    body: (a) => ({
+      defaultPayloadMode: a.defaultPayloadMode,
+      recommendationProvider: a.recommendationProvider,
+    }),
+  },
+  set_jev_api_key: {
+    method: "POST",
+    path: "/api/analytics/jev/key",
+    body: (a) => ({ key: a.key }),
+  },
+  clear_jev_api_key: { method: "DELETE", path: "/api/analytics/jev/key" },
+  test_jev_connection: { method: "POST", path: "/api/analytics/jev/test" },
+  set_recommendation_provider_api_key: {
+    method: "POST",
+    path: "/api/analytics/recommendation/key",
+    body: (a) => ({ key: a.key }),
+  },
+  clear_recommendation_provider_api_key: {
+    method: "DELETE",
+    path: "/api/analytics/recommendation/key",
+  },
+  test_recommendation_provider: {
+    method: "POST",
+    path: "/api/analytics/recommendation/test",
+    body: (a) => ({ provider: a.provider }),
+  },
+  prepare_session_efficiency_payload: {
+    method: "POST",
+    path: "/api/efficiency/prepare",
+    body: (a) => ({ path: a.path, payloadMode: a.payloadMode }),
+  },
+  start_session_efficiency_analysis: {
+    method: "POST",
+    path: "/api/efficiency/start",
+    body: (a) => ({ path: a.path, payload: a.payload }),
+  },
+  list_efficiency_analysis_jobs: { path: "/api/efficiency/jobs" },
+  cancel_efficiency_analysis: {
+    method: "POST",
+    path: (a) => `/api/efficiency/job/${encodeURIComponent(String(a.analysisId ?? ""))}/cancel`,
+  },
+  get_session_efficiency: {
+    path: (a) => `/api/efficiency/result?path=${encodeURIComponent(String(a.path ?? ""))}`,
+  },
+  list_efficiency_summaries: { path: "/api/efficiency/summaries" },
+  delete_session_efficiency: {
+    method: "DELETE",
+    path: (a) => `/api/efficiency/result?path=${encodeURIComponent(String(a.path ?? ""))}`,
+  },
   set_projects_dir: {
     method: "POST",
     path: "/api/settings/dir",

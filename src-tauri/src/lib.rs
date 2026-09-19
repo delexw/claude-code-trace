@@ -4,6 +4,8 @@ mod auth;
 mod clients;
 mod commands;
 mod convert;
+mod credentials;
+mod efficiency;
 mod http_api;
 mod indexer;
 mod jwt;
@@ -113,6 +115,21 @@ fn run_desktop(args: &[String]) {
             commands::clients::register_client,
             commands::clients::reissue_client,
             commands::clients::revoke_client,
+            commands::efficiency::get_analytics_settings,
+            commands::efficiency::set_analytics_settings,
+            commands::efficiency::set_jev_api_key,
+            commands::efficiency::clear_jev_api_key,
+            commands::efficiency::test_jev_connection,
+            commands::efficiency::set_recommendation_provider_api_key,
+            commands::efficiency::clear_recommendation_provider_api_key,
+            commands::efficiency::test_recommendation_provider,
+            commands::efficiency::prepare_session_efficiency_payload,
+            commands::efficiency::start_session_efficiency_analysis,
+            commands::efficiency::list_efficiency_analysis_jobs,
+            commands::efficiency::get_session_efficiency,
+            commands::efficiency::list_efficiency_summaries,
+            commands::efficiency::delete_session_efficiency,
+            commands::efficiency::cancel_efficiency_analysis,
             commands::terminal::focus_session_window,
             switch_to_browser,
         ])

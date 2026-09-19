@@ -10,6 +10,7 @@ use crate::AppHandle;
 use crate::auth::{AuthMode, ClientIdentity, ResolvedAuth};
 use crate::clients::{self, Client, ClientRegistry};
 use crate::convert::{DisplayMessage, LoadResult};
+use crate::efficiency::EfficiencyState;
 use crate::indexer::Indexer;
 use crate::jwt::Claims;
 use crate::parser::cache::SessionCache;
@@ -86,6 +87,9 @@ pub struct AppState {
     pub event_tx: broadcast::Sender<SseEvent>,
     /// The background walk of the project directories, and what it has read so far.
     pub indexer: Arc<Indexer>,
+    /// User-triggered Jev jobs. Results themselves live in the versioned disk cache;
+    /// this map holds only lightweight lifecycle state for dashboard updates.
+    pub efficiency: EfficiencyState,
     /// Short-TTL cache for the live `/rename` session-name registry, shared by
     /// all concurrent `discover_sessions_cached` callers.
     session_names_cache: Mutex<SessionNamesCache>,
@@ -135,6 +139,7 @@ impl AppState {
             watched_session_ongoing: Mutex::new(None),
             event_tx,
             indexer: Arc::new(Indexer::new(event_tx_for_indexer)),
+            efficiency: EfficiencyState::default(),
             session_names_cache: Mutex::new(SessionNamesCache::new()),
             liveness_cache: Mutex::new(LivenessCache::new()),
             session_light_cache: Mutex::new(None),

@@ -21,8 +21,30 @@ permissions = [
   "allow-register-client",
   "allow-reissue-client",
   "allow-revoke-client",
+  "allow-analytics",
   "allow-switch-to-browser",
   "allow-focus-session-window",
+]
+
+[[permission]]
+identifier = "allow-analytics"
+description = "Allow configuring and running explicitly user-triggered efficiency analysis"
+commands.allow = [
+  "get_analytics_settings",
+  "set_analytics_settings",
+  "set_jev_api_key",
+  "clear_jev_api_key",
+  "test_jev_connection",
+  "set_recommendation_provider_api_key",
+  "clear_recommendation_provider_api_key",
+  "test_recommendation_provider",
+  "prepare_session_efficiency_payload",
+  "start_session_efficiency_analysis",
+  "list_efficiency_analysis_jobs",
+  "get_session_efficiency",
+  "list_efficiency_summaries",
+  "delete_session_efficiency",
+  "cancel_efficiency_analysis",
 ]
 
 [[permission]]

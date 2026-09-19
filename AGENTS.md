@@ -39,7 +39,7 @@ npx oxfmt && npx oxlint && npx tsc --noEmit && npx vitest run && cargo fmt --man
 
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **claude-code-trace** (2596 symbols, 5375 relationships, 223 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **claude-code-trace** (6235 symbols, 13382 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 

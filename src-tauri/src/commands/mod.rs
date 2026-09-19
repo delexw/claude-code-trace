@@ -12,6 +12,7 @@ pub mod session;
 // all builds; only their `#[tauri::command]` wrappers are desktop-gated.
 pub mod clients;
 pub mod cors;
+pub mod efficiency;
 pub mod git;
 pub mod settings;
 pub mod terminal;

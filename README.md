@@ -6,7 +6,7 @@
 
 [![CI](https://github.com/delexw/claude-code-trace/actions/workflows/ci.yml/badge.svg)](https://github.com/delexw/claude-code-trace/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Rust](https://img.shields.io/badge/rust-1.77.2%2B-orange?logo=rust)](https://www.rust-lang.org/)
+[![Rust](https://img.shields.io/badge/rust-1.88%2B-orange?logo=rust)](https://www.rust-lang.org/)
 [![React](https://img.shields.io/badge/react-19-61DAFB?logo=react&logoColor=white)](https://react.dev/)
 [![Tauri](https://img.shields.io/badge/tauri-v2-24C8D8?logo=tauri&logoColor=white)](https://v2.tauri.app/)
 [![Python](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
@@ -17,15 +17,29 @@
   <strong><a href="#install">⬇&#65039; Install Claude Code Trace</a></strong>
 </p>
 
-**Claude Code Trace** is a **Claude Code session log viewer** for local JSONL files stored in `~/.claude/projects/`.
+**Claude Code Trace** is a **Claude Code session log viewer** and **Jev-powered AI agent efficiency analyzer** for local JSONL files stored in `~/.claude/projects/`. It combines real-time Claude Code trace observability with structured behavioural analysis from [Jev, TypeSafe AI's System One Model](https://typesafe.ai/blog/introducing-system-one-models-and-jev).
 
-Browse, tail, and inspect Claude Code conversations in real time. Claude Code Trace renders Claude Code JSONL session files as readable conversations with expandable tool calls, token counts, timestamps, MCP tool call detection, and live log tailing. It also helps you find sessions by user message. It runs as a **GUI app** for macOS, Linux, and Windows, a **Web app** or a **TUI**.
+Browse, tail, and inspect Claude Code conversations in real time. Claude Code Trace renders Claude Code JSONL session files as readable conversations with expandable tool calls, token counts, timestamps, MCP tool call detection, and live log tailing. Its optional Jev integration scores agent progress, tool use, focus, exploration, recovery, and token efficiency using typed probabilistic decisions. It runs as a **GUI app** for macOS, Linux, and Windows, a **Web app** or a **TUI**.
+
+## Jev-powered AI agent efficiency analysis
+
+Claude Code Trace turns a Claude Code agent trace into a privacy-reviewed, redacted analysis request for Jev. The resulting session efficiency dashboard helps identify repeated work, thrashing, excessive exploration, failed retries, effective recovery, useful subagent work, and inefficient token usage.
+
+- **Structured Jev decisions** — evaluates agent behaviour using typed probabilities rather than generated prose
+- **Token efficiency analysis** — considers total tokens, context growth, turns, repeated work, and tool activity without evaluating monetary cost
+- **Trace-linked findings** — jumps from an efficiency finding to the relevant Claude Code messages
+- **Privacy before external analysis** — shows the exact redacted payload and requires confirmation before sending it
+- **Secure API tokens** — stores Jev and provider API tokens in macOS Keychain, Windows Credential Manager, or Linux Secret Service
+- **Versioned local results** — caches one latest result per session and marks it stale when the trace or analysis formula changes
+
+> **Integration credit:** The Jev-powered Claude Code analysis workflow was designed and built in Claude Code Trace by [delexw](https://github.com/delexw). Jev is developed by [TypeSafe AI](https://typesafe.ai/); this open-source project is independent and is not an official TypeSafe AI integration.
 
 Use Claude Code Trace when you want to:
 
 - View Claude Code conversation history from `~/.claude/projects/`
 - Find Claude Code sessions by user message
 - Inspect Claude Code tool calls, MCP calls, timestamps, and token usage
+- Analyze Claude Code agent efficiency with Jev and review trace-linked behavioural findings
 - Monitor live Claude Code sessions while they are running
 - Debug long-running Claude Code workflows without reading raw JSONL files
 - Support and build a personal AI harness platform such as [DovePaw Lite](https://github.com/PixelPaw-Labs/DovePaw-Lite)
@@ -48,6 +62,7 @@ Use Claude Code Trace when you want to:
 - **Tool call inspection** — expand Claude Code tool calls for detailed debugging
 - **MCP support** — detects Model Context Protocol tool calls and displays human-friendly names
 - **Token visibility** — shows token counts where available in Claude Code session data
+- **Jev-powered efficiency analysis** — scores progress, tool use, focus, exploration, recovery, and token efficiency with trace-linked findings
 - **Desktop, web, and TUI modes** — choose the interface that fits your workflow
 - **Cross-platform builds** — supports macOS, Linux, and Windows
 
@@ -145,7 +160,7 @@ See [docs/docker.md](docs/docker.md) for runtime environment variables, volume l
 
 ## Requirements
 
-- [Rust](https://rustup.rs/) 1.77+
+- [Rust](https://rustup.rs/) 1.88+
 - Node.js 18+
 - macOS: Xcode Command Line Tools (`xcode-select --install`)
 - Linux: `libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev`
@@ -162,6 +177,15 @@ cctrace --tui        # terminal UI (starts backend + TUI together)
 Launch Claude Code Trace to open the session picker. It automatically discovers Claude Code sessions from `~/.claude/projects/`.
 
 Select a session to view the conversation. Click messages to expand tool calls, or open the detail view for full inspection.
+
+### Analyze a Claude Code session with Jev
+
+1. Open **Settings → Analytics** and save your Jev API key, or provide `JEV_API_KEY` in the environment.
+2. Select **Analyse efficiency** on a session.
+3. Review the locally redacted payload and explicitly confirm before it is sent.
+4. Use the efficiency dashboard and trace annotations to inspect Jev's findings.
+
+The default minimized mode sends extracted behavioural signals and selected excerpts. Full-transcript mode is available when more context is needed. Re-analysis replaces the previous result for that session, and API tokens are never written to the settings file.
 
 In desktop mode, click **Open in Browser** in the toolbar to switch to browser mode. This opens `http://localhost:1420` in your default browser and hides the desktop window.
 
