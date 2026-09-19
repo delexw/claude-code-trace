@@ -2840,6 +2840,30 @@ body {
   font-weight: 600;
 }
 
+.analytics-settings__security-notice {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--icon-warning) 55%, var(--border));
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--icon-warning) 8%, var(--bg-surface));
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.analytics-settings__security-notice > svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  font-size: 16px;
+}
+
+.analytics-settings__security-notice p {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
 .analytics-settings__section {
   display: flex;
   flex-direction: column;

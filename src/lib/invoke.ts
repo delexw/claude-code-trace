@@ -31,22 +31,7 @@ const routes: Record<string, Route> = {
       recommendationProvider: a.recommendationProvider,
     }),
   },
-  set_jev_api_key: {
-    method: "POST",
-    path: "/api/analytics/jev/key",
-    body: (a) => ({ key: a.key }),
-  },
-  clear_jev_api_key: { method: "DELETE", path: "/api/analytics/jev/key" },
   test_jev_connection: { method: "POST", path: "/api/analytics/jev/test" },
-  set_recommendation_provider_api_key: {
-    method: "POST",
-    path: "/api/analytics/recommendation/key",
-    body: (a) => ({ key: a.key }),
-  },
-  clear_recommendation_provider_api_key: {
-    method: "DELETE",
-    path: "/api/analytics/recommendation/key",
-  },
   test_recommendation_provider: {
     method: "POST",
     path: "/api/analytics/recommendation/test",

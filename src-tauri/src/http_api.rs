@@ -194,15 +194,7 @@ fn build_router(state: Arc<HttpState>, static_dir: Option<String>) -> Router {
             "/api/analytics/settings",
             get(api_get_analytics_settings).post(api_set_analytics_settings),
         )
-        .route(
-            "/api/analytics/jev/key",
-            post(api_set_jev_api_key).delete(api_clear_jev_api_key),
-        )
         .route("/api/analytics/jev/test", post(api_test_jev_connection))
-        .route(
-            "/api/analytics/recommendation/key",
-            post(api_set_recommendation_api_key).delete(api_clear_recommendation_api_key),
-        )
         .route(
             "/api/analytics/recommendation/test",
             post(api_test_recommendation_provider),
@@ -427,32 +419,6 @@ async fn api_set_analytics_settings(Json(body): Json<AnalyticsSettingsBody>) -> 
     }
 }
 
-#[derive(Deserialize)]
-struct ApiKeyBody {
-    key: String,
-}
-
-async fn api_set_jev_api_key(Json(body): Json<ApiKeyBody>) -> Response {
-    match crate::credentials::api_tokens::store(
-        crate::credentials::api_tokens::ApiToken::Jev,
-        &body.key,
-    )
-    .and_then(|()| crate::commands::efficiency::get_analytics_settings_impl())
-    {
-        Ok(settings) => ok_json(&settings),
-        Err(error) => err_response(axum::http::StatusCode::BAD_REQUEST, error),
-    }
-}
-
-async fn api_clear_jev_api_key() -> Response {
-    match crate::credentials::api_tokens::delete(crate::credentials::api_tokens::ApiToken::Jev)
-        .and_then(|()| crate::commands::efficiency::get_analytics_settings_impl())
-    {
-        Ok(settings) => ok_json(&settings),
-        Err(error) => err_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, error),
-    }
-}
-
 async fn api_test_jev_connection() -> Response {
     let key = match crate::credentials::api_tokens::resolve(
         crate::credentials::api_tokens::ApiToken::Jev,
@@ -469,25 +435,6 @@ async fn api_test_jev_connection() -> Response {
     match crate::efficiency::jev::test_connection(&key).await {
         Ok(()) => ok_json(&serde_json::json!({ "status": "connected" })),
         Err(error) => err_response(axum::http::StatusCode::BAD_GATEWAY, error),
-    }
-}
-
-async fn api_set_recommendation_api_key(Json(body): Json<ApiKeyBody>) -> Response {
-    match crate::credentials::api_tokens::store(
-        crate::credentials::api_tokens::ApiToken::RecommendationProvider,
-        &body.key,
-    ) {
-        Ok(()) => ok_json(&serde_json::json!({ "configured": true })),
-        Err(error) => err_response(axum::http::StatusCode::BAD_REQUEST, error),
-    }
-}
-
-async fn api_clear_recommendation_api_key() -> Response {
-    match crate::credentials::api_tokens::delete(
-        crate::credentials::api_tokens::ApiToken::RecommendationProvider,
-    ) {
-        Ok(()) => ok_json(&serde_json::json!({ "configured": false })),
-        Err(error) => err_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, error),
     }
 }
 
@@ -1467,6 +1414,29 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn api_token_mutation_routes_are_not_exposed_over_http() {
+        let router = api_router(AuthMode::Disabled);
+        let routes = [
+            (Method::POST, "/api/analytics/jev/key"),
+            (Method::DELETE, "/api/analytics/jev/key"),
+            (Method::POST, "/api/analytics/recommendation/key"),
+            (Method::DELETE, "/api/analytics/recommendation/key"),
+        ];
+
+        for (method, path) in routes {
+            let request = Request::builder()
+                .method(method)
+                .uri(path)
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"key":"must-not-cross-http"}"#))
+                .unwrap();
+            let response = router.clone().oneshot(request).await.unwrap();
+
+            assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
+        }
     }
 
     #[tokio::test]

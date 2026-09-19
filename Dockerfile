@@ -23,6 +23,7 @@
 #   CCTRACE_HTTP_HOST   bind host    (default: 0.0.0.0 in this image)
 #   CCTRACE_HTTP_PORT   bind port    (default: 1421 in this image)
 #   CCTRACE_STATIC_DIR  static dist  (default: /app/dist in this image)
+#   JEV_API_KEY_FILE    Jev key file (optional; Compose uses /run/secrets/jev_api_key)
 # =============================================================================
 
 ARG RUST_IMAGE=rust:latest

@@ -6,6 +6,7 @@ const mockInvoke = vi.fn();
 vi.mock("../lib/invoke", () => ({
   invoke: (...args: unknown[]) => mockInvoke(...args),
 }));
+vi.mock("../lib/isTauri", () => ({ isTauri: true }));
 
 const settings = {
   jev: { configured: false, source: null, status: "not_configured" },
@@ -27,7 +28,7 @@ describe("AnalyticsSettings", () => {
     expect(screen.getByText(/Native Codex subscription/)).toBeInTheDocument();
   });
 
-  it("sends a newly entered key only to the secure-storage command", async () => {
+  it("sends a newly entered key only through native IPC", async () => {
     mockInvoke.mockImplementation((command: string) => {
       if (command === "get_analytics_settings") return Promise.resolve(settings);
       if (command === "set_jev_api_key") {

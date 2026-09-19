@@ -142,6 +142,18 @@ npm run dev:tui          # TUI (starts backend + terminal UI)
 
 Docker is supported for web mode only.
 
+For an interactive deployment, use the redeploy script. It asks whether you want to configure or
+update the Jev API key, reads it without echoing, and stores it in a Docker-managed volume that is
+mounted read-only by the running container:
+
+```bash
+./script/redeploy.sh
+```
+
+Answer **No** to keep the existing Docker key unchanged or to run without Jev analysis.
+
+For a manual deployment without the interactive prompt:
+
 ```bash
 docker build -t claude-code-trace .
 docker run --rm -p 1421:1421 \
@@ -150,7 +162,7 @@ docker run --rm -p 1421:1421 \
 # then open http://localhost:1421
 ```
 
-Or with Docker Compose:
+Or use Docker Compose directly:
 
 ```bash
 docker compose up --build
@@ -180,7 +192,7 @@ Select a session to view the conversation. Click messages to expand tool calls, 
 
 ### Analyze a Claude Code session with Jev
 
-1. Open **Settings → Analytics** and save your Jev API key, or provide `JEV_API_KEY` in the environment.
+1. In the desktop app, open **Settings → Analytics** and save your Jev API key to the operating system credential store. In web mode, provide `JEV_API_KEY` in the server environment; the HTTP API deliberately does not accept API-token save or clear requests.
 2. Select **Analyse efficiency** on a session.
 3. Review the locally redacted payload and explicitly confirm before it is sent.
 4. Use the efficiency dashboard and trace annotations to inspect Jev's findings.
