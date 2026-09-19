@@ -19,6 +19,7 @@ from widgets.detail_view import (
     _render_edit_diff,
     _render_item_body,
     _render_msg_title,
+    _render_raw_diff,
 )
 
 
@@ -312,3 +313,35 @@ def test_render_edit_diff_returns_none_for_non_edit():
 
     assert _render_edit_diff(json.dumps({"path": "file.ts"})) is None
     assert _render_edit_diff("not json") is None
+
+
+# ---------------------------------------------------------------------------
+# _render_raw_diff
+# ---------------------------------------------------------------------------
+
+
+def test_render_raw_diff_returns_none_without_a_diff_hunk():
+    assert _render_raw_diff("file1.txt\nfile2.txt") is None
+
+
+def test_render_raw_diff_colors_an_embedded_hunk_and_keeps_plain_stdout():
+    body = "\n".join(
+        [
+            "Applied patch successfully",
+            "--- a/foo.txt",
+            "+++ b/foo.txt",
+            "@@ -1,2 +1,2 @@",
+            " context line",
+            "-old line",
+            "+new line",
+        ]
+    )
+    text = _render_raw_diff(body)
+    assert text is not None
+    assert "Applied patch successfully" in text.plain
+    assert "-old line" in text.plain
+    assert "+new line" in text.plain
+    removed = _spans_with(text, "#f85149")
+    assert ("-old line", "#f85149") in removed
+    added = _spans_with(text, "#3fb950")
+    assert ("+new line", "#3fb950") in added

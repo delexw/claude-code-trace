@@ -4,8 +4,8 @@
 import type { DisplayMessage } from "../types";
 import { transformInlineJson } from "../../shared/format";
 export { formatTokens, transformInlineJson } from "../../shared/format";
-export { computeEditDiff } from "../../shared/diff";
-export type { DiffLine, DiffSegment, DiffLineKind } from "../../shared/diff";
+export { computeEditDiff, splitDiffSections } from "../../shared/diff";
+export type { DiffLine, DiffSegment, DiffLineKind, DiffTextSegment } from "../../shared/diff";
 
 /**
  * Turns "claude-opus-4-6" into "opus4.6".

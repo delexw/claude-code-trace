@@ -8,9 +8,10 @@ import {
   truncate,
   parseEditInput,
   computeEditDiff,
+  splitDiffSections,
   shortModel,
 } from "../lib/format";
-import type { DiffLineKind } from "../lib/format";
+import type { DiffLineKind, DiffTextSegment } from "../lib/format";
 import { getTeamColor, getModelColor } from "../lib/theme";
 import { StatsBar, useSubagentStats } from "./StatsBar";
 import { PopoutModal } from "./PopoutModal";
@@ -28,6 +29,62 @@ import {
   ChevronIcon,
   PanelChevronIcon,
 } from "./Icons";
+
+type RawDiffLineKind = "header" | DiffLineKind;
+
+const RAW_DIFF_LINE_CLASS: Record<RawDiffLineKind, string> = {
+  header: "detail-item__diff-line detail-item__diff-line--header",
+  context: "detail-item__diff-line detail-item__diff-line--context",
+  removed: "detail-item__diff-line detail-item__diff-line--removed",
+  added: "detail-item__diff-line detail-item__diff-line--added",
+};
+
+function classifyRawDiffLine(line: string): RawDiffLineKind {
+  if (line.startsWith("+++ ") || line.startsWith("--- ") || line.startsWith("@@ ")) return "header";
+  if (line.startsWith("+")) return "added";
+  if (line.startsWith("-")) return "removed";
+  return "context";
+}
+
+// Renders an embedded unified-diff hunk (e.g. from Claude Code's
+// bashEditDiffEnabled) with the same context/added/removed line coloring as
+// EditDiffLines, so it reads as a diff rather than plain command output.
+function RawDiffBlock({ content }: { content: string }) {
+  // Precompute stable keys outside JSX so the index never appears in a `key`
+  // prop directly (see EditDiffLines above for the same convention).
+  const rows = content.split("\n").map((line, i) => {
+    const kind = classifyRawDiffLine(line);
+    return { key: `${kind}${i}`, className: RAW_DIFF_LINE_CLASS[kind], line };
+  });
+  return (
+    <div className="detail-item__diff">
+      <pre>
+        <code>
+          {rows.map((row) => (
+            <div key={row.key} className={row.className}>
+              {row.line}
+            </div>
+          ))}
+        </code>
+      </pre>
+    </div>
+  );
+}
+
+function ToolResultSections({ sections }: { sections: DiffTextSegment[] }) {
+  const rows = sections.map((s, i) => ({ key: `${s.kind}${i}`, ...s }));
+  return (
+    <>
+      {rows.map((row) =>
+        row.kind === "diff" ? (
+          <RawDiffBlock key={row.key} content={row.content} />
+        ) : (
+          row.content && <span key={row.key}>{row.content}</span>
+        ),
+      )}
+    </>
+  );
+}
 
 function ToolResultBody({ result, resultJson }: { result: string; resultJson: string }) {
   if (resultJson) {
@@ -48,6 +105,10 @@ function ToolResultBody({ result, resultJson }: { result: string; resultJson: st
         </pre>
       </div>
     );
+  }
+  const sections = splitDiffSections(result);
+  if (sections.some((s) => s.kind === "diff")) {
+    return <ToolResultSections sections={sections} />;
   }
   return <>{result}</>;
 }

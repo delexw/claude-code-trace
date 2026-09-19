@@ -19,7 +19,7 @@ from textual.widgets import Collapsible, ListItem, Markdown, Static
 
 import theme
 from data_types import DisplayItem, DisplayMessage
-from diff_utils import compute_edit_diff
+from diff_utils import compute_edit_diff, split_diff_sections
 from format_utils import format_duration, format_tokens, role_icon
 from items import get_item_icon, get_item_name, get_item_summary
 from theme import get_item_color, get_role_border_color, get_team_color
@@ -234,6 +234,53 @@ def _render_edit_diff(tool_input: str) -> Text | None:
     return text
 
 
+# Per-line foreground colour for an embedded unified-diff hunk within a plain
+# tool_result (e.g. Claude Code's bashEditDiffEnabled diff of files a Bash
+# command changed). Mirrors web's RawDiffBlock coloring.
+_RAW_DIFF_LINE_STYLE = {
+    "header": f"bold {theme.TEXT_SECONDARY}",
+    "context": theme.TEXT_MUTED,
+    "removed": "#f85149",
+    "added": "#3fb950",
+}
+
+
+def _classify_raw_diff_line(line: str) -> str:
+    if line.startswith(("+++ ", "--- ", "@@ ")):
+        return "header"
+    if line.startswith("+"):
+        return "added"
+    if line.startswith("-"):
+        return "removed"
+    return "context"
+
+
+def _render_raw_diff(body: str) -> Text | None:
+    """Render embedded unified-diff sections within `body` as coloured Rich
+    Text, or None when no diff sections are detected (caller falls back to
+    plain/JSON rendering).
+    """
+    sections = split_diff_sections(body)
+    if not any(s.kind == "diff" for s in sections):
+        return None
+
+    text = Text()
+    last = len(sections) - 1
+    for idx, sec in enumerate(sections):
+        if sec.kind == "text":
+            text.append(sec.content)
+        else:
+            diff_lines = sec.content.split("\n")
+            last_line = len(diff_lines) - 1
+            for li, line in enumerate(diff_lines):
+                text.append(line, style=_RAW_DIFF_LINE_STYLE[_classify_raw_diff_line(line)])
+                if li < last_line:
+                    text.append("\n")
+        if idx < last:
+            text.append("\n")
+    return text
+
+
 def _label(text: str) -> Static:
     """An unbordered heading line for the box below it (e.g. "Input", "Result").
 
@@ -250,7 +297,11 @@ def _tool_result_widgets(item: DisplayItem) -> list[Widget]:
         return []
     label = "Error" if item.tool_error else "Result"
     body = item.tool_result_json or item.tool_result
-    return [_label(label), Static(_json_text(body), classes="diff-block")]
+    # Only the plain tool_result (no separate JSON payload) can carry an
+    # embedded unified-diff hunk mixed into stdout/stderr text.
+    raw_diff = None if item.tool_result_json else _render_raw_diff(body)
+    content: Text | Content = raw_diff if raw_diff is not None else _json_text(body)
+    return [_label(label), Static(content, classes="diff-block")]
 
 
 def _render_item_body(item: DisplayItem) -> str:
