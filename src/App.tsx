@@ -6,6 +6,7 @@ import type {
   SessionInfo,
   DisplayMessage,
   AnalyticsSettings,
+  EfficiencyAnalysisJob,
   EfficiencyFinding,
   PreparedEfficiencyPayload,
   SessionEfficiencyAnalysis,
@@ -18,6 +19,7 @@ import { useViewActionsRef, useViewActionCallbacks } from "./hooks/useViewAction
 import { useFontScale } from "./hooks/useFontScale";
 import { useRecapPreview } from "./hooks/useRecapPreview";
 import { useEfficiencyJobs } from "./hooks/useEfficiencyJobs";
+import { useCompletedEfficiencyDashboard } from "./hooks/useCompletedEfficiencyDashboard";
 import { SessionPicker } from "./components/SessionPicker";
 import { MessageList } from "./components/MessageList";
 import { MessageDetail } from "./components/MessageDetail";
@@ -86,6 +88,7 @@ export function App() {
   } | null>(null);
   const detailReqRef = useRef(0);
   const efficiencyDashboardReqRef = useRef(0);
+  const preparedAnalysisOpensDashboardRef = useRef(false);
   // Counts session opens this page lifetime, to periodically recycle the
   // webview (see lib/webviewRecycle.ts for why).
   const switchCountRef = useRef(0);
@@ -238,11 +241,12 @@ export function App() {
     [loadSession, clearExpanded],
   );
 
-  const requestEfficiencyAnalysis = useCallback(async (path: string) => {
+  const requestEfficiencyAnalysis = useCallback(async (path: string, openDashboard = false) => {
     setEfficiencyError("");
     try {
       const settings = await invoke<AnalyticsSettings>("get_analytics_settings");
       if (!settings.jev.configured) {
+        preparedAnalysisOpensDashboardRef.current = false;
         setShowJevKeyRequired(true);
         return;
       }
@@ -250,29 +254,13 @@ export function App() {
         "prepare_session_efficiency_payload",
         { path, payloadMode: settings.defaultPayloadMode },
       );
+      preparedAnalysisOpensDashboardRef.current = openDashboard;
       setPreparedEfficiencyPayload(payload);
     } catch (error) {
+      preparedAnalysisOpensDashboardRef.current = false;
       setEfficiencyError(String(error));
     }
   }, []);
-
-  const confirmEfficiencyAnalysis = useCallback(async () => {
-    if (!preparedEfficiencyPayload) return;
-    setStartingEfficiency(true);
-    setEfficiencyError("");
-    try {
-      await invoke("start_session_efficiency_analysis", {
-        path: preparedEfficiencyPayload.sessionPath,
-        payload: preparedEfficiencyPayload,
-      });
-      setPreparedEfficiencyPayload(null);
-      await efficiencyJobs.refresh();
-    } catch (error) {
-      setEfficiencyError(String(error));
-    } finally {
-      setStartingEfficiency(false);
-    }
-  }, [preparedEfficiencyPayload, efficiencyJobs]);
 
   const closeEfficiencyDashboard = useCallback(() => {
     efficiencyDashboardReqRef.current += 1;
@@ -297,6 +285,43 @@ export function App() {
       setEfficiencyDashboard({ session: sessionInfo, analysis: null, error: String(error) });
     }
   }, []);
+
+  const openCompletedPickerDashboard = useCallback(
+    (completedSessionPath: string) => {
+      const sessionInfo = picker.allSessions.find(
+        (candidate) => candidate.path === completedSessionPath,
+      );
+      if (sessionInfo) void openEfficiencyDashboard(sessionInfo);
+    },
+    [openEfficiencyDashboard, picker.allSessions],
+  );
+  const openDashboardWhenAnalysisCompletes = useCompletedEfficiencyDashboard(
+    efficiencyJobs.jobs,
+    openCompletedPickerDashboard,
+  );
+
+  const confirmEfficiencyAnalysis = useCallback(async () => {
+    if (!preparedEfficiencyPayload) return;
+    setStartingEfficiency(true);
+    setEfficiencyError("");
+    try {
+      const job = await invoke<EfficiencyAnalysisJob>("start_session_efficiency_analysis", {
+        path: preparedEfficiencyPayload.sessionPath,
+        payload: preparedEfficiencyPayload,
+      });
+      if (preparedAnalysisOpensDashboardRef.current) {
+        openDashboardWhenAnalysisCompletes(job);
+      }
+      preparedAnalysisOpensDashboardRef.current = false;
+      setPreparedEfficiencyPayload(null);
+      await efficiencyJobs.refresh();
+    } catch (error) {
+      preparedAnalysisOpensDashboardRef.current = false;
+      setEfficiencyError(String(error));
+    } finally {
+      setStartingEfficiency(false);
+    }
+  }, [preparedEfficiencyPayload, efficiencyJobs, openDashboardWhenAnalysisCompletes]);
 
   useEffect(() => {
     if (!session.sessionPath) {
@@ -593,7 +618,7 @@ export function App() {
               viewActionsRef={viewActionsRef}
               efficiencyJobs={efficiencyJobs.jobsBySession}
               efficiencySummaries={efficiencyJobs.summariesBySession}
-              onAnalyse={(path) => void requestEfficiencyAnalysis(path)}
+              onAnalyse={(path) => void requestEfficiencyAnalysis(path, true)}
               onOpenEfficiencyDashboard={(sessionInfo) => void openEfficiencyDashboard(sessionInfo)}
             />
           </div>
@@ -793,7 +818,10 @@ export function App() {
         <EfficiencyPrivacyModal
           payload={preparedEfficiencyPayload}
           busy={startingEfficiency}
-          onCancel={() => setPreparedEfficiencyPayload(null)}
+          onCancel={() => {
+            preparedAnalysisOpensDashboardRef.current = false;
+            setPreparedEfficiencyPayload(null);
+          }}
           onConfirm={() => void confirmEfficiencyAnalysis()}
         />
       )}
@@ -812,7 +840,7 @@ export function App() {
             onReanalyse={() => {
               const path = efficiencyDashboard.session.path;
               closeEfficiencyDashboard();
-              void requestEfficiencyAnalysis(path);
+              void requestEfficiencyAnalysis(path, true);
             }}
             onJumpToFinding={(finding) => {
               const sessionInfo = efficiencyDashboard.session;
