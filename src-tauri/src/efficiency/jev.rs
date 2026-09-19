@@ -4,7 +4,10 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::time::Duration;
 
-use super::{EfficiencyFinding, EfficiencyFindingType, EfficiencyInput, JevEfficiencyDecision};
+use super::{
+    EfficiencyFinding, EfficiencyFindingType, EfficiencyInput, EfficiencyMetricEvaluation,
+    JevEfficiencyDecision,
+};
 
 const JEV_ENDPOINT: &str = "https://api.typesafe.ai/v1/systemone";
 const JEV_MODEL: &str = "jev-latest";
@@ -28,30 +31,82 @@ pub fn destination() -> JevDestination {
     }
 }
 
-const BASE_QUESTIONS: [(&str, &str); 9] = [
-    ("progressingEfficiently", "Did the agent make steady, meaningful progress toward the user's task?"),
-    ("toolCallsUseful", "Were the tool calls useful and proportionate to completing the task?"),
-    ("redundantWorkPresent", "Was materially redundant or repeated work present?"),
-    ("excessiveExploration", "Was exploration excessive relative to the task?"),
-    ("likelyThrashing", "Did the agent cycle among similar actions without meaningful progress?"),
-    ("effectiveRecovery", "When mistakes or failures occurred, did the agent recover effectively?"),
-    ("tokenUsageEfficient", "Was token usage efficient for the work completed? Consider total tokens, context growth, turn count, repeated work, and tool activity. Judge resource efficiency only; do not estimate or consider monetary cost."),
-    ("subagentsUseful", "If subagents were used, did they add useful independent work? Answer yes when no subagents were needed or used."),
-    ("likelyTaskCompleted", "Does the trace indicate that the user's requested task was completed successfully?"),
+struct BaseMetricDefinition {
+    key: &'static str,
+    label: &'static str,
+    question: &'static str,
+    higher_probability_is_better: bool,
+}
+
+const BASE_METRICS: [BaseMetricDefinition; 9] = [
+    BaseMetricDefinition {
+        key: "progressingEfficiently",
+        label: "Progress",
+        question: "Did the agent make steady, meaningful progress toward the user's task?",
+        higher_probability_is_better: true,
+    },
+    BaseMetricDefinition {
+        key: "toolCallsUseful",
+        label: "Useful tool calls",
+        question: "Were the tool calls useful and proportionate to completing the task?",
+        higher_probability_is_better: true,
+    },
+    BaseMetricDefinition {
+        key: "redundantWorkPresent",
+        label: "Avoided repeated work",
+        question: "Was materially redundant or repeated work present?",
+        higher_probability_is_better: false,
+    },
+    BaseMetricDefinition {
+        key: "excessiveExploration",
+        label: "Proportionate exploration",
+        question: "Was exploration excessive relative to the task?",
+        higher_probability_is_better: false,
+    },
+    BaseMetricDefinition {
+        key: "likelyThrashing",
+        label: "Avoided thrashing",
+        question: "Did the agent cycle among similar actions without meaningful progress?",
+        higher_probability_is_better: false,
+    },
+    BaseMetricDefinition {
+        key: "effectiveRecovery",
+        label: "Effective recovery",
+        question: "When mistakes or failures occurred, did the agent recover effectively?",
+        higher_probability_is_better: true,
+    },
+    BaseMetricDefinition {
+        key: "tokenUsageEfficient",
+        label: "Efficient token use",
+        question: "Was token usage efficient for the work completed? Consider total tokens, context growth, turn count, repeated work, and tool activity. Judge resource efficiency only; do not estimate or consider monetary cost.",
+        higher_probability_is_better: true,
+    },
+    BaseMetricDefinition {
+        key: "subagentsUseful",
+        label: "Useful subagents",
+        question: "If subagents were used, did they add useful independent work? Answer yes when no subagents were needed or used.",
+        higher_probability_is_better: true,
+    },
+    BaseMetricDefinition {
+        key: "likelyTaskCompleted",
+        label: "Task completion",
+        question: "Does the trace indicate that the user's requested task was completed successfully?",
+        higher_probability_is_better: true,
+    },
 ];
 
 #[derive(Serialize)]
-struct NoulQuestion<'a> {
+struct NoulQuestion {
     #[serde(rename = "type")]
     question_type: &'static str,
-    instructions: &'a str,
+    instructions: String,
 }
 
 #[derive(Serialize)]
 struct JevRequest<'a> {
     model: &'static str,
     state: &'a EfficiencyInput,
-    questions: HashMap<String, NoulQuestion<'a>>,
+    questions: HashMap<String, NoulQuestion>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -66,6 +121,7 @@ struct JevResponse {
 
 pub struct JevAnalysisResult {
     pub decisions: JevEfficiencyDecision,
+    pub metric_evaluations: Vec<EfficiencyMetricEvaluation>,
     pub findings: Vec<EfficiencyFinding>,
 }
 
@@ -76,25 +132,27 @@ fn client() -> Result<reqwest::Client, String> {
         .map_err(|error| error.to_string())
 }
 
-fn questions(input: &EfficiencyInput) -> HashMap<String, NoulQuestion<'static>> {
-    let mut questions = BASE_QUESTIONS
-        .into_iter()
-        .map(|(id, instructions)| {
+fn questions(input: &EfficiencyInput) -> HashMap<String, NoulQuestion> {
+    let mut questions = BASE_METRICS
+        .iter()
+        .map(|metric| {
             (
-                id.to_string(),
+                metric.key.to_string(),
                 NoulQuestion {
                     question_type: "noul",
-                    instructions,
+                    instructions: metric.question.to_string(),
                 },
             )
         })
         .collect::<HashMap<_, _>>();
-    for window in 0..input
+    for (window, actions) in input
         .actions
-        .len()
-        .div_ceil(WINDOW_ACTIONS)
-        .min(MAX_WINDOWS)
+        .chunks(WINDOW_ACTIONS)
+        .take(MAX_WINDOWS)
+        .enumerate()
     {
+        let first_action_position = window * WINDOW_ACTIONS;
+        let last_action_position = first_action_position + actions.len() - 1;
         for (kind, prompt) in [
             (
                 "repeated",
@@ -121,7 +179,9 @@ fn questions(input: &EfficiencyInput) -> HashMap<String, NoulQuestion<'static>> 
                 format!("window_{window}_{kind}"),
                 NoulQuestion {
                     question_type: "noul",
-                    instructions: prompt,
+                    instructions: format!(
+                        "Evaluate only state.actions at zero-based positions {first_action_position} through {last_action_position}. Ignore every action outside that range. {prompt}"
+                    ),
                 },
             );
         }
@@ -138,6 +198,30 @@ fn probability(answers: &HashMap<String, NoulAnswer>, key: &str) -> Result<f64, 
         return Err(format!("Jev returned an invalid probability for {key}"));
     }
     Ok(value)
+}
+
+fn metric_evaluations(
+    answers: &HashMap<String, NoulAnswer>,
+) -> Result<Vec<EfficiencyMetricEvaluation>, String> {
+    BASE_METRICS
+        .iter()
+        .map(|metric| {
+            let probability = probability(answers, metric.key)?;
+            let displayed_probability = if metric.higher_probability_is_better {
+                probability
+            } else {
+                1.0 - probability
+            };
+            Ok(EfficiencyMetricEvaluation {
+                key: metric.key.to_string(),
+                label: metric.label.to_string(),
+                question: metric.question.to_string(),
+                higher_probability_is_better: metric.higher_probability_is_better,
+                probability,
+                score: (displayed_probability.clamp(0.0, 1.0) * 100.0).round() as u8,
+            })
+        })
+        .collect()
 }
 
 fn findings(
@@ -171,6 +255,7 @@ fn findings(
                     probability: answer.noul,
                     start_message_index: first.index,
                     end_message_index: last.index,
+                    activity_summary: String::new(),
                 });
             }
         }
@@ -181,15 +266,94 @@ fn findings(
                 probability: (0.6 + failed as f64 * 0.1).min(0.95),
                 start_message_index: first.index,
                 end_message_index: last.index,
+                activity_summary: String::new(),
             });
         }
     }
-    findings.sort_by_key(|finding| finding.start_message_index);
+    let mut findings = merge_overlapping_findings(findings);
+    for finding in &mut findings {
+        let related_actions = input
+            .actions
+            .iter()
+            .filter(|action| {
+                action.index >= finding.start_message_index
+                    && action.index <= finding.end_message_index
+            })
+            .collect::<Vec<_>>();
+        finding.activity_summary = describe_activity(&related_actions);
+    }
     findings
+}
+
+fn describe_activity(actions: &[&super::EfficiencyAction]) -> String {
+    let mut tools = Vec::new();
+    for action in actions {
+        let tool = action.tool.trim();
+        if !tool.is_empty() && !tools.contains(&tool) {
+            tools.push(tool);
+        }
+    }
+    let displayed_tools = tools.iter().take(3).copied().collect::<Vec<_>>();
+    let hidden_tool_count = tools.len().saturating_sub(displayed_tools.len());
+    let call_label = if actions.len() == 1 {
+        "1 tool call".to_string()
+    } else {
+        format!("{} tool calls", actions.len())
+    };
+    if displayed_tools.is_empty() {
+        return call_label;
+    }
+    let mut summary = format!("{call_label} · {}", displayed_tools.join(", "));
+    if hidden_tool_count > 0 {
+        summary.push_str(&format!(" +{hidden_tool_count} more"));
+    }
+    let failed_call_count = actions.iter().filter(|action| action.error).count();
+    if failed_call_count > 0 {
+        summary.push_str(&format!(" · {failed_call_count} failed"));
+    }
+    summary
+}
+
+fn finding_type_rank(finding_type: &EfficiencyFindingType) -> u8 {
+    match finding_type {
+        EfficiencyFindingType::RepeatedWork => 0,
+        EfficiencyFindingType::Thrashing => 1,
+        EfficiencyFindingType::ExcessiveExploration => 2,
+        EfficiencyFindingType::FailedRetries => 3,
+        EfficiencyFindingType::Recovery => 4,
+        EfficiencyFindingType::UsefulSubagent => 5,
+    }
+}
+
+fn merge_overlapping_findings(mut findings: Vec<EfficiencyFinding>) -> Vec<EfficiencyFinding> {
+    findings.sort_by_key(|finding| {
+        (
+            finding_type_rank(&finding.finding_type),
+            finding.start_message_index,
+            finding.end_message_index,
+        )
+    });
+    let mut merged: Vec<EfficiencyFinding> = Vec::with_capacity(findings.len());
+    for finding in findings {
+        if let Some(previous) = merged.last_mut() {
+            if previous.finding_type == finding.finding_type
+                && finding.start_message_index <= previous.end_message_index
+            {
+                previous.end_message_index =
+                    previous.end_message_index.max(finding.end_message_index);
+                previous.probability = previous.probability.max(finding.probability);
+                continue;
+            }
+        }
+        merged.push(finding);
+    }
+    merged.sort_by_key(|finding| finding.start_message_index);
+    merged
 }
 
 fn parse(input: &EfficiencyInput, response: JevResponse) -> Result<JevAnalysisResult, String> {
     let answers = response.answers;
+    let metric_evaluations = metric_evaluations(&answers)?;
     let decisions = JevEfficiencyDecision {
         progressing_efficiently: probability(&answers, "progressingEfficiently")?,
         tool_calls_useful: probability(&answers, "toolCallsUseful")?,
@@ -203,6 +367,7 @@ fn parse(input: &EfficiencyInput, response: JevResponse) -> Result<JevAnalysisRe
     };
     Ok(JevAnalysisResult {
         decisions,
+        metric_evaluations,
         findings: findings(input, &answers),
     })
 }
@@ -271,7 +436,7 @@ pub async fn test_connection(api_key: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::efficiency::{EfficiencySignals, EfficiencyTask};
+    use crate::efficiency::{EfficiencyAction, EfficiencySignals, EfficiencyTask};
 
     #[test]
     fn disclosed_destination_matches_the_actual_jev_request() {
@@ -315,8 +480,32 @@ mod tests {
     #[test]
     fn base_request_contains_all_narrow_decisions() {
         let questions = questions(&empty_input());
-        for (id, _) in BASE_QUESTIONS {
-            assert!(questions.contains_key(id));
+        for metric in &BASE_METRICS {
+            assert_eq!(questions[metric.key].instructions, metric.question);
+        }
+    }
+
+    #[test]
+    fn dashboard_metrics_are_generated_from_the_same_definitions_as_jev_questions() {
+        let answers = BASE_METRICS
+            .iter()
+            .map(|metric| (metric.key.to_string(), NoulAnswer { noul: 0.25 }))
+            .collect::<HashMap<_, _>>();
+        let evaluations = metric_evaluations(&answers).unwrap();
+
+        assert_eq!(evaluations.len(), BASE_METRICS.len());
+        for (evaluation, definition) in evaluations.iter().zip(BASE_METRICS.iter()) {
+            assert_eq!(evaluation.key, definition.key);
+            assert_eq!(evaluation.label, definition.label);
+            assert_eq!(evaluation.question, definition.question);
+            assert_eq!(
+                evaluation.score,
+                if definition.higher_probability_is_better {
+                    25
+                } else {
+                    75
+                }
+            );
         }
     }
 
@@ -342,5 +531,61 @@ mod tests {
         );
         assert!(request.pointer("/questions/tokenUsageEfficient").is_some());
         assert!(!request["state"].to_string().to_lowercase().contains("cost"));
+    }
+
+    #[test]
+    fn window_questions_identify_the_exact_shared_state_actions_to_evaluate() {
+        let mut input = empty_input();
+        input.actions = (0..8)
+            .map(|index| EfficiencyAction {
+                index,
+                tool: "Read".into(),
+                category: "Read".into(),
+                summary: format!("file-{index}"),
+                duration_ms: 1,
+                error: false,
+                repeated_similar_call_count: 0,
+            })
+            .collect();
+
+        let questions = questions(&input);
+        assert!(questions["window_0_recovery"]
+            .instructions
+            .contains("state.actions at zero-based positions 0 through 5"));
+        assert!(questions["window_1_recovery"]
+            .instructions
+            .contains("state.actions at zero-based positions 6 through 7"));
+    }
+
+    #[test]
+    fn overlapping_window_answers_become_one_finding() {
+        let mut input = empty_input();
+        input.actions = (0..15)
+            .map(|action_position| EfficiencyAction {
+                index: if action_position < 13 { 2 } else { 4 },
+                tool: "Read".into(),
+                category: "Read".into(),
+                summary: format!("file-{action_position}"),
+                duration_ms: 1,
+                error: false,
+                repeated_similar_call_count: 0,
+            })
+            .collect();
+        let answers = HashMap::from([
+            ("window_0_recovery".into(), NoulAnswer { noul: 0.75 }),
+            ("window_1_recovery".into(), NoulAnswer { noul: 0.76 }),
+            ("window_2_recovery".into(), NoulAnswer { noul: 0.78 }),
+        ]);
+
+        assert_eq!(
+            findings(&input, &answers),
+            vec![EfficiencyFinding {
+                finding_type: EfficiencyFindingType::Recovery,
+                probability: 0.78,
+                start_message_index: 2,
+                end_message_index: 4,
+                activity_summary: "15 tool calls · Read".into(),
+            }]
+        );
     }
 }

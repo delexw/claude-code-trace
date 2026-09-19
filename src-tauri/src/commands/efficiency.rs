@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::process::{Output, Stdio};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -216,6 +217,7 @@ pub fn start_session_efficiency_analysis_impl(
                     payload.transcript_fingerprint,
                     payload.input.task.turns,
                     result.decisions,
+                    result.metric_evaluations,
                     result.findings,
                 );
                 let updated = {
@@ -325,14 +327,7 @@ pub async fn test_recommendation_provider_impl(
                 command.args(["--model", &model]);
             }
             command.arg("Return exactly this JSON object and nothing else: {\"connected\":true}");
-            let status = tokio::time::timeout(Duration::from_secs(60), command.status())
-                .await
-                .map_err(|_| "Connection test timed out".to_string())?
-                .map_err(|_| "Codex is not installed or not authenticated".to_string())?;
-            status
-                .success()
-                .then_some(())
-                .ok_or_else(|| "Codex is not authenticated".to_string())
+            run_cli_connection_test(command, "Codex").await
         }
         RecommendationProvider::ClaudeCodeSubscription { model } => {
             let mut command = tokio::process::Command::new("claude");
@@ -345,14 +340,7 @@ pub async fn test_recommendation_provider_impl(
             if let Some(model) = model.filter(|model| !model.trim().is_empty()) {
                 command.args(["--model", &model]);
             }
-            let status = tokio::time::timeout(Duration::from_secs(60), command.status())
-                .await
-                .map_err(|_| "Connection test timed out".to_string())?
-                .map_err(|_| "Claude Code is not installed or not authenticated".to_string())?;
-            status
-                .success()
-                .then_some(())
-                .ok_or_else(|| "Claude Code is not authenticated".to_string())
+            run_cli_connection_test(command, "Claude Code").await
         }
         RecommendationProvider::OpenaiCompatible {
             base_url, model, ..
@@ -384,6 +372,49 @@ pub async fn test_recommendation_provider_impl(
                 }
             })
         }
+    }
+}
+
+async fn run_cli_connection_test(
+    mut command: tokio::process::Command,
+    cli_name: &str,
+) -> Result<(), String> {
+    command.stdin(Stdio::null()).kill_on_drop(true);
+    let output = tokio::time::timeout(Duration::from_secs(60), command.output())
+        .await
+        .map_err(|_| format!("{cli_name} connection test timed out"))?
+        .map_err(|error| format!("Could not start {cli_name}: {error}"))?;
+    output
+        .status
+        .success()
+        .then_some(())
+        .ok_or_else(|| cli_failure_message(cli_name, &output))
+}
+
+fn cli_failure_message(cli_name: &str, output: &Output) -> String {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let detail = stderr.lines().rev().find_map(|line| {
+        let line = line.trim();
+        let payload = line.strip_prefix("ERROR: ")?;
+        serde_json::from_str::<serde_json::Value>(payload)
+            .ok()
+            .and_then(|value| {
+                value
+                    .pointer("/error/message")?
+                    .as_str()
+                    .map(str::to_string)
+            })
+    });
+    match detail {
+        Some(detail) => format!("{cli_name} connection test failed: {detail}"),
+        None => format!(
+            "{cli_name} connection test failed. Run `{}` in a terminal for details.",
+            if cli_name == "Codex" {
+                "codex login status"
+            } else {
+                "claude auth status"
+            }
+        ),
     }
 }
 
@@ -509,6 +540,14 @@ pub async fn cancel_efficiency_analysis(
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
+    fn failed_output(stderr: &str) -> Output {
+        std::process::Command::new("sh")
+            .args(["-c", &format!("printf '%s' '{stderr}' >&2; exit 1")])
+            .output()
+            .unwrap()
+    }
+
     fn job(analysis_id: &str, session_path: &str) -> EfficiencyAnalysisJob {
         EfficiencyAnalysisJob {
             analysis_id: analysis_id.to_string(),
@@ -536,5 +575,29 @@ mod tests {
         assert!(!jobs.contains_key("old"));
         assert!(jobs.contains_key("new"));
         assert!(jobs.contains_key("other"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cli_failure_surfaces_the_actual_provider_message() {
+        let output = failed_output(
+            r#"ERROR: {"type":"error","status":400,"error":{"message":"Please upgrade to the latest Codex CLI."}}"#,
+        );
+
+        assert_eq!(
+            cli_failure_message("Codex", &output),
+            "Codex connection test failed: Please upgrade to the latest Codex CLI."
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cli_failure_without_structured_detail_gives_a_diagnostic_command() {
+        let output = failed_output("unstructured failure");
+
+        assert_eq!(
+            cli_failure_message("Codex", &output),
+            "Codex connection test failed. Run `codex login status` in a terminal for details."
+        );
     }
 }

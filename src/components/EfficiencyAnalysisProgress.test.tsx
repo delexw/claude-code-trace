@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { EfficiencyAnalysisJob } from "../types";
 import { EfficiencyAnalysisProgress } from "./EfficiencyAnalysisProgress";
@@ -21,15 +21,19 @@ describe("EfficiencyAnalysisProgress", () => {
   it("briefly shows a completed job, then removes it from the progress strip", () => {
     vi.useFakeTimers();
     vi.setSystemTime("2026-09-19T04:00:00.000Z");
+    const onOpenDashboard = vi.fn();
     render(
       <EfficiencyAnalysisProgress
         jobs={[completedJob]}
         onOpenSession={vi.fn()}
+        onOpenDashboard={onOpenDashboard}
         onCancel={vi.fn()}
       />,
     );
 
     expect(screen.getByText("✓ Analysis complete — Efficiency 82")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Dashboard" }));
+    expect(onOpenDashboard).toHaveBeenCalledWith(completedJob.sessionPath);
     act(() => vi.advanceTimersByTime(5_000));
     expect(screen.queryByLabelText("Jev analysis progress")).not.toBeInTheDocument();
   });

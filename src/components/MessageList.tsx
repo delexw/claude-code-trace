@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { useRegisterViewActions, type ViewActionsRef } from "../hooks/useViewActions";
+import { mergeOverlappingEfficiencyFindings } from "../lib/efficiencyFindings";
 import type { DisplayMessage, EfficiencyFinding } from "../types";
 import { MessageItem } from "./MessageItem";
 
@@ -121,6 +122,7 @@ export function MessageList({
   findings = NO_FINDINGS,
 }: MessageListProps) {
   const virtuosoRef = useRef<VirtuosoHandle>(null);
+  const mergedFindings = useMemo(() => mergeOverlappingEfficiencyFindings(findings), [findings]);
 
   // The message list is displayed reversed (newest first), so the visual top is
   // the last index and the visual bottom is index 0 — matching the keyboard
@@ -214,7 +216,7 @@ export function MessageList({
         lastIndex: count - 1,
         onClick: handleClick,
         onOpenDetail,
-        findings,
+        findings: mergedFindings,
       }}
       // Stick to the bottom on new/streamed content, but only while the user is
       // already at the bottom (replaces the old near-bottom auto-scroll hook).

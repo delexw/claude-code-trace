@@ -4,6 +4,7 @@ import type { EfficiencyAnalysisJob } from "../types";
 interface EfficiencyAnalysisProgressProps {
   jobs: EfficiencyAnalysisJob[];
   onOpenSession: (path: string) => void;
+  onOpenDashboard: (path: string) => void;
   onCancel: (analysisId: string) => void;
 }
 
@@ -19,6 +20,7 @@ const activeStatuses = new Set([
 export function EfficiencyAnalysisProgress({
   jobs,
   onOpenSession,
+  onOpenDashboard,
   onCancel,
 }: EfficiencyAnalysisProgressProps) {
   const [now, setNow] = useState(() => Date.now());
@@ -66,7 +68,15 @@ export function EfficiencyAnalysisProgress({
               ? `✓ Analysis complete — Efficiency ${job.score}`
               : job.error || job.message}
           </span>
-          {activeStatuses.has(job.status) && (
+          {job.status === "completed" ? (
+            <button
+              type="button"
+              className="efficiency-progress__dashboard"
+              onClick={() => onOpenDashboard(job.sessionPath)}
+            >
+              Dashboard
+            </button>
+          ) : activeStatuses.has(job.status) ? (
             <button
               type="button"
               className="efficiency-progress__cancel"
@@ -74,7 +84,7 @@ export function EfficiencyAnalysisProgress({
             >
               Cancel
             </button>
-          )}
+          ) : null}
         </div>
       ))}
     </section>

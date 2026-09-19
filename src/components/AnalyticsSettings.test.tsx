@@ -47,5 +47,32 @@ describe("AnalyticsSettings", () => {
       expect(mockInvoke).toHaveBeenCalledWith("set_jev_api_key", { key: "jev-test-secret" }),
     );
     expect(input).toHaveValue("");
+    expect(screen.getByRole("alertdialog", { name: "Success" })).toHaveTextContent(
+      "Jev API key stored in the platform credential store.",
+    );
+  });
+
+  it("shows provider test errors and successes in a result pop-up", async () => {
+    mockInvoke.mockImplementation((command: string) => {
+      if (command === "get_analytics_settings") return Promise.resolve(settings);
+      if (command === "test_recommendation_provider") {
+        return Promise.reject(new Error("Codex could not start"));
+      }
+      return Promise.resolve();
+    });
+    render(<AnalyticsSettings />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Test recommendation provider" }));
+    expect(await screen.findByRole("alertdialog", { name: "Action failed" })).toHaveTextContent(
+      "Codex could not start",
+    );
+    expect(screen.queryByText("Error: Codex could not start")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "OK" }));
+    mockInvoke.mockResolvedValue(undefined);
+    fireEvent.click(screen.getByRole("button", { name: "Test recommendation provider" }));
+    expect(await screen.findByRole("alertdialog", { name: "Success" })).toHaveTextContent(
+      "Recommendation provider connected.",
+    );
   });
 });

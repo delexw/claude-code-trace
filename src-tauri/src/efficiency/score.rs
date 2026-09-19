@@ -1,8 +1,8 @@
 use chrono::Utc;
 
 use super::{
-    EfficiencyDimensions, EfficiencyFinding, JevEfficiencyDecision, SessionEfficiencyAnalysis,
-    ANALYSIS_VERSION, DECISION_SET_VERSION, SCORE_FORMULA_VERSION,
+    EfficiencyDimensions, EfficiencyFinding, EfficiencyMetricEvaluation, JevEfficiencyDecision,
+    SessionEfficiencyAnalysis, ANALYSIS_VERSION, DECISION_SET_VERSION, SCORE_FORMULA_VERSION,
 };
 
 fn percentage(probability: f64) -> u8 {
@@ -15,6 +15,7 @@ pub fn build_analysis(
     transcript_fingerprint: String,
     analyzed_turns: usize,
     decisions: JevEfficiencyDecision,
+    metric_evaluations: Vec<EfficiencyMetricEvaluation>,
     findings: Vec<EfficiencyFinding>,
 ) -> SessionEfficiencyAnalysis {
     let dimensions = EfficiencyDimensions {
@@ -39,6 +40,7 @@ pub fn build_analysis(
         session_path,
         score: weighted.round().clamp(0.0, 100.0) as u8,
         dimensions,
+        metric_evaluations,
         findings,
         decisions,
         analyzed_at: Utc::now().to_rfc3339(),
@@ -73,6 +75,7 @@ mod tests {
                 subagents_useful: 0.5,
                 likely_task_completed: 1.0,
             },
+            vec![],
             vec![],
         );
         assert_eq!(analysis.dimensions.focus, 70);

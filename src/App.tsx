@@ -46,6 +46,12 @@ const EfficiencyPanel = lazy(() =>
   })),
 );
 
+const EfficiencyDashboardModal = lazy(() =>
+  import("./components/EfficiencyDashboardModal").then((module) => ({
+    default: module.EfficiencyDashboardModal,
+  })),
+);
+
 export function App() {
   const [view, setView] = useState<ViewState>("picker");
   const [storedSelectedMessage, setSelectedMessage] = useState(0);
@@ -74,7 +80,13 @@ export function App() {
   const [efficiencyAnalysis, setEfficiencyAnalysis] = useState<SessionEfficiencyAnalysis | null>(
     null,
   );
+  const [efficiencyDashboard, setEfficiencyDashboard] = useState<{
+    session: SessionInfo;
+    analysis: SessionEfficiencyAnalysis | null;
+    error: string;
+  } | null>(null);
   const detailReqRef = useRef(0);
+  const efficiencyDashboardReqRef = useRef(0);
   // Counts session opens this page lifetime, to periodically recycle the
   // webview (see lib/webviewRecycle.ts for why).
   const switchCountRef = useRef(0);
@@ -262,6 +274,38 @@ export function App() {
       setStartingEfficiency(false);
     }
   }, [preparedEfficiencyPayload, efficiencyJobs]);
+
+  const closeEfficiencyDashboard = useCallback(() => {
+    efficiencyDashboardReqRef.current += 1;
+    setEfficiencyDashboard(null);
+  }, []);
+
+  const openEfficiencyDashboard = useCallback(async (sessionInfo: SessionInfo) => {
+    const requestId = ++efficiencyDashboardReqRef.current;
+    setEfficiencyDashboard({ session: sessionInfo, analysis: null, error: "" });
+    try {
+      const analysis = await invoke<SessionEfficiencyAnalysis | null>("get_session_efficiency", {
+        path: sessionInfo.path,
+      });
+      if (requestId !== efficiencyDashboardReqRef.current) return;
+      setEfficiencyDashboard({
+        session: sessionInfo,
+        analysis,
+        error: analysis ? "" : "No completed efficiency analysis was found for this session.",
+      });
+    } catch (error) {
+      if (requestId !== efficiencyDashboardReqRef.current) return;
+      setEfficiencyDashboard({ session: sessionInfo, analysis: null, error: String(error) });
+    }
+  }, []);
+
+  const openEfficiencyDashboardByPath = useCallback(
+    (path: string) => {
+      const sessionInfo = picker.allSessions.find((candidate) => candidate.path === path);
+      if (sessionInfo) void openEfficiencyDashboard(sessionInfo);
+    },
+    [openEfficiencyDashboard, picker.allSessions],
+  );
 
   useEffect(() => {
     if (!session.sessionPath) {
@@ -547,6 +591,7 @@ export function App() {
             <EfficiencyAnalysisProgress
               jobs={efficiencyJobs.jobs}
               onOpenSession={openSessionByPath}
+              onOpenDashboard={openEfficiencyDashboardByPath}
               onCancel={(analysisId) => void efficiencyJobs.cancel(analysisId)}
             />
             <SessionPicker
@@ -564,6 +609,7 @@ export function App() {
               efficiencyJobs={efficiencyJobs.jobsBySession}
               efficiencySummaries={efficiencyJobs.summariesBySession}
               onAnalyse={(path) => void requestEfficiencyAnalysis(path)}
+              onOpenEfficiencyDashboard={(sessionInfo) => void openEfficiencyDashboard(sessionInfo)}
             />
           </div>
         );
@@ -765,6 +811,32 @@ export function App() {
           onCancel={() => setPreparedEfficiencyPayload(null)}
           onConfirm={() => void confirmEfficiencyAnalysis()}
         />
+      )}
+      {efficiencyDashboard && (
+        <Suspense fallback={null}>
+          <EfficiencyDashboardModal
+            sessionName={
+              efficiencyDashboard.session.name ||
+              efficiencyDashboard.session.first_message ||
+              efficiencyDashboard.session.session_id
+            }
+            currentTurns={efficiencyDashboard.session.turn_count}
+            analysis={efficiencyDashboard.analysis}
+            error={efficiencyDashboard.error}
+            onClose={closeEfficiencyDashboard}
+            onReanalyse={() => {
+              const path = efficiencyDashboard.session.path;
+              closeEfficiencyDashboard();
+              void requestEfficiencyAnalysis(path);
+            }}
+            onJumpToFinding={(finding) => {
+              const sessionInfo = efficiencyDashboard.session;
+              closeEfficiencyDashboard();
+              handleSelectSession(sessionInfo);
+              jumpToEfficiencyFinding(finding);
+            }}
+          />
+        </Suspense>
       )}
       {showJevKeyRequired && (
         <JevKeyRequiredModal

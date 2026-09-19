@@ -60,6 +60,28 @@ export interface EfficiencyFinding {
   probability: number;
   startMessageIndex: number;
   endMessageIndex: number;
+  activitySummary?: string;
+}
+
+export interface JevEfficiencyDecisions {
+  progressingEfficiently: number;
+  toolCallsUseful: number;
+  redundantWorkPresent: number;
+  excessiveExploration: number;
+  likelyThrashing: number;
+  effectiveRecovery: number;
+  tokenUsageEfficient: number;
+  subagentsUseful: number;
+  likelyTaskCompleted: number;
+}
+
+export interface EfficiencyMetricEvaluation {
+  key: string;
+  label: string;
+  question: string;
+  higherProbabilityIsBetter: boolean;
+  probability: number;
+  score: number;
 }
 
 export interface SessionEfficiencyAnalysis {
@@ -74,8 +96,9 @@ export interface SessionEfficiencyAnalysis {
     recovery: number;
     tokenUse: number;
   };
+  metricEvaluations: EfficiencyMetricEvaluation[];
   findings: EfficiencyFinding[];
-  decisions: Record<string, number>;
+  decisions: JevEfficiencyDecisions;
   analyzedAt: string;
   analyzedTurns: number;
   transcriptFingerprint: string;

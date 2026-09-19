@@ -95,10 +95,11 @@ describe("SessionPicker", () => {
     expect(onSelect).not.toHaveBeenCalled();
   });
 
-  it("opens cached efficiency without creating a new request", () => {
+  it("opens cached efficiency in the dashboard without opening the session", () => {
     const session = makeSession();
     const onSelect = vi.fn();
     const onAnalyse = vi.fn();
+    const onOpenEfficiencyDashboard = vi.fn();
     render(
       <SessionPicker
         index={indexed}
@@ -109,6 +110,7 @@ describe("SessionPicker", () => {
         onSelect={onSelect}
         onSearchChange={vi.fn()}
         onAnalyse={onAnalyse}
+        onOpenEfficiencyDashboard={onOpenEfficiencyDashboard}
         efficiencySummaries={
           new Map([
             [
@@ -119,8 +121,9 @@ describe("SessionPicker", () => {
         }
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "82 Efficiency" }));
-    expect(onSelect).toHaveBeenCalledWith(session);
+    fireEvent.click(screen.getByRole("button", { name: "Dashboard · 82" }));
+    expect(onOpenEfficiencyDashboard).toHaveBeenCalledWith(session);
+    expect(onSelect).not.toHaveBeenCalled();
     expect(onAnalyse).not.toHaveBeenCalled();
   });
   it("shows loading spinner when loading", () => {

@@ -66,6 +66,12 @@ fn run_headless() {
 /// and just points a browser at it). Requires the `desktop` feature.
 #[cfg(feature = "desktop")]
 fn run_desktop(args: &[String]) {
+    // GUI apps do not reliably inherit the user's shell PATH. Restore it before
+    // any command can launch subscription-backed CLIs such as Codex or Claude.
+    if let Err(error) = fix_path_env::fix() {
+        eprintln!("Could not restore the shell PATH for desktop commands: {error}");
+    }
+
     let web_only = args.iter().any(|a| a == "--web");
     let no_open = args.iter().any(|a| a == "--no-open");
     let desktop = !web_only;

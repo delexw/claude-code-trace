@@ -57,6 +57,7 @@ interface SessionPickerProps {
   efficiencyJobs?: Map<string, EfficiencyAnalysisJob>;
   efficiencySummaries?: Map<string, EfficiencySummary>;
   onAnalyse?: (path: string) => void;
+  onOpenEfficiencyDashboard?: (session: SessionInfo) => void;
 }
 
 export function SessionPicker({
@@ -74,6 +75,7 @@ export function SessionPicker({
   efficiencyJobs = NO_EFFICIENCY_JOBS,
   efficiencySummaries = NO_EFFICIENCY_SUMMARIES,
   onAnalyse,
+  onOpenEfficiencyDashboard,
 }: SessionPickerProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const selectedRef = useScrollToSelected(selectedIndex);
@@ -197,13 +199,13 @@ export function SessionPicker({
                         <button
                           type="button"
                           className={`picker__efficiency-score picker__efficiency-score--${efficiencyTone}`}
-                          title="View analysis"
+                          title={`Open efficiency dashboard with score ${efficiencySummary.score}`}
                           onClick={(event) => {
                             event.stopPropagation();
-                            onSelect(session);
+                            onOpenEfficiencyDashboard?.(session);
                           }}
                         >
-                          {efficiencySummary.score} Efficiency
+                          Dashboard · {efficiencySummary.score}
                           {efficiencySummary.stale ? " · stale" : ""}
                         </button>
                         {onAnalyse && (

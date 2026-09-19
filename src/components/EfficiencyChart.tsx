@@ -7,34 +7,22 @@ import {
   type ChartOptions,
 } from "chart.js";
 import { Bar } from "react-chartjs-2";
+import { VscInfo } from "react-icons/vsc";
 import { colors } from "../lib/theme";
-import type { SessionEfficiencyAnalysis } from "../types";
+import type { EfficiencyMetricEvaluation } from "../types";
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip);
 
 interface EfficiencyChartProps {
-  dimensions: SessionEfficiencyAnalysis["dimensions"];
+  metrics: EfficiencyMetricEvaluation[];
 }
 
-export function efficiencyDimensionValues(
-  dimensions: SessionEfficiencyAnalysis["dimensions"],
-): number[] {
-  return [
-    dimensions.progress,
-    dimensions.toolUse,
-    dimensions.focus,
-    dimensions.exploration,
-    dimensions.recovery,
-    dimensions.tokenUse,
-  ];
-}
-
-export function EfficiencyChart({ dimensions }: EfficiencyChartProps) {
+export function EfficiencyChart({ metrics }: EfficiencyChartProps) {
   const data = {
-    labels: ["Progress", "Tool use", "Focus", "Exploration", "Recovery", "Token use"],
+    labels: metrics.map(({ label }) => label),
     datasets: [
       {
-        data: efficiencyDimensionValues(dimensions),
+        data: metrics.map(({ score }) => score),
         backgroundColor: colors.accent,
         borderRadius: 3,
       },
@@ -55,15 +43,49 @@ export function EfficiencyChart({ dimensions }: EfficiencyChartProps) {
         border: { color: colors.border },
       },
       y: {
-        ticks: { color: colors.textPrimary },
+        ticks: { display: false },
         grid: { display: false },
         border: { display: false },
       },
     },
   };
+  if (metrics.length === 0) {
+    return <div className="efficiency-chart__unavailable">Re-analyse to view Jev metrics.</div>;
+  }
   return (
-    <div className="efficiency-chart" aria-label="Efficiency dimensions chart">
-      <Bar data={data} options={options} />
+    <div className="efficiency-chart" aria-label="Jev metric evaluations chart">
+      <div
+        className="efficiency-chart__labels"
+        style={{ gridTemplateRows: `repeat(${metrics.length}, minmax(0, 1fr))` }}
+      >
+        {metrics.map((metric) => {
+          const tooltipId = `efficiency-metric-tip-${metric.key}`;
+          return (
+            <div className="efficiency-chart__label" key={metric.key}>
+              <span>{metric.label}</span>
+              <span className="efficiency-chart__tip">
+                <button
+                  type="button"
+                  className="efficiency-chart__tip-trigger"
+                  aria-label={`About ${metric.label}`}
+                  aria-describedby={tooltipId}
+                >
+                  <VscInfo aria-hidden="true" />
+                </button>
+                <span id={tooltipId} role="tooltip" className="efficiency-chart__tooltip">
+                  Jev question: “{metric.question}”{" "}
+                  {metric.higherProbabilityIsBetter
+                    ? "Higher is better."
+                    : "This bar reverses Jev's probability so higher is better."}
+                </span>
+              </span>
+            </div>
+          );
+        })}
+      </div>
+      <div className="efficiency-chart__plot">
+        <Bar data={data} options={options} />
+      </div>
     </div>
   );
 }

@@ -8,6 +8,7 @@ import type {
 } from "../types";
 import { BetaBadge } from "./BetaBadge";
 import { WarningIcon } from "./Icons";
+import { OperationResultModal } from "./OperationResultModal";
 
 const defaultSettings: AnalyticsSettingsValue = {
   jev: { configured: false, source: null, status: "not_configured" },
@@ -19,43 +20,61 @@ function statusLabel(status: string): string {
   return status.replaceAll("_", " ").replace(/^./, (first) => first.toUpperCase());
 }
 
+interface OperationResult {
+  kind: "success" | "error";
+  message: string;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 export function AnalyticsSettings() {
   const [settings, setSettings] = useState(defaultSettings);
   const [jevKey, setJevKey] = useState("");
   const [providerKey, setProviderKey] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
-  const [notice, setNotice] = useState("");
-  const [error, setError] = useState("");
+  const [operationResult, setOperationResult] = useState<OperationResult | null>(null);
 
   useEffect(() => {
     void invoke<AnalyticsSettingsValue>("get_analytics_settings")
       .then(setSettings)
-      .catch((loadError) => setError(String(loadError)));
+      .catch((loadError) =>
+        setOperationResult({ kind: "error", message: errorMessage(loadError) }),
+      );
   }, []);
 
-  const run = useCallback(async (label: string, action: () => Promise<void>) => {
-    setBusy(label);
-    setError("");
-    setNotice("");
-    try {
-      await action();
-    } catch (actionError) {
-      setError(String(actionError));
-    } finally {
-      setBusy(null);
-    }
-  }, []);
+  const run = useCallback(
+    async (label: string, action: () => Promise<void>, successMessage?: string) => {
+      setBusy(label);
+      setOperationResult(null);
+      try {
+        await action();
+        if (successMessage) {
+          setOperationResult({ kind: "success", message: successMessage });
+        }
+      } catch (actionError) {
+        setOperationResult({ kind: "error", message: errorMessage(actionError) });
+      } finally {
+        setBusy(null);
+      }
+    },
+    [],
+  );
 
   const saveConfiguration = useCallback(
     async (next: AnalyticsSettingsValue) => {
-      await run("settings", async () => {
-        const saved = await invoke<AnalyticsSettingsValue>("set_analytics_settings", {
-          defaultPayloadMode: next.defaultPayloadMode,
-          recommendationProvider: next.recommendationProvider,
-        });
-        setSettings(saved);
-        setNotice("Analytics settings saved.");
-      });
+      await run(
+        "settings",
+        async () => {
+          const saved = await invoke<AnalyticsSettingsValue>("set_analytics_settings", {
+            defaultPayloadMode: next.defaultPayloadMode,
+            recommendationProvider: next.recommendationProvider,
+          });
+          setSettings(saved);
+        },
+        "Analytics settings saved.",
+      );
     },
     [run],
   );
@@ -125,13 +144,16 @@ export function AnalyticsSettings() {
                 className="settings-modal__btn"
                 disabled={environmentKey || !jevKey.trim() || busy !== null}
                 onClick={() =>
-                  void run("jev-key", async () => {
-                    setSettings(
-                      await invoke<AnalyticsSettingsValue>("set_jev_api_key", { key: jevKey }),
-                    );
-                    setJevKey("");
-                    setNotice("Jev API key stored in the platform credential store.");
-                  })
+                  void run(
+                    "jev-key",
+                    async () => {
+                      setSettings(
+                        await invoke<AnalyticsSettingsValue>("set_jev_api_key", { key: jevKey }),
+                      );
+                      setJevKey("");
+                    },
+                    "Jev API key stored in the platform credential store.",
+                  )
                 }
               >
                 {settings.jev.configured ? "Update" : "Save"}
@@ -141,10 +163,13 @@ export function AnalyticsSettings() {
                 className="settings-modal__btn"
                 disabled={environmentKey || !settings.jev.configured || busy !== null}
                 onClick={() =>
-                  void run("jev-clear", async () => {
-                    setSettings(await invoke<AnalyticsSettingsValue>("clear_jev_api_key"));
-                    setNotice("Stored Jev API key cleared.");
-                  })
+                  void run(
+                    "jev-clear",
+                    async () => {
+                      setSettings(await invoke<AnalyticsSettingsValue>("clear_jev_api_key"));
+                    },
+                    "Stored Jev API key cleared.",
+                  )
                 }
               >
                 Clear
@@ -160,14 +185,17 @@ export function AnalyticsSettings() {
           className="settings-modal__btn"
           disabled={!settings.jev.configured || busy !== null}
           onClick={() =>
-            void run("jev-test", async () => {
-              await invoke("test_jev_connection");
-              setSettings((current) => ({
-                ...current,
-                jev: { ...current.jev, status: "connected" },
-              }));
-              setNotice("Jev connection successful.");
-            })
+            void run(
+              "jev-test",
+              async () => {
+                await invoke("test_jev_connection");
+                setSettings((current) => ({
+                  ...current,
+                  jev: { ...current.jev, status: "connected" },
+                }));
+              },
+              "Jev connection successful.",
+            )
           }
         >
           {busy === "jev-test" ? "Testing…" : "Test Jev connection"}
@@ -331,19 +359,27 @@ export function AnalyticsSettings() {
           className="settings-modal__btn analytics-settings__test-provider"
           disabled={busy !== null}
           onClick={() =>
-            void run("provider-test", async () => {
-              await invoke("test_recommendation_provider", {
-                provider: settings.recommendationProvider,
-              });
-              setNotice("Recommendation provider connected.");
-            })
+            void run(
+              "provider-test",
+              async () => {
+                await invoke("test_recommendation_provider", {
+                  provider: settings.recommendationProvider,
+                });
+              },
+              "Recommendation provider connected.",
+            )
           }
         >
           {busy === "provider-test" ? "Testing…" : "Test recommendation provider"}
         </button>
       </section>
-      {notice && <p className="settings-modal__hint settings-modal__hint--effective">{notice}</p>}
-      {error && <p className="settings-modal__error">{error}</p>}
+      {operationResult && (
+        <OperationResultModal
+          kind={operationResult.kind}
+          message={operationResult.message}
+          onClose={() => setOperationResult(null)}
+        />
+      )}
     </div>
   );
 }

@@ -8,8 +8,8 @@ pub mod settings;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-pub const ANALYSIS_VERSION: u32 = 2;
-pub const DECISION_SET_VERSION: u32 = 2;
+pub const ANALYSIS_VERSION: u32 = 5;
+pub const DECISION_SET_VERSION: u32 = 3;
 pub const SCORE_FORMULA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -98,6 +98,19 @@ pub struct EfficiencyFinding {
     pub probability: f64,
     pub start_message_index: usize,
     pub end_message_index: usize,
+    #[serde(default)]
+    pub activity_summary: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct EfficiencyMetricEvaluation {
+    pub key: String,
+    pub label: String,
+    pub question: String,
+    pub higher_probability_is_better: bool,
+    pub probability: f64,
+    pub score: u8,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -119,6 +132,8 @@ pub struct SessionEfficiencyAnalysis {
     pub session_path: String,
     pub score: u8,
     pub dimensions: EfficiencyDimensions,
+    #[serde(default)]
+    pub metric_evaluations: Vec<EfficiencyMetricEvaluation>,
     pub findings: Vec<EfficiencyFinding>,
     pub decisions: JevEfficiencyDecision,
     pub analyzed_at: String,
