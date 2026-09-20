@@ -192,10 +192,10 @@ Select a session to view the conversation. Click messages to expand tool calls, 
 
 ### Analyze a Claude Code session with Jev
 
-1. In the desktop app, open **Settings → Analytics** and save your Jev API key to the operating system credential store. In web mode, provide `JEV_API_KEY` in the server environment; the HTTP API deliberately does not accept API-token save or clear requests.
-2. Select **Analyse efficiency** on a session.
+1. In the desktop app, open **Settings → Analytics** and save your Jev API key to the operating system credential store. In web mode, provide `JEV_API_KEY` in the server environment; the HTTP API deliberately does not accept API-token save or clear requests. The TUI is an HTTP client too, so it reads the key the same way web mode does and cannot store one.
+2. Select **Analyse efficiency** on a session. In the TUI, press `a` on a session row; `,` opens the same analytics settings.
 3. Review the locally redacted payload and explicitly confirm before it is sent.
-4. Use the efficiency dashboard and trace annotations to inspect Jev's findings.
+4. Use the efficiency dashboard and trace annotations to inspect Jev's findings. The TUI shows live analysis progress and the score on the session row; the dashboard itself is desktop and web only.
 
 The default minimized mode sends extracted behavioural signals and selected excerpts. Full-transcript mode is available when more context is needed. Re-analysis replaces the previous result for that session, and API tokens are never written to the settings file.
 

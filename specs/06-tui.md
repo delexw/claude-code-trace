@@ -130,7 +130,12 @@ graph TB
                 DB["DebugViewer (#debug)"]
             end
         end
+        IP["IndexProgressBar (#index-progress)\nheight: 1"]
         F["Footer (Textual built-in)"]
+    end
+    subgraph Modals["Modal screens (pushed over the above)"]
+        AS["AnalyticsSettingsScreen"]
+        EP["EfficiencyPrivacyScreen"]
     end
 ```
 
@@ -153,20 +158,35 @@ flowchart TD
 
 **App.BINDINGS** (in `tui-py/app.py`):
 
-| Key       | Action                            | Description   |
-| --------- | --------------------------------- | ------------- |
-| `j`       | `focused_cursor_down`             | ↓             |
-| `k`       | `focused_cursor_up`               | ↑             |
-| `enter`   | `focused_select_cursor`           | Open          |
-| `q`       | `back_or_quit`                    | priority=True |
-| `escape`  | `back_or_quit`                    | priority=True |
-| `tab`     | `toggle_expand`                   | priority=True |
-| `e`       | `expand_all`                      | priority=True |
-| `c`       | `collapse_all`                    | priority=True |
-| `g` / `G` | `jump_first` / `jump_last`        | priority=True |
-| `u` / `d` | `scroll_up` / `d_action`          | priority=True |
-| `r`       | `refresh`                         | priority=True |
-| `h` / `l` | `focus_sidebar` / `focus_content` | priority=True |
+| Key       | Action                            | Description      |
+| --------- | --------------------------------- | ---------------- |
+| `j`       | `focused_cursor_down`             | ↓                |
+| `k`       | `focused_cursor_up`               | ↑                |
+| `enter`   | `focused_select_cursor`           | Open             |
+| `q`       | `back_or_quit`                    | priority=True    |
+| `escape`  | `back_or_quit`                    | priority=True    |
+| `tab`     | `toggle_expand`                   | priority=True    |
+| `e`       | `expand_all`                      | priority=True    |
+| `c`       | `collapse_all`                    | priority=True    |
+| `g` / `G` | `jump_first` / `jump_last`        | priority=True    |
+| `u` / `d` | `scroll_up` / `d_action`          | priority=True    |
+| `r`       | `refresh`                         | priority=True    |
+| `h` / `l` | `focus_sidebar` / `focus_content` | priority=True    |
+| `y`       | `copy_resume`                     | list/detail only |
+| `a`       | `analyse_session`                 | picker only      |
+| `,`       | `analytics_settings`              | picker only      |
+
+`check_action` gates the last three. `y` needs a session in context, and the two Jev keys
+only apply where sessions are listed; keeping them off the global footer matters because it
+already overflows on narrow terminals.
+
+While a modal screen is open (`len(self.screen_stack) > 1`) `check_action` also returns
+`False` for every action in `OWN_ACTIONS` — the set derived from `BINDINGS`, so a key added
+to the table above cannot be forgotten. Without it the priority bindings would steal
+`Escape` from the modal and swallow characters (`q`, `j`, `c`) typed into its inputs. It is
+deliberately scoped to **this app's own** actions: Textual's app-level actions live on the
+same namespace, and a modal's inherited `Tab` binding runs `app.focus_next`, so disabling
+everything left the modal navigable by mouse only.
 
 Putting `j/k/Enter` at the App level (not on each list widget) ensures they
 always render in the Footer. The action methods (`action_focused_cursor_up`,
@@ -228,6 +248,33 @@ flowchart TD
 Uses `self.loading = True` (Textual's built-in `LoadingIndicator` overlay)
 while discovery / re-discovery is in flight. Loading overlay is also raised
 while a session is being loaded — see `_load_session` below.
+
+A session that has been analysed by Jev gets a third line from
+`_analysis_line(job, summary)`: the score (`% Jev 82`, coloured by the same
+bands as the web badge, `· stale` when the transcript moved on), a running
+analysis (`Analysing ██████░░░░ 65% · <phase message>`), or a failure with the
+backend's reason. `update_analysis(jobs, summaries)` re-renders only the rows
+that have analysis state — a full `populate()` would clear the list and drop
+the cursor, and a running job reports progress every second or so.
+
+---
+
+### `IndexProgressBar` (`widgets/index_progress.py`)
+
+One line between the content pane and the Footer, fed by the `index-progress`
+SSE event. Reading every session file takes minutes on a large directory; the
+picker fills in newest-first as the walk goes and this says how much is still
+to come.
+
+Measured in **bytes**, not files — one huge session among three thousand small
+ones would otherwise sit at 99% with nearly all the reading still to do. The
+label counts bytes too, so the number and the bar cannot contradict each other.
+The row is kept whether a scan is running or not (blank when idle or done), so
+starting a scan never shifts the layout above it.
+
+```text
+███░░░░░░░░░░░░░░░░░ 16%  9 sessions · 23.2 MB / 144.6 MB
+```
 
 ---
 
@@ -368,6 +415,12 @@ Keyboard navigation:
 - `Space` — expand/collapse a group node
 - `Enter` — select a project (filter sessions)
 
+`_rebuild()` re-adds every node, which would put the sidebar back at the top. It captures
+`scroll_offset` first and restores it after the selected-project highlight (which moves the
+cursor and can scroll with it), so a refresh — `r`, or a live session update, which arrives
+on its own — leaves the user where they were scrolled to. Textual clamps the offset, so a
+tree that shrank lands at its end.
+
 ---
 
 ### `InfoBar` (`widgets/info_bar.py`)
@@ -416,6 +469,69 @@ user lands on a half-built list pane.
 
 ---
 
+## Jev efficiency analysis
+
+The TUI drives the same analysis as the desktop and web clients over the same
+HTTP routes (see [14-jev-integration.md](14-jev-integration.md)). Types and
+parsers live in `tui-py/efficiency.py` — these come off the wire in camelCase,
+unlike the snake_case session types in `data_types.py`.
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant APP as CCTraceApp
+    participant API as Backend
+    participant JEV as Jev
+
+    U ->> APP: a (on a session row)
+    APP ->> API: GET /api/analytics/settings
+    alt no Jev API key
+        APP -->> U: warning toast, nothing prepared
+    else key configured
+        APP ->> API: POST /api/efficiency/prepare
+        API -->> APP: payload (built and redacted locally)
+        APP ->> U: EfficiencyPrivacyScreen (destination + exact payload)
+        U ->> APP: tick the confirmation, Send to Jev
+        APP ->> API: POST /api/efficiency/start
+        API ->> JEV: analysis request
+        API -->> APP: efficiency-analysis-update (SSE, repeatedly)
+        APP ->> API: GET /api/efficiency/summaries (on completed)
+    end
+```
+
+On start-up `_load_efficiency_state()` reads `/api/efficiency/jobs` and
+`/api/efficiency/summaries`, so analyses run from the desktop app, a browser,
+or an earlier TUI run show their score and any run still in flight.
+`latest_jobs_by_session` keeps the newest attempt per session — the backend
+keeps every attempt, and only the last one describes where a session stands.
+
+### `EfficiencyPrivacyScreen` (`widgets/efficiency_privacy.py`)
+
+The same gate as `EfficiencyPrivacyModal` on the other surfaces: where the data
+goes, what may be shared, the exact `payload.input`, and a confirmation that is
+required again for every analysis, retry, and re-analysis. Dismisses `True`
+only when the box is ticked and **Send to Jev** is pressed; `Escape` and
+**Cancel** dismiss `False` and nothing is sent.
+
+The payload preview is rendered with `markup=False`, and the destination lines
+as a Rich `Text`. Session content is full of brackets (`[src]`, JSON, shell
+flags) and Textual would otherwise parse them as markup tags and raise
+`MarkupError` while rendering.
+
+### `AnalyticsSettingsScreen` (`widgets/analytics_settings.py`)
+
+Jev key status, a **Test Jev connection** button, the default payload mode, and
+the recommendation provider (with base URL and model for an OpenAI-compatible
+endpoint). Built from settings the caller already fetched, so every control
+shows its real value on first paint.
+
+API keys cannot be entered here: the TUI reaches the backend over HTTP, which
+never accepts them — the same limit web mode has. `apiKeyConfigured` is carried
+back to the backend untouched so saving the form cannot clear a key the TUI has
+no way to re-enter.
+
+---
+
 ## SSE integration (`tui-py/sse.py`)
 
 `SSEClient` is a thin httpx-based client running on a background thread.
@@ -425,6 +541,12 @@ It maintains a per-event handler dict and dispatches each `event:` /
 Subscribed events:
 
 - `picker-refresh` — re-runs `api.discover_sessions(dirs)`.
+- `index-progress` — how much of the projects directory has been read; drives
+  `IndexProgressBar`.
+- `efficiency-analysis-update` — one Jev job's progress, from any client. Kept
+  against its session path; a `completed` status also re-reads
+  `/api/efficiency/summaries`, because the score lands in the summary, not in
+  the finished job.
 - `session-update` — a lightweight signal (count + roles, no bodies, see
   [04-http-api.md](04-http-api.md)). Calls `_on_session_update(_payload)` on
   the App, which ignores the payload and re-fetches the session via
@@ -454,14 +576,22 @@ not duplicated in the global CSS.
 
 `pytest` + `pytest-asyncio` (configured in `pytest.ini`).
 
-| File                        | Covers                                                                                                                                                                           |
-| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `test_highlight_list.py`    | `ensure_highlight` policy, disabled-row skipping, idempotence, shared highlight color resolves to `$block-cursor-blurred-background`.                                            |
-| `test_message_list.py`      | Async populate race-safety (no duplicated rows after empty→real), full-rebuild sets index=0, incremental diff preserves the user's cursor, tail append, empty-state placeholder. |
-| `test_detail_view.py`       | Bordered container, RESPONSE/STEP headings render with live counts and hide when there is no message / no items; "Input"/"Result" label is unboxed while the JSON content is.    |
-| `test_message_from_dict.py` | `message_from_dict` (the `POST /api/session/message` response parser) parses top-level fields, full tool_input/tool_result bodies on items, and nested subagent messages.        |
-| `test_load_message.py`      | `api.load_message` posts `{path, index}` to `/api/session/message` and returns `None` for an out-of-range index.                                                                 |
-| `test_session_update.py`    | `_on_session_update` re-fetches via `load_session` on the lightweight signal, is a no-op with no session open, and keeps prior messages when the re-fetch fails.                 |
+| File                                | Covers                                                                                                                                                                                                                                                    |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test_highlight_list.py`            | `ensure_highlight` policy, disabled-row skipping, idempotence, shared highlight color resolves to `$block-cursor-blurred-background`.                                                                                                                     |
+| `test_message_list.py`              | Async populate race-safety (no duplicated rows after empty→real), full-rebuild sets index=0, incremental diff preserves the user's cursor, tail append, empty-state placeholder.                                                                          |
+| `test_detail_view.py`               | Bordered container, RESPONSE/STEP headings render with live counts and hide when there is no message / no items; "Input"/"Result" label is unboxed while the JSON content is.                                                                             |
+| `test_message_from_dict.py`         | `message_from_dict` (the `POST /api/session/message` response parser) parses top-level fields, full tool_input/tool_result bodies on items, and nested subagent messages.                                                                                 |
+| `test_load_message.py`              | `api.load_message` posts `{path, index}` to `/api/session/message` and returns `None` for an out-of-range index.                                                                                                                                          |
+| `test_session_update.py`            | `_on_session_update` re-fetches via `load_session` on the lightweight signal, is a no-op with no session open, and keeps prior messages when the re-fetch fails.                                                                                          |
+| `test_format_progress.py`           | `format_bytes` units and the fixed-width, clamped block bar.                                                                                                                                                                                              |
+| `test_index_progress.py`            | Scan line: blank before a scan and once done, "Counting sessions…" before totals are known, percentage measured in bytes.                                                                                                                                 |
+| `test_efficiency_types.py`          | camelCase job/summary/settings parsing, the two provider payload shapes, newest-job-per-session, score bands.                                                                                                                                             |
+| `test_session_picker_analysis.py`   | The score / running / failed analysis line, and that `update_analysis` refreshes rows without rebuilding the list or moving the cursor.                                                                                                                   |
+| `test_efficiency_privacy.py`        | Send stays disabled until the notice is confirmed, cancel and Escape dismiss `False`, and a bracket-filled payload still renders.                                                                                                                         |
+| `test_analytics_settings_screen.py` | Controls open on the loaded values, base URL only for the OpenAI-compatible provider, a stored provider key survives a save, backend refusals are reported verbatim.                                                                                      |
+| `test_app_efficiency.py`            | `index-progress` drives the bar, job updates land against their session, nothing is prepared without a key or sent without confirmation, an open modal disarms the app's own keys but keeps `Tab` working, and app-bound letters type into a modal input. |
+| `test_project_tree_widget.py`       | A rebuild keeps the sidebar's scroll offset, clamps it when the tree shrinks, and still marks the selected project.                                                                                                                                       |
 
 Run with:
 

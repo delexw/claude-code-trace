@@ -1,7 +1,9 @@
 # Spec: Jev Efficiency Analysis Integration
 
 **Location**: `src-tauri/src/efficiency/`, `src-tauri/src/commands/efficiency.rs`,
-`src-tauri/src/credentials/api_tokens.rs`, `src/components/Efficiency*.tsx`
+`src-tauri/src/credentials/api_tokens.rs`, `src/components/Efficiency*.tsx`,
+`tui-py/efficiency.py`, `tui-py/widgets/efficiency_privacy.py`,
+`tui-py/widgets/analytics_settings.py`
 
 An **optional** integration that sends a reduced, locally redacted summary of one session to
 **Jev** (TypeSafe AI's System One model) and turns the returned answers into a 0–100
@@ -352,6 +354,20 @@ All routes sit behind `auth::require_client` on the shared API server.
 `src/lib/invoke.ts` maps each command name to its route so the React code calls one `invoke()`
 in both desktop and web mode.
 
+### Clients
+
+| Surface         | How it calls                    | Key entry                             |
+| --------------- | ------------------------------- | ------------------------------------- |
+| Desktop (Tauri) | `invoke()` → Tauri command      | yes — OS keychain                     |
+| Web (browser)   | `invoke()` → HTTP route         | no — `JEV_API_KEY` or the desktop app |
+| TUI (`tui-py/`) | `api.py` → the same HTTP routes | no — same limit as web                |
+
+The TUI is an HTTP client like the browser, so the two `desktop only` commands are out of reach
+for it: keys come from `JEV_API_KEY` or from the desktop app's credential store. Everything else —
+settings, prepare, start, jobs, summaries — is the same route the web client uses, and progress
+arrives on the same `efficiency-analysis-update` SSE event. See
+[06-tui.md](06-tui.md#jev-efficiency-analysis).
+
 ---
 
 ## Cache and Staleness (`cache.rs`)
@@ -461,7 +477,10 @@ Nothing deletes `analysis/*.json` when a session is removed. `list_summaries` re
 the cost grows with history. For a deleted session `transcript_fingerprint` errors,
 `.unwrap_or(true)` marks it stale, and the orphan row is listed forever.
 
-### 9. No TUI support
+### 9. The TUI has no dashboard and cannot cancel
 
-Zero references to Jev or efficiency in `tui-py/`. The feature exists on desktop and web only,
-against the project's multi-surface parity goal. The TUI cannot start, view, or cancel an analysis.
+The TUI can configure analytics, start an analysis behind the privacy notice, and show live
+progress and the resulting score in the session picker. It cannot open the findings dashboard
+(there is no TUI equivalent of `EfficiencyDashboardModal`) and does not bind
+`/api/efficiency/job/{id}/cancel`, so a run started from the TUI can only be cancelled from the
+desktop app or a browser.

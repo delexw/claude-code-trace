@@ -199,3 +199,34 @@ def short_mode(mode: str) -> str:
     if mode == "plan":
         return "plan"
     return mode
+
+
+# ---------------------------------------------------------------------------
+# Bytes / progress bars
+# ---------------------------------------------------------------------------
+
+
+def format_bytes(n: int) -> str:
+    """Format a byte count: 1500 -> '1.5 KB' (mirrors shared/format.ts formatBytes)."""
+    if n >= 1_000_000_000:
+        return f"{n / 1_000_000_000:.1f} GB"
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f} MB"
+    if n >= 1_000:
+        return f"{n / 1_000:.1f} KB"
+    return f"{n} B"
+
+
+BAR_FILLED = "█"
+BAR_EMPTY = "░"
+
+
+def progress_bar(percent: int, width: int = 12) -> str:
+    """Render a fixed-width block bar for a 0-100 percentage.
+
+    The percentage is clamped, so a backend reporting 120 (or a negative)
+    can never draw a bar wider than `width` or a negative slice.
+    """
+    clamped = max(0, min(100, percent))
+    filled = round(width * clamped / 100)
+    return BAR_FILLED * filled + BAR_EMPTY * (width - filled)

@@ -11,7 +11,21 @@ from textual.widgets import ListItem, Static
 
 import theme
 from data_types import Liveness, SessionInfo
-from format_utils import format_cost, format_tokens, short_model, short_path, time_ago
+from efficiency import (
+    EfficiencyJob,
+    EfficiencySummary,
+    is_running,
+    score_color,
+    status_label,
+)
+from format_utils import (
+    format_cost,
+    format_tokens,
+    progress_bar,
+    short_model,
+    short_path,
+    time_ago,
+)
 from theme import get_model_color
 from widgets.highlight_list import HighlightListView
 
@@ -21,6 +35,10 @@ ICON_BRANCH = "*"
 ICON_CHAT = "#"
 ICON_CLOCK = "~"
 ICON_SESSION = "@"
+ICON_SCORE = "%"
+
+# Narrower than the scan bar: it shares a row with the score and status text.
+ANALYSIS_BAR_WIDTH = 10
 
 
 def _liveness_badge(liveness: Liveness | None) -> str:
@@ -35,6 +53,38 @@ def _liveness_badge(liveness: Liveness | None) -> str:
         minutes = liveness.idle_seconds // 60
         return f"○ idle {minutes}m"
     return f"○ {liveness.status}"
+
+
+def _analysis_line(job: EfficiencyJob | None, summary: EfficiencySummary | None) -> Text | None:
+    """The session's Jev line: its score, a running analysis, or a failure.
+
+    Returns None for a session that has never been analysed, so untouched
+    sessions keep their two-line layout.
+    """
+    if job is None and summary is None:
+        return None
+
+    line = Text()
+    if summary is not None:
+        line.append(f"{ICON_SCORE} Jev {summary.score}", style=f"bold {score_color(summary.score)}")
+        if summary.stale:
+            line.append(" · stale", style=theme.TEXT_DIM)
+
+    if job is not None and is_running(job):
+        percent = job.progress if job.progress is not None else 0
+        if line.plain:
+            line.append("  ")
+        line.append(f"{status_label(job.status)} ", style=theme.ACCENT)
+        line.append(progress_bar(percent, ANALYSIS_BAR_WIDTH), style=theme.ACCENT)
+        line.append(f" {percent}%", style=f"bold {theme.ACCENT}")
+        if job.message:
+            line.append(f" · {job.message}", style=theme.TEXT_DIM)
+    elif job is not None and job.status == "failed" and summary is None:
+        line.append("Analysis failed", style=theme.ERROR)
+        if job.error:
+            line.append(f" · {job.error}", style=theme.TEXT_DIM)
+
+    return line if line.plain else None
 
 
 def _group_by_date(sessions: list[SessionInfo]) -> list[tuple[str, list[SessionInfo]]]:
@@ -71,7 +121,12 @@ def _group_by_date(sessions: list[SessionInfo]) -> list[tuple[str, list[SessionI
     return [(cat, groups[cat]) for cat in order if cat in groups and groups[cat]]
 
 
-def _render_session(s: SessionInfo, anim_frame: int = 0) -> object:
+def _render_session(
+    s: SessionInfo,
+    anim_frame: int = 0,
+    job: EfficiencyJob | None = None,
+    summary: EfficiencySummary | None = None,
+) -> object:
     """Render a session as a Rich Group with full-width separator."""
     model_str = short_model(s.model) if s.model else ""
     model_clr = get_model_color(s.model) if s.model else theme.TEXT_DIM
@@ -121,6 +176,9 @@ def _render_session(s: SessionInfo, anim_frame: int = 0) -> object:
     if dirs_line is not None:
         parts += ["\n", dirs_line]
     parts += ["\n", line2]
+    analysis_line = _analysis_line(job, summary)
+    if analysis_line is not None:
+        parts += ["\n", analysis_line]
     content = Text.assemble(*parts)
     sep = Rule(style=theme.TEXT_MUTED, characters="─")
     return Group(content, sep)
@@ -148,6 +206,8 @@ class SessionPicker(HighlightListView):
         self._loading: bool = True
         self._error: str = ""
         self._anim_frame: int = 0
+        self._jobs: dict[str, EfficiencyJob] = {}
+        self._summaries: dict[str, EfficiencySummary] = {}
 
     def on_mount(self) -> None:
         self.set_interval(0.5, self._spin)
@@ -168,9 +228,17 @@ class SessionPicker(HighlightListView):
         try:
             item = self._nodes[raw_idx]
             static = item.query_one(Static)
-            static.update(_render_session(session, self._anim_frame))
+            static.update(self._render_row(session))
         except Exception:
             pass
+
+    def _render_row(self, session: SessionInfo) -> object:
+        return _render_session(
+            session,
+            self._anim_frame,
+            job=self._jobs.get(session.path),
+            summary=self._summaries.get(session.path),
+        )
 
     # ----------------------------------------------------------------
     # Public API
@@ -181,11 +249,15 @@ class SessionPicker(HighlightListView):
         sessions: list[SessionInfo],
         loading: bool,
         error: str,
+        jobs: dict[str, EfficiencyJob] | None = None,
+        summaries: dict[str, EfficiencySummary] | None = None,
     ) -> None:
         """Rebuild the list contents."""
         self._loading = loading
         self._error = error
         self._index_to_session = {}
+        self._jobs = jobs or {}
+        self._summaries = summaries or {}
 
         # Eagerly clear so neither stale sessions nor the previous overlay
         # sit under the new state.
@@ -224,13 +296,28 @@ class SessionPicker(HighlightListView):
             raw_idx += 1
 
             for s in group_sessions:
-                renderable = _render_session(s, self._anim_frame)
-                self.append(ListItem(Static(renderable)))
+                self.append(ListItem(Static(self._render_row(s))))
                 self._index_to_session[raw_idx] = s
                 raw_idx += 1
 
         # Pick the first selectable row (HighlightListView skips disabled headers).
         self.ensure_highlight()
+
+    def update_analysis(
+        self,
+        jobs: dict[str, EfficiencyJob],
+        summaries: dict[str, EfficiencySummary],
+    ) -> None:
+        """Re-render only the rows with analysis state.
+
+        A full populate() would clear the list and drop the cursor, and job
+        progress arrives every second or so while an analysis runs.
+        """
+        self._jobs = jobs
+        self._summaries = summaries
+        for raw_idx, session in self._index_to_session.items():
+            if session.path in jobs or session.path in summaries:
+                self._refresh_item(raw_idx, session)
 
     def session_at_raw_index(self, raw_idx: int) -> SessionInfo | None:
         """Return the SessionInfo at the given raw ListView node index.

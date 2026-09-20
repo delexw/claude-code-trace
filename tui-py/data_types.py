@@ -257,6 +257,28 @@ class FlatItem:
 
 
 # ---------------------------------------------------------------------------
+# IndexProgress (session scan)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class IndexProgress:
+    """How far the backend's walk of the project directories has got.
+
+    Broadcast as the `index-progress` SSE event while sessions are being
+    read. Measured in bytes as well as files because one huge session and a
+    thousand small ones would otherwise sit at 99% with most of the reading
+    still to do.
+    """
+
+    files_read: int = 0
+    total_files: int = 0
+    bytes_read: int = 0
+    total_bytes: int = 0
+    done: bool = False
+
+
+# ---------------------------------------------------------------------------
 # JSON deserialisation helpers
 # ---------------------------------------------------------------------------
 
@@ -436,4 +458,14 @@ def debug_entry_from_dict(d: dict) -> DebugEntry:
         extra=d.get("extra", ""),
         line_num=int(d.get("line_num", 0)),
         count=int(d.get("count", 1)),
+    )
+
+
+def index_progress_from_dict(d: dict) -> IndexProgress:
+    return IndexProgress(
+        files_read=int(d.get("files_read", 0)),
+        total_files=int(d.get("total_files", 0)),
+        bytes_read=int(d.get("bytes_read", 0)),
+        total_bytes=int(d.get("total_bytes", 0)),
+        done=bool(d.get("done", False)),
     )
