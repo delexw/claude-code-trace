@@ -134,6 +134,8 @@ pub fn extract_input(
     let mut failed_tool_calls = 0;
     let mut min_context = i64::MAX;
     let mut max_context = 0;
+    let mut thinking_blocks = 0;
+    let mut thinking_chars = 0_i64;
 
     for (message_index, message) in messages.iter().enumerate() {
         if message.context_tokens > 0 {
@@ -141,6 +143,10 @@ pub fn extract_input(
             max_context = max_context.max(message.context_tokens);
         }
         for item in &message.items {
+            if item.item_type == "Thinking" {
+                thinking_blocks += 1;
+                thinking_chars += item.text.chars().count() as i64;
+            }
             // A Task/Agent spawn is a `Subagent` item, not a `ToolCall`. Skipping
             // those hid every subagent from the payload: a session could run 100 of
             // them and still report subagentCount 0, so `subagentsUseful` was
@@ -235,6 +241,8 @@ pub fn extract_input(
             } else {
                 max_context.saturating_sub(min_context)
             },
+            thinking_blocks,
+            thinking_chars,
         },
         actions,
         selected_excerpts,
@@ -328,6 +336,62 @@ mod tests {
 
     fn plain(role: &str, content: &str) -> DisplayMessage {
         message(role, content, None)
+    }
+
+    fn thinking_message(texts: &[&str]) -> DisplayMessage {
+        let mut m = plain("claude", "");
+        m.thinking_count = texts.len();
+        m.items = texts
+            .iter()
+            .map(|text| {
+                let mut item = message("claude", "", Some("Read")).items.remove(0);
+                item.item_type = "Thinking".into();
+                item.text = (*text).into();
+                item.tool_name = String::new();
+                item.tool_summary = String::new();
+                item.tool_category = String::new();
+                item
+            })
+            .collect();
+        m
+    }
+
+    #[test]
+    fn thinking_volume_reaches_jev_without_the_thinking_text() {
+        let input = extract_input(
+            &[
+                plain("user", "do it"),
+                thinking_message(&["weighing the options", "still weighing"]),
+                plain("claude", "done"),
+                thinking_message(&["one more thought"]),
+            ],
+            0,
+            PayloadMode::Minimized,
+        );
+
+        assert_eq!(input.signals.thinking_blocks, 3);
+        assert_eq!(input.signals.thinking_chars, 20 + 14 + 16);
+        let payload = serde_json::to_string(&input).unwrap();
+        assert!(
+            !payload.contains("weighing the options"),
+            "thinking text must never leave the device; got {payload}"
+        );
+    }
+
+    #[test]
+    fn a_thinking_block_is_not_counted_as_a_tool_call() {
+        let input = extract_input(&[thinking_message(&["hmm"])], 0, PayloadMode::Minimized);
+        assert_eq!(input.signals.tool_calls, 0);
+        assert!(input.actions.is_empty());
+    }
+
+    #[test]
+    fn redacted_thinking_still_counts_as_a_block() {
+        // Claude Code writes the block with an encrypted signature and empty text,
+        // so a chars-only signal would report a heavy-thinking session as zero.
+        let input = extract_input(&[thinking_message(&["", ""])], 0, PayloadMode::Minimized);
+        assert_eq!(input.signals.thinking_blocks, 2);
+        assert_eq!(input.signals.thinking_chars, 0);
     }
 
     #[test]

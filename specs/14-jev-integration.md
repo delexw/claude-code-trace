@@ -4,12 +4,15 @@
 `src-tauri/src/credentials/api_tokens.rs`, `src/components/Efficiency*.tsx`
 
 An **optional** integration that sends a reduced, locally redacted summary of one session to
-**Jev** (TypeSafe AI's System One model) and turns the returned probabilities into a 0–100
-efficiency score, six dimension scores, and trace-linked findings.
+**Jev** (TypeSafe AI's System One model) and turns the returned answers into a 0–100
+efficiency score, seven dimension scores, and trace-linked findings.
 
-Jev answers **typed probability questions** ("noul" answers, a float in `0.0..=1.0`) rather
-than generating prose. Every number in the dashboard is derived arithmetically from those
-probabilities — the model never writes a sentence that reaches the UI.
+Jev answers **typed questions** rather than generating prose. Two of the three System One
+question types are used: a **noul** (a float in `0.0..=1.0`, the probability a statement is
+true) for every yes/no judgement, and a **score** (a probability-weighted position along
+ordered levels) for the one judgement that is two-sided. Every number in the dashboard is
+derived arithmetically from those answers — the model never writes a sentence that reaches
+the UI.
 
 The feature is inert until a Jev API key is configured. No analysis is ever sent without an
 explicit per-request user confirmation.
@@ -37,7 +40,7 @@ graph TB
     JSONL --> BUILD --> EXTRACT --> REDACT --> MODAL
     MODAL -->|"user ticks the confirmation box"| JEV
     KEY -->|"Bearer"| JEV
-    JEV -->|"answers{key: {noul}}"| PARSE["jev::parse\nmetric_evaluations + findings"]
+    JEV -->|"answers: noul or score"| PARSE["jev::parse\nmetric_evaluations + findings"]
     PARSE --> SCORE["score::build_analysis\ndimensions + weighted score"]
     SCORE --> CACHE
     CACHE --> PANEL["EfficiencyPanel / DashboardModal"]
@@ -53,7 +56,7 @@ graph TB
 | `extract.rs`  | `DisplayMessage[]` → `EfficiencyInput` (task, actions, signals, excerpts)          |
 | `redact.rs`   | Regex scrubbing of secrets and the user's home path, in place on `EfficiencyInput` |
 | `jev.rs`      | Question construction, HTTP call, response validation, findings derivation         |
-| `score.rs`    | Probabilities → six dimensions → one weighted 0–100 score                          |
+| `score.rs`    | Answers → seven dimensions → one weighted 0–100 score                              |
 | `cache.rs`    | SHA-256 transcript fingerprint, on-disk analysis cache, staleness                  |
 | `settings.rs` | Payload mode, recommendation provider, provider guardrails for Docker and web      |
 
@@ -67,7 +70,7 @@ graph TB
 | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | `task`             | First user message (≤1200 chars), turn count, summed duration, total tokens                                                                |
 | `actions[]`        | One entry per `ToolCall` **and `Subagent`** item: message index, tool, category, summary (≤500), duration, error flag, repeated-call count |
-| `signals`          | Tool-call count, failed calls, repeated calls, subagent count, context growth                                                              |
+| `signals`          | Tool-call count, failed calls, repeated calls, subagent count, context growth, thinking blocks, thinking chars                             |
 | `selectedExcerpts` | Role-prefixed message text                                                                                                                 |
 
 `actions[].index` is the **Trace message index**, kept stable so a finding can scroll the
@@ -161,28 +164,58 @@ proof, since an identical call is legitimate once the state it reads has changed
 (`the_redundant_work_question_defines_what_counts_and_what_does_not`) pins both the base and window
 wording so the rule cannot be silently dropped.
 
-### Nine base metrics
+### Ten base metrics
 
 `BASE_METRICS` is the single source of truth: it generates both the request's questions **and**
 the dashboard's `metricEvaluations`, so the label a user reads is the question the model answered.
+Each entry also declares its `MetricAnswer` — `Noul` or `Rubric` — which decides both the question
+type sent and how the answer becomes a bar.
 
-| Key                      | Label                     | Higher is better |
-| ------------------------ | ------------------------- | ---------------- |
-| `progressingEfficiently` | Progress                  | yes              |
-| `toolCallsUseful`        | Useful tool calls         | yes              |
-| `redundantWorkPresent`   | Avoided redundant work    | **no**           |
-| `excessiveExploration`   | Proportionate exploration | **no**           |
-| `likelyThrashing`        | Avoided thrashing         | **no**           |
-| `effectiveRecovery`      | Effective recovery        | yes              |
-| `tokenUsageEfficient`    | Efficient token use       | yes              |
-| `subagentsUseful`        | Useful subagents          | yes              |
-| `likelyTaskCompleted`    | Task completion           | yes              |
+| Key                      | Label                     | Answer | Higher is better |
+| ------------------------ | ------------------------- | ------ | ---------------- |
+| `progressingEfficiently` | Progress                  | noul   | yes              |
+| `toolCallsUseful`        | Useful tool calls         | noul   | yes              |
+| `redundantWorkPresent`   | Avoided redundant work    | noul   | **no**           |
+| `excessiveExploration`   | Proportionate exploration | noul   | **no**           |
+| `likelyThrashing`        | Avoided thrashing         | noul   | **no**           |
+| `effectiveRecovery`      | Effective recovery        | noul   | yes              |
+| `tokenUsageEfficient`    | Efficient token use       | noul   | yes              |
+| `thinkingBalance`        | Balanced thinking         | score  | n/a — two-sided  |
+| `subagentsUseful`        | Useful subagents          | noul   | yes              |
+| `likelyTaskCompleted`    | Task completion           | noul   | yes              |
 
 For a `higher_probability_is_better: false` metric the **displayed** score is `1 − p`, so every
 tile in the dashboard reads "higher is better".
 
 The token question explicitly instructs the model to judge resource efficiency only and **not**
 to estimate monetary cost. A test asserts the serialised request body contains no "cost" string.
+
+### Why thinking is a score and not a noul
+
+"Was the amount of thinking proportionate?" has two failure directions, and a single probability
+cannot carry them: `0.3` says the deliberation was disproportionate without saying whether there
+was too much of it or too little, which are opposite fixes. `thinkingBalance` is therefore sent as
+a **Score** question with five ordered `criteria`, `THINKING_LEVELS`:
+
+| Position | Level                                                  |
+| -------- | ------------------------------------------------------ |
+| 0        | Far too little thinking for the difficulty of the work |
+| 1        | A little less thinking than the work needed            |
+| 2        | Thinking matched the difficulty of the work            |
+| 3        | A little more thinking than the work needed            |
+| 4        | Far more thinking than the work needed                 |
+
+Jev returns a probability-weighted `score` that can land between levels. `thinking_balance()`
+folds that position into `0..1` around the middle level, so equal distance in either direction
+costs the same, and the level it landed on travels to the UI in
+`metricEvaluations[].scale` — otherwise the bar would say "unbalanced" without saying which way.
+
+**The thinking text itself is never sent.** Only `thinkingBlocks` and `thinkingChars` go out, and
+the question tells the model to weigh that volume against the turns, duration, tokens and tool
+calls already in the payload. There is deliberately **no per-turn ratio**: `DisplayMessage` is a
+chunked turn group, not one API turn, so a real session sending 60 thinking blocks reports only 4
+`claude` messages and any turn-based denominator would understate the rate by an order of
+magnitude.
 
 ### Window questions
 
@@ -197,10 +230,10 @@ so the model cannot drift outside its window.
 
 ```mermaid
 flowchart TB
-    ANS["answers{key: {noul}}"]
-    ANS --> VAL{"finite and\n0.0 ≤ p ≤ 1.0?"}
+    ANS["answers: noul or score"]
+    ANS --> VAL{"in range?\nnoul 0.0-1.0\nscore 0-4"}
     VAL -->|"no, or key missing"| ERR["Err — whole analysis fails"]
-    VAL -->|"yes"| BASE["9 base decisions"]
+    VAL -->|"yes"| BASE["10 base decisions"]
     ANS --> WIN{"window answer\np ≥ 0.65?"}
     WIN -->|"yes"| F["EfficiencyFinding\nspanning first..last action index"]
     ACT["≥2 errored actions\nin one window"] --> FR["FailedRetries finding\np = min(0.6 + 0.1·failed, 0.95)"]
@@ -221,10 +254,14 @@ job reports "Efficiency analysis failed" rather than scoring a partial response.
 | `progress`    | `progressingEfficiently`                            | 0.25   |
 | `toolUse`     | `toolCallsUseful`                                   | 0.20   |
 | `focus`       | `1 − (redundantWorkPresent + likelyThrashing) / 2`  | 0.15   |
-| `tokenUse`    | `tokenUsageEfficient`                               | 0.15   |
+| `tokenUse`    | `tokenUsageEfficient`                               | 0.10   |
 | `exploration` | `1 − excessiveExploration`                          | 0.10   |
 | `recovery`    | `effectiveRecovery`                                 | 0.10   |
+| `thinking`    | `thinking_balance(thinkingBalance)`                 | 0.05   |
 | —             | `likelyTaskCompleted` (score only, not a dimension) | 0.05   |
+
+`thinking` takes its 0.05 from `tokenUse`, which drops from 0.15, keeping the resource-efficiency
+share of the score at 0.15 and leaving every behavioural weight untouched.
 
 Weights total **1.00**. The result is rounded and clamped to `0..=100`.
 
@@ -325,9 +362,9 @@ hash, so the cache directory never discloses which sessions were analysed** — 
 An analysis is marked `stale` when any of these differ from the current values:
 
 - `transcriptFingerprint` — SHA-256 of the whole transcript, streamed in 64 KiB chunks
-- `analysisVersion` (7) — payload/pipeline shape
-- `decisionSetVersion` (4) — the set of questions asked
-- `scoreFormulaVersion` (2) — the weighting
+- `analysisVersion` (8) — payload/pipeline shape
+- `decisionSetVersion` (5) — the set of questions asked
+- `scoreFormulaVersion` (3) — the weighting
 
 Bumping any constant invalidates every cached analysis without a migration. `EfficiencyPanel`
 additionally treats `currentTurns !== analyzedTurns` as changed, so a session that grew since its

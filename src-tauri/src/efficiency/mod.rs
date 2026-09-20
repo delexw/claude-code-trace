@@ -8,9 +8,9 @@ pub mod settings;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-pub const ANALYSIS_VERSION: u32 = 7;
-pub const DECISION_SET_VERSION: u32 = 4;
-pub const SCORE_FORMULA_VERSION: u32 = 2;
+pub const ANALYSIS_VERSION: u32 = 8;
+pub const DECISION_SET_VERSION: u32 = 5;
+pub const SCORE_FORMULA_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -42,6 +42,10 @@ pub struct EfficiencySignals {
     pub repeated_tool_calls: usize,
     pub subagent_count: usize,
     pub context_growth: i64,
+    #[serde(default)]
+    pub thinking_blocks: usize,
+    #[serde(default)]
+    pub thinking_chars: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -75,6 +79,10 @@ pub struct JevEfficiencyDecision {
     pub effective_recovery: f64,
     #[serde(default)]
     pub token_usage_efficient: f64,
+    /// Position along [`jev::THINKING_LEVELS`], not a probability: the middle
+    /// level means the amount of thinking matched the work.
+    #[serde(default = "jev::balanced_thinking_position")]
+    pub thinking_balance: f64,
     pub subagents_useful: f64,
     pub likely_task_completed: f64,
 }
@@ -109,8 +117,22 @@ pub struct EfficiencyMetricEvaluation {
     pub label: String,
     pub question: String,
     pub higher_probability_is_better: bool,
+    /// Yes/no metrics: the probability the statement is true. Rubric metrics:
+    /// the probability mass Jev put on the level it reported.
     pub probability: f64,
     pub score: u8,
+    /// Present only for rubric metrics, where the answer is a position along
+    /// ordered levels rather than a yes/no probability.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scale: Option<EfficiencyMetricScale>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct EfficiencyMetricScale {
+    pub levels: Vec<String>,
+    pub position: f64,
+    pub level: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -123,6 +145,8 @@ pub struct EfficiencyDimensions {
     pub recovery: u8,
     #[serde(default)]
     pub token_use: u8,
+    #[serde(default)]
+    pub thinking: u8,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

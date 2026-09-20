@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use super::{
     EfficiencyFinding, EfficiencyFindingType, EfficiencyInput, EfficiencyMetricEvaluation,
-    JevEfficiencyDecision,
+    EfficiencyMetricScale, JevEfficiencyDecision,
 };
 
 const JEV_ENDPOINT: &str = "https://api.typesafe.ai/v1/systemone";
@@ -31,92 +31,164 @@ pub fn destination() -> JevDestination {
     }
 }
 
+/// How Jev is asked to answer one metric.
+///
+/// `Noul` is a yes/no probability. `Rubric` is a Score question: Jev places the
+/// session along ordered levels and returns a weighted position, so a two-sided
+/// judgement keeps its direction instead of collapsing into one probability.
+enum MetricAnswer {
+    Noul,
+    Rubric(&'static [&'static str]),
+}
+
 struct BaseMetricDefinition {
     key: &'static str,
     label: &'static str,
     question: &'static str,
     higher_probability_is_better: bool,
+    answer: MetricAnswer,
 }
 
-const BASE_METRICS: [BaseMetricDefinition; 9] = [
+pub const THINKING_LEVELS: [&str; 5] = [
+    "Far too little thinking for the difficulty of the work",
+    "A little less thinking than the work needed",
+    "Thinking matched the difficulty of the work",
+    "A little more thinking than the work needed",
+    "Far more thinking than the work needed",
+];
+
+/// The rubric position that means the amount of thinking matched the work.
+pub fn balanced_thinking_position() -> f64 {
+    (THINKING_LEVELS.len() - 1) as f64 / 2.0
+}
+
+/// Turn a rubric position into a 0..1 "how balanced" value, penalising a session
+/// the same amount whether it thought too little or too much.
+pub fn thinking_balance(position: f64) -> f64 {
+    let middle = balanced_thinking_position();
+    (1.0 - (position.clamp(0.0, middle * 2.0) - middle).abs() / middle).clamp(0.0, 1.0)
+}
+
+const BASE_METRICS: [BaseMetricDefinition; 10] = [
     BaseMetricDefinition {
         key: "progressingEfficiently",
         label: "Progress",
         question: "Did the agent make steady, meaningful progress toward the user's task?",
         higher_probability_is_better: true,
+        answer: MetricAnswer::Noul,
     },
     BaseMetricDefinition {
         key: "toolCallsUseful",
         label: "Useful tool calls",
         question: "Were the tool calls useful and proportionate to completing the task?",
         higher_probability_is_better: true,
+        answer: MetricAnswer::Noul,
     },
     BaseMetricDefinition {
         key: "redundantWorkPresent",
         label: "Avoided redundant work",
         question: "Was materially redundant work present? An action is redundant only when it repeats earlier work whose result could not have changed, because nothing relevant was modified in between — for example re-reading an unchanged file, or re-running the same search after no edits. Do NOT count: re-running a command after a change that could alter its result, such as re-running tests or a build after an edit; the same tool applied to a different target or different input; or a retry after an error or interruption. Each entry in state.actions carries repeatedSimilarCallCount, the number of other actions with the identical tool and input; treat that as evidence, not proof, since an identical call can still be legitimate once the state it reads has changed.",
         higher_probability_is_better: false,
+        answer: MetricAnswer::Noul,
     },
     BaseMetricDefinition {
         key: "excessiveExploration",
         label: "Proportionate exploration",
         question: "Was exploration excessive relative to the task?",
         higher_probability_is_better: false,
+        answer: MetricAnswer::Noul,
     },
     BaseMetricDefinition {
         key: "likelyThrashing",
         label: "Avoided thrashing",
         question: "Did the agent cycle among similar actions without meaningful progress?",
         higher_probability_is_better: false,
+        answer: MetricAnswer::Noul,
     },
     BaseMetricDefinition {
         key: "effectiveRecovery",
         label: "Effective recovery",
         question: "When mistakes or failures occurred, did the agent recover effectively?",
         higher_probability_is_better: true,
+        answer: MetricAnswer::Noul,
     },
     BaseMetricDefinition {
         key: "tokenUsageEfficient",
         label: "Efficient token use",
         question: "Was token usage efficient for the work completed? Consider total tokens, context growth, turn count, repeated work, and tool activity. Judge resource efficiency only; do not estimate or consider monetary cost.",
         higher_probability_is_better: true,
+        answer: MetricAnswer::Noul,
+    },
+    BaseMetricDefinition {
+        key: "thinkingBalance",
+        label: "Balanced thinking",
+        question: "Rate the amount of extended thinking the agent did against what the work actually required. state.signals reports thinkingBlocks (how many extended-thinking blocks the agent produced) and thinkingChars (their combined length); weigh those against the work actually done, which state.task and the rest of state.signals describe as turns, duration, total tokens, and tool calls. The thinking text itself is never shared, so judge the volume against the difficulty of the task and against what the agent did next. Too little thinking shows up as avoidable mistakes, rework, wrong paths, or failed tool calls on steps that needed planning. Too much shows up as long or frequent deliberation on work that was simple, mechanical, or already decided — for example thinking at length before a single trivial read, or re-deliberating a choice the user had already made. A genuinely hard, ambiguous, or high-risk task warrants heavy thinking, and a quick answer to simple, well-specified work is correct. Judge the amount against the work, not against a fixed budget.",
+        higher_probability_is_better: true,
+        answer: MetricAnswer::Rubric(&THINKING_LEVELS),
     },
     BaseMetricDefinition {
         key: "subagentsUseful",
         label: "Useful subagents",
         question: "If subagents were used, did they add useful independent work? Answer yes when no subagents were needed or used.",
         higher_probability_is_better: true,
+        answer: MetricAnswer::Noul,
     },
     BaseMetricDefinition {
         key: "likelyTaskCompleted",
         label: "Task completion",
         question: "Does the trace indicate that the user's requested task was completed successfully?",
         higher_probability_is_better: true,
+        answer: MetricAnswer::Noul,
     },
 ];
 
 #[derive(Serialize)]
-struct NoulQuestion {
+struct JevQuestion {
     #[serde(rename = "type")]
     question_type: &'static str,
     instructions: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    criteria: Option<&'static [&'static str]>,
+}
+
+impl JevQuestion {
+    fn noul(instructions: String) -> Self {
+        Self {
+            question_type: "noul",
+            instructions,
+            criteria: None,
+        }
+    }
+
+    fn rubric(instructions: String, criteria: &'static [&'static str]) -> Self {
+        Self {
+            question_type: "score",
+            instructions,
+            criteria: Some(criteria),
+        }
+    }
 }
 
 #[derive(Serialize)]
 struct JevRequest<'a> {
     model: &'static str,
     state: &'a EfficiencyInput,
-    questions: HashMap<String, NoulQuestion>,
+    questions: HashMap<String, JevQuestion>,
 }
 
-#[derive(Debug, Deserialize)]
-struct NoulAnswer {
-    noul: f64,
+#[derive(Debug, Default, Deserialize)]
+struct JevAnswer {
+    #[serde(default)]
+    noul: Option<f64>,
+    #[serde(default)]
+    score: Option<f64>,
+    #[serde(default)]
+    probabilities: HashMap<String, f64>,
 }
 
 #[derive(Debug, Deserialize)]
 struct JevResponse {
-    answers: HashMap<String, NoulAnswer>,
+    answers: HashMap<String, JevAnswer>,
 }
 
 pub struct JevAnalysisResult {
@@ -132,17 +204,17 @@ fn client() -> Result<reqwest::Client, String> {
         .map_err(|error| error.to_string())
 }
 
-fn questions(input: &EfficiencyInput) -> HashMap<String, NoulQuestion> {
+fn questions(input: &EfficiencyInput) -> HashMap<String, JevQuestion> {
     let mut questions = BASE_METRICS
         .iter()
         .map(|metric| {
-            (
-                metric.key.to_string(),
-                NoulQuestion {
-                    question_type: "noul",
-                    instructions: metric.question.to_string(),
-                },
-            )
+            let question = match metric.answer {
+                MetricAnswer::Noul => JevQuestion::noul(metric.question.to_string()),
+                MetricAnswer::Rubric(criteria) => {
+                    JevQuestion::rubric(metric.question.to_string(), criteria)
+                }
+            };
+            (metric.key.to_string(), question)
         })
         .collect::<HashMap<_, _>>();
     for (window, actions) in input
@@ -177,56 +249,94 @@ fn questions(input: &EfficiencyInput) -> HashMap<String, NoulQuestion> {
         ] {
             questions.insert(
                 format!("window_{window}_{kind}"),
-                NoulQuestion {
-                    question_type: "noul",
-                    instructions: format!(
-                        "Evaluate only state.actions at zero-based positions {first_action_position} through {last_action_position}. Ignore every action outside that range. {prompt}"
-                    ),
-                },
+                JevQuestion::noul(format!(
+                    "Evaluate only state.actions at zero-based positions {first_action_position} through {last_action_position}. Ignore every action outside that range. {prompt}"
+                )),
             );
         }
     }
     questions
 }
 
-fn probability(answers: &HashMap<String, NoulAnswer>, key: &str) -> Result<f64, String> {
+fn probability(answers: &HashMap<String, JevAnswer>, key: &str) -> Result<f64, String> {
     let value = answers
         .get(key)
-        .ok_or_else(|| format!("Jev response omitted decision {key}"))?
-        .noul;
+        .and_then(|answer| answer.noul)
+        .ok_or_else(|| format!("Jev response omitted decision {key}"))?;
     if !value.is_finite() || !(0.0..=1.0).contains(&value) {
         return Err(format!("Jev returned an invalid probability for {key}"));
     }
     Ok(value)
 }
 
+/// Read a Score answer as a position along its ordered levels.
+fn rubric_position(
+    answers: &HashMap<String, JevAnswer>,
+    key: &str,
+    levels: usize,
+) -> Result<f64, String> {
+    let value = answers
+        .get(key)
+        .and_then(|answer| answer.score)
+        .ok_or_else(|| format!("Jev response omitted decision {key}"))?;
+    let highest = (levels - 1) as f64;
+    if !value.is_finite() || !(0.0..=highest).contains(&value) {
+        return Err(format!("Jev returned an invalid score for {key}"));
+    }
+    Ok(value)
+}
+
 fn metric_evaluations(
-    answers: &HashMap<String, NoulAnswer>,
+    answers: &HashMap<String, JevAnswer>,
 ) -> Result<Vec<EfficiencyMetricEvaluation>, String> {
     BASE_METRICS
         .iter()
-        .map(|metric| {
-            let probability = probability(answers, metric.key)?;
-            let displayed_probability = if metric.higher_probability_is_better {
-                probability
-            } else {
-                1.0 - probability
-            };
-            Ok(EfficiencyMetricEvaluation {
-                key: metric.key.to_string(),
-                label: metric.label.to_string(),
-                question: metric.question.to_string(),
-                higher_probability_is_better: metric.higher_probability_is_better,
-                probability,
-                score: (displayed_probability.clamp(0.0, 1.0) * 100.0).round() as u8,
-            })
+        .map(|metric| match metric.answer {
+            MetricAnswer::Noul => {
+                let probability = probability(answers, metric.key)?;
+                let displayed_probability = if metric.higher_probability_is_better {
+                    probability
+                } else {
+                    1.0 - probability
+                };
+                Ok(EfficiencyMetricEvaluation {
+                    key: metric.key.to_string(),
+                    label: metric.label.to_string(),
+                    question: metric.question.to_string(),
+                    higher_probability_is_better: metric.higher_probability_is_better,
+                    probability,
+                    score: (displayed_probability.clamp(0.0, 1.0) * 100.0).round() as u8,
+                    scale: None,
+                })
+            }
+            MetricAnswer::Rubric(levels) => {
+                let position = rubric_position(answers, metric.key, levels.len())?;
+                let landed = position.round() as usize;
+                Ok(EfficiencyMetricEvaluation {
+                    key: metric.key.to_string(),
+                    label: metric.label.to_string(),
+                    question: metric.question.to_string(),
+                    higher_probability_is_better: metric.higher_probability_is_better,
+                    probability: answers
+                        .get(metric.key)
+                        .and_then(|answer| answer.probabilities.get(&landed.to_string()))
+                        .copied()
+                        .unwrap_or_default(),
+                    score: (thinking_balance(position) * 100.0).round() as u8,
+                    scale: Some(EfficiencyMetricScale {
+                        levels: levels.iter().map(|level| (*level).to_string()).collect(),
+                        position,
+                        level: levels.get(landed).copied().unwrap_or_default().to_string(),
+                    }),
+                })
+            }
         })
         .collect()
 }
 
 fn findings(
     input: &EfficiencyInput,
-    answers: &HashMap<String, NoulAnswer>,
+    answers: &HashMap<String, JevAnswer>,
 ) -> Vec<EfficiencyFinding> {
     let mut findings = Vec::new();
     for (window, actions) in input
@@ -246,13 +356,16 @@ fn findings(
             ("recovery", EfficiencyFindingType::Recovery),
             ("subagent", EfficiencyFindingType::UsefulSubagent),
         ] {
-            let Some(answer) = answers.get(&format!("window_{window}_{suffix}")) else {
+            let Some(noul) = answers
+                .get(&format!("window_{window}_{suffix}"))
+                .and_then(|answer| answer.noul)
+            else {
                 continue;
             };
-            if answer.noul >= 0.65 {
+            if noul >= 0.65 {
                 findings.push(EfficiencyFinding {
                     finding_type,
-                    probability: answer.noul,
+                    probability: noul,
                     start_message_index: first.index,
                     end_message_index: last.index,
                     activity_summary: String::new(),
@@ -362,6 +475,7 @@ fn parse(input: &EfficiencyInput, response: JevResponse) -> Result<JevAnalysisRe
         likely_thrashing: probability(&answers, "likelyThrashing")?,
         effective_recovery: probability(&answers, "effectiveRecovery")?,
         token_usage_efficient: probability(&answers, "tokenUsageEfficient")?,
+        thinking_balance: rubric_position(&answers, "thinkingBalance", THINKING_LEVELS.len())?,
         subagents_useful: probability(&answers, "subagentsUseful")?,
         likely_task_completed: probability(&answers, "likelyTaskCompleted")?,
     };
@@ -450,6 +564,34 @@ mod tests {
         );
     }
 
+    fn noul(value: f64) -> JevAnswer {
+        JevAnswer {
+            noul: Some(value),
+            ..Default::default()
+        }
+    }
+
+    fn rubric(position: f64) -> JevAnswer {
+        JevAnswer {
+            score: Some(position),
+            probabilities: HashMap::from([(position.round().to_string(), 0.8)]),
+            ..Default::default()
+        }
+    }
+
+    fn every_answer(value: f64, position: f64) -> HashMap<String, JevAnswer> {
+        BASE_METRICS
+            .iter()
+            .map(|metric| {
+                let answer = match metric.answer {
+                    MetricAnswer::Noul => noul(value),
+                    MetricAnswer::Rubric(_) => rubric(position),
+                };
+                (metric.key.to_string(), answer)
+            })
+            .collect()
+    }
+
     fn empty_input() -> EfficiencyInput {
         EfficiencyInput {
             task: EfficiencyTask {
@@ -465,6 +607,8 @@ mod tests {
                 repeated_tool_calls: 0,
                 subagent_count: 0,
                 context_growth: 0,
+                thinking_blocks: 0,
+                thinking_chars: 0,
             },
             selected_excerpts: vec![],
         }
@@ -508,10 +652,129 @@ mod tests {
     }
 
     #[test]
+    fn thinking_is_asked_as_an_ordered_rubric_not_a_yes_no() {
+        // "Was thinking proportionate?" as one probability cannot say which way a
+        // session went wrong. A Score question keeps the direction: below the
+        // middle level is too little, above it is too much.
+        let metric = BASE_METRICS
+            .iter()
+            .find(|m| m.key == "thinkingBalance")
+            .expect("metric exists");
+        let MetricAnswer::Rubric(levels) = metric.answer else {
+            panic!("thinking must be a rubric, not a noul");
+        };
+
+        assert_eq!(metric.label, "Balanced thinking");
+        assert_eq!(levels.len(), 5);
+        assert!(
+            levels[2].contains("matched"),
+            "the middle level is balanced"
+        );
+        assert!(levels[0].contains("too little"));
+        assert!(levels[4].contains("more"));
+        for required in [
+            "thinkingBlocks",
+            "thinkingChars",
+            "difficulty",
+            "tool calls",
+        ] {
+            assert!(
+                metric.question.contains(required),
+                "the rubric question must reference {required:?}"
+            );
+        }
+
+        let question = &questions(&empty_input())["thinkingBalance"];
+        assert_eq!(question.question_type, "score");
+        assert_eq!(question.criteria, Some(&THINKING_LEVELS[..]));
+    }
+
+    #[test]
+    fn only_the_thinking_question_is_sent_as_a_score() {
+        let questions = questions(&empty_input());
+        for metric in &BASE_METRICS {
+            let question = &questions[metric.key];
+            match metric.answer {
+                MetricAnswer::Noul => {
+                    assert_eq!(question.question_type, "noul", "{}", metric.key);
+                    assert!(question.criteria.is_none(), "{}", metric.key);
+                }
+                MetricAnswer::Rubric(_) => {
+                    assert_eq!(metric.key, "thinkingBalance");
+                    assert_eq!(question.question_type, "score");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_rubric_answer_keeps_the_level_it_landed_on() {
+        // The bar alone says "unbalanced" without saying which way, so the level
+        // Jev picked travels with it.
+        let answers = every_answer(0.5, 3.4);
+        let thinking = metric_evaluations(&answers)
+            .unwrap()
+            .into_iter()
+            .find(|evaluation| evaluation.key == "thinkingBalance")
+            .expect("evaluated");
+        let scale = thinking.scale.expect("a rubric metric carries its scale");
+
+        assert_eq!(scale.position, 3.4);
+        assert_eq!(scale.level, THINKING_LEVELS[3]);
+        assert_eq!(scale.levels.len(), THINKING_LEVELS.len());
+        assert_eq!(thinking.score, 30);
+        assert_eq!(thinking.probability, 0.8);
+    }
+
+    #[test]
+    fn yes_no_metrics_carry_no_scale() {
+        let answers = every_answer(0.5, 2.0);
+        for evaluation in metric_evaluations(&answers).unwrap() {
+            if evaluation.key != "thinkingBalance" {
+                assert!(evaluation.scale.is_none(), "{}", evaluation.key);
+            }
+        }
+    }
+
+    #[test]
+    fn the_request_carries_thinking_volume_but_never_thinking_text() {
+        let mut input = empty_input();
+        input.signals.thinking_blocks = 55;
+        input.signals.thinking_chars = 42_854;
+        let request = serde_json::to_value(JevRequest {
+            model: JEV_MODEL,
+            state: &input,
+            questions: questions(&input),
+        })
+        .unwrap();
+
+        assert_eq!(
+            request.pointer("/state/signals/thinkingBlocks"),
+            Some(&json!(55))
+        );
+        assert_eq!(
+            request.pointer("/state/signals/thinkingChars"),
+            Some(&json!(42_854))
+        );
+        assert_eq!(
+            request.pointer("/questions/thinkingBalance/type"),
+            Some(&json!("score"))
+        );
+        assert_eq!(
+            request
+                .pointer("/questions/thinkingBalance/criteria")
+                .and_then(|criteria| criteria.as_array())
+                .map(Vec::len),
+            Some(5)
+        );
+    }
+
+    #[test]
     fn rejects_missing_or_out_of_range_probabilities() {
         assert!(probability(&HashMap::new(), "missing").is_err());
-        let answers = HashMap::from([("bad".into(), NoulAnswer { noul: 1.1 })]);
+        let answers = HashMap::from([("bad".into(), noul(1.1))]);
         assert!(probability(&answers, "bad").is_err());
+        assert!(probability(&HashMap::from([("r".into(), rubric(2.0))]), "r").is_err());
     }
 
     #[test]
@@ -523,11 +786,20 @@ mod tests {
     }
 
     #[test]
+    fn rejects_a_rubric_position_outside_its_levels() {
+        let levels = THINKING_LEVELS.len();
+        assert!(rubric_position(&HashMap::new(), "missing", levels).is_err());
+        let off_the_end = HashMap::from([("t".to_string(), rubric(4.5))]);
+        assert!(rubric_position(&off_the_end, "t", levels).is_err());
+        let noul_only = HashMap::from([("t".to_string(), noul(0.5))]);
+        assert!(rubric_position(&noul_only, "t", levels).is_err());
+        let inside = HashMap::from([("t".to_string(), rubric(3.2))]);
+        assert_eq!(rubric_position(&inside, "t", levels).unwrap(), 3.2);
+    }
+
+    #[test]
     fn dashboard_metrics_are_generated_from_the_same_definitions_as_jev_questions() {
-        let answers = BASE_METRICS
-            .iter()
-            .map(|metric| (metric.key.to_string(), NoulAnswer { noul: 0.25 }))
-            .collect::<HashMap<_, _>>();
+        let answers = every_answer(0.25, 2.0);
         let evaluations = metric_evaluations(&answers).unwrap();
 
         assert_eq!(evaluations.len(), BASE_METRICS.len());
@@ -535,14 +807,12 @@ mod tests {
             assert_eq!(evaluation.key, definition.key);
             assert_eq!(evaluation.label, definition.label);
             assert_eq!(evaluation.question, definition.question);
-            assert_eq!(
-                evaluation.score,
-                if definition.higher_probability_is_better {
-                    25
-                } else {
-                    75
-                }
-            );
+            let expected = match definition.answer {
+                MetricAnswer::Rubric(_) => 100,
+                MetricAnswer::Noul if definition.higher_probability_is_better => 25,
+                MetricAnswer::Noul => 75,
+            };
+            assert_eq!(evaluation.score, expected);
         }
     }
 
@@ -609,9 +879,9 @@ mod tests {
             })
             .collect();
         let answers = HashMap::from([
-            ("window_0_recovery".into(), NoulAnswer { noul: 0.75 }),
-            ("window_1_recovery".into(), NoulAnswer { noul: 0.76 }),
-            ("window_2_recovery".into(), NoulAnswer { noul: 0.78 }),
+            ("window_0_recovery".into(), noul(0.75)),
+            ("window_1_recovery".into(), noul(0.76)),
+            ("window_2_recovery".into(), noul(0.78)),
         ]);
 
         assert_eq!(
