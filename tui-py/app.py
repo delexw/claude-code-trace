@@ -52,6 +52,9 @@ from widgets.project_tree import ProjectTree
 from widgets.session_picker import SessionPicker
 from widgets.team_board import TeamBoard
 
+# A failed analysis is worth reading; the default 5s toast is not enough.
+FAILURE_NOTICE_SECONDS = 30
+
 JEV_KEY_REQUIRED = (
     "Set JEV_API_KEY before starting the backend, or store the key with the desktop "
     "app, then reopen the analytics settings to confirm it."
@@ -320,6 +323,17 @@ class CCTraceApp(App):
         if job.status == "completed":
             # The score lands in the summaries, not in the job.
             await self._refresh_efficiency_summaries()
+        elif job.status == "failed":
+            # Raised as well as written into the row: an analysis takes minutes,
+            # by which time the user is usually looking at something else.
+            name = job.session_name or job.session_id or job.session_path
+            self.notify(
+                f"{name}: {job.error or job.message}",
+                title="Jev analysis failed",
+                severity="error",
+                timeout=FAILURE_NOTICE_SECONDS,
+                markup=False,
+            )
 
     # ----------------------------------------------------------------
     # Jev efficiency analysis

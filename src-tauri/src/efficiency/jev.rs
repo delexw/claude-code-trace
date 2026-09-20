@@ -12,8 +12,17 @@ use super::{
 const JEV_ENDPOINT: &str = "https://api.typesafe.ai/v1/systemone";
 const JEV_MODEL: &str = "jev-latest";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
-const WINDOW_ACTIONS: usize = 6;
-const MAX_WINDOWS: usize = 12;
+pub(super) const WINDOW_ACTIONS: usize = 6;
+pub(super) const MAX_WINDOWS: usize = 12;
+
+/// How much serialized `state` Jev will take, in characters.
+///
+/// The documented limit is 32k tokens for the state plus the longest single
+/// question, and going over comes back as a bare `400 Bad Request` — no
+/// explanation. 123k characters of payload was rejected. Shell commands and
+/// file paths tokenize badly, near three characters a token, so the budget
+/// keeps the worst case inside the limit with the questions still to come.
+pub(super) const MAX_STATE_CHARS: usize = 80_000;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -486,12 +495,66 @@ fn parse(input: &EfficiencyInput, response: JevResponse) -> Result<JevAnalysisRe
     })
 }
 
-fn response_error(status: StatusCode) -> String {
-    if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
-        "Authentication failed".to_string()
+/// A send failure, without quoting the error: reqwest formats the URL into it,
+/// and a timeout is worth telling apart from an unreachable network — they are
+/// the same string otherwise, and the timeout is the one a large session hits.
+fn transport_error(error: reqwest::Error) -> String {
+    if error.is_timeout() {
+        format!("Jev did not respond within {}s", REQUEST_TIMEOUT.as_secs())
     } else {
-        format!("Jev request failed ({status})")
+        "Connection failed".to_string()
     }
+}
+
+/// The part of an error body worth showing: Jev's own sentence, on one line.
+///
+/// A rejected request carries the reason in the body, and without it a 400
+/// reads as "Jev request failed" and leaves nobody any wiser.
+fn failure_detail(body: &str) -> Option<String> {
+    const MAX_DETAIL_CHARS: usize = 200;
+    let text = serde_json::from_str::<Value>(body)
+        .ok()
+        .and_then(|value| {
+            ["error", "message", "detail"]
+                .iter()
+                .find_map(|field| match value.get(field) {
+                    Some(Value::String(text)) => Some(text.clone()),
+                    Some(nested) => nested
+                        .get("message")
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
+                    None => None,
+                })
+        })
+        .unwrap_or_else(|| body.to_string());
+    let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if text.is_empty() {
+        return None;
+    }
+    Some(if text.chars().count() > MAX_DETAIL_CHARS {
+        format!(
+            "{}…",
+            text.chars().take(MAX_DETAIL_CHARS).collect::<String>()
+        )
+    } else {
+        text
+    })
+}
+
+fn failure_message(status: StatusCode, body: &str) -> String {
+    if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
+        return "Authentication failed".to_string();
+    }
+    match failure_detail(body) {
+        Some(detail) => format!("Jev request failed ({status}): {detail}"),
+        None => format!("Jev request failed ({status})"),
+    }
+}
+
+async fn response_error(response: reqwest::Response) -> String {
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    failure_message(status, &body)
 }
 
 pub async fn analyse(api_key: &str, input: &EfficiencyInput) -> Result<JevAnalysisResult, String> {
@@ -505,9 +568,9 @@ pub async fn analyse(api_key: &str, input: &EfficiencyInput) -> Result<JevAnalys
         })
         .send()
         .await
-        .map_err(|_| "Connection failed".to_string())?;
+        .map_err(transport_error)?;
     if !response.status().is_success() {
-        return Err(response_error(response.status()));
+        return Err(response_error(response).await);
     }
     let response = response
         .json::<JevResponse>()
@@ -529,9 +592,9 @@ pub async fn test_connection(api_key: &str) -> Result<(), String> {
         }))
         .send()
         .await
-        .map_err(|_| "Connection failed".to_string())?;
+        .map_err(transport_error)?;
     if !response.status().is_success() {
-        return Err(response_error(response.status()));
+        return Err(response_error(response).await);
     }
     let value = response
         .json::<Value>()
@@ -551,6 +614,103 @@ pub async fn test_connection(api_key: &str) -> Result<(), String> {
 mod tests {
     use super::*;
     use crate::efficiency::{EfficiencyAction, EfficiencySignals, EfficiencyTask};
+
+    #[test]
+    fn a_rejected_request_quotes_the_reason_jev_gave() {
+        // Without the body this read "Jev request failed (400 Bad Request)",
+        // which told the user nothing about an oversized payload.
+        assert_eq!(
+            failure_message(
+                StatusCode::BAD_REQUEST,
+                r#"{"error":"state exceeds the 32k token limit"}"#
+            ),
+            "Jev request failed (400 Bad Request): state exceeds the 32k token limit"
+        );
+        assert_eq!(
+            failure_message(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                r#"{"error":{"message":"questions.repeated0: too long"}}"#
+            ),
+            "Jev request failed (422 Unprocessable Entity): questions.repeated0: too long"
+        );
+    }
+
+    #[test]
+    fn a_plain_text_body_arrives_on_one_line_and_short() {
+        assert_eq!(
+            failure_message(StatusCode::BAD_REQUEST, "payload\n  too   large\n"),
+            "Jev request failed (400 Bad Request): payload too large"
+        );
+        let detail = failure_detail(&"word ".repeat(200)).unwrap();
+        assert_eq!(
+            detail.chars().count(),
+            201,
+            "200 characters plus the ellipsis"
+        );
+        assert!(detail.ends_with('\u{2026}'));
+    }
+
+    #[test]
+    fn an_empty_body_leaves_the_status_speaking_for_itself() {
+        assert_eq!(
+            failure_message(StatusCode::BAD_GATEWAY, "   "),
+            "Jev request failed (502 Bad Gateway)"
+        );
+    }
+
+    #[test]
+    fn a_rejected_key_still_reads_as_an_authentication_failure() {
+        // The body here is about the key; quoting it would only be noise.
+        assert_eq!(
+            failure_message(StatusCode::UNAUTHORIZED, r#"{"error":"invalid api key"}"#),
+            "Authentication failed"
+        );
+        assert_eq!(
+            failure_message(StatusCode::FORBIDDEN, ""),
+            "Authentication failed"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_timeout_is_named_rather_than_read_as_a_dead_network() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            // Accept, then never answer.
+            let _connection = listener.accept().await;
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        });
+
+        let error = reqwest::Client::builder()
+            .timeout(Duration::from_millis(50))
+            .build()
+            .unwrap()
+            .get(format!("http://{address}/"))
+            .send()
+            .await
+            .expect_err("a server that never answers cannot succeed");
+
+        assert!(error.is_timeout());
+        assert_eq!(transport_error(error), "Jev did not respond within 60s");
+    }
+
+    #[tokio::test]
+    async fn an_unreachable_endpoint_still_reads_as_a_connection_failure() {
+        // Bound then dropped: nothing is listening on the port any more.
+        let port = {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            listener.local_addr().unwrap().port()
+        };
+
+        let error = reqwest::Client::new()
+            .get(format!("http://127.0.0.1:{port}/"))
+            .send()
+            .await
+            .expect_err("nothing is listening");
+
+        assert!(!error.is_timeout());
+        assert_eq!(transport_error(error), "Connection failed");
+    }
 
     #[test]
     fn disclosed_destination_matches_the_actual_jev_request() {

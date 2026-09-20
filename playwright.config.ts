@@ -99,6 +99,12 @@ export default defineConfig({
         CLAUDE_PROJECTS_DIR: E2E.webMode.projectsDir,
         CCTRACE_HTTP_PORT: String(E2E.webMode.apiPort),
         CCTRACE_ALLOWED_ORIGINS: `http://localhost:${E2E.webMode.uiPort}`,
+        // A key so the analysis flow runs, and a proxy pointing at a dead port
+        // so the request cannot leave the machine: the run always ends in a
+        // transport failure, which is the path under test.
+        JEV_API_KEY: "e2e-not-a-real-key",
+        HTTPS_PROXY: "http://127.0.0.1:1",
+        NO_PROXY: "127.0.0.1,localhost",
       },
     },
     {

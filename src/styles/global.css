@@ -2990,6 +2990,15 @@ body {
   cursor: pointer;
 }
 
+.picker__analysis-error {
+  overflow: hidden;
+  max-width: 320px;
+  color: var(--context-crit);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .picker__analyse:disabled {
   cursor: default;
   opacity: 0.7;
@@ -3540,29 +3549,6 @@ body {
 
 .efficiency-privacy__confirmation input {
   margin-top: 2px;
-}
-
-.efficiency-error {
-  position: fixed;
-  right: 16px;
-  bottom: 34px;
-  z-index: 1000;
-  display: flex;
-  gap: 10px;
-  max-width: 420px;
-  padding: 8px 10px;
-  border: 1px solid var(--context-crit);
-  border-radius: 4px;
-  background: var(--bg-elevated);
-  color: var(--text-primary);
-  font-size: 12px;
-}
-
-.efficiency-error button {
-  border: 0;
-  background: transparent;
-  color: var(--text-secondary);
-  cursor: pointer;
 }
 
 .settings-modal {

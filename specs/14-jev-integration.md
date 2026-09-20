@@ -122,6 +122,29 @@ Selection is now, in priority order, capped at `MAX_EXCERPTS`:
 
 `minimized` is the default (`AnalyticsConfiguration::default`).
 
+### Fitting the payload to Jev's limit (`fit_within_jev_budget`)
+
+Jev takes **32k tokens of state plus the longest single question**, and a request over that comes
+back as a bare `400 Bad Request`. Two real sessions hit it: 262 actions serialized to 123k
+characters and 331 actions to 160k, both rejected, while a ~100k-character payload had been
+accepted. Long sessions were therefore unanalysable, and the failure said nothing about why.
+
+`extract_input` now trims the payload to `jev::MAX_STATE_CHARS` (80 000 characters — shell
+commands and paths tokenize at close to three characters a token, so the worst case still clears
+32k with the questions to come). Detail is given up in the order it can be spared:
+
+1. **Action summaries**, capped at 300 → 200 → 140 → 90 characters. They are the bulk of a long
+   session: 331 actions carried 97k characters of summary between them.
+2. **Excerpt length**, halved from the mode's cap down to 150 characters.
+3. **The number of excerpts**, sampled with `evenly_spaced` down to 4.
+4. **The actions themselves**, sampled down to `WINDOW_ACTIONS * MAX_WINDOWS` — the ones every
+   window question is asked about — and no further.
+
+`signals` is computed before any trimming, so `toolCalls`, `failedToolCalls` and the rest still
+count the whole session. Trimming happens in `prepare`, not on the way out, so the privacy modal
+previews exactly what is sent. Both real sessions now serialize to ~78k characters in either
+payload mode with every action still described.
+
 ---
 
 ## Redaction (`redact.rs`)
@@ -286,9 +309,14 @@ sequenceDiagram
     CMD ->> CMD: resolve API key BEFORE creating the job
     CMD -->> UI: job (queued)
     CMD ->> JEV: POST /v1/systemone (60 s timeout)
-    JEV -->> CMD: answers
-    CMD ->> CMD: build_analysis → cache::write
-    CMD -->> UI: job (completed, score)
+    alt Jev answers
+        JEV -->> CMD: answers
+        CMD ->> CMD: build_analysis → cache::write
+        CMD -->> UI: job (completed, score)
+    else request fails or times out
+        CMD -->> UI: job (failed, error)
+        Note over UI: the reason is raised to the user, not only stored
+    end
 ```
 
 Status values: `queued → preparing → redacting → sending → analysing → processing_result →
@@ -306,6 +334,28 @@ the previous job for that session.
 
 The cache write happens **while still holding the jobs lock**, so a newer re-analysis must
 replace the job before an older in-flight result can write its analysis.
+
+**A failed job says why.** The reason lives on `job.error`, and every surface raises it when the
+`failed` update arrives: the web and desktop clients open `OperationResultModal` as a blocking
+error dialog naming the session, and also leave the reason on the picker row; the TUI raises a
+30-second toast as well as writing the reason into its picker row.
+Without that, a failure read only as the picker's button changing to "Retry analysis". Only live
+updates announce it — the jobs read on mount may be old failures the user has already seen.
+
+`jev::transport_error` tells a timeout apart from an unreachable endpoint. Both used to read
+"Connection failed", and the 60-second timeout is the one a large session actually hits; the
+reqwest error is still never quoted, because it formats the URL into its message.
+
+`jev::failure_message` quotes the reason out of a rejected response — the `error`, `message` or
+`detail` field of a JSON body, else the body itself — collapsed to one line and cut at 200
+characters. A 400 used to read "Jev request failed (400 Bad Request)" and leave the user nowhere.
+A 401 or 403 still reads "Authentication failed": the body there only restates the key.
+
+The whole path is covered end to end in web mode (`e2e/web-mode.spec.ts`): the harness backend
+carries a dummy `JEV_API_KEY` and an `HTTPS_PROXY` pointing at a dead port, so a re-analysis
+always ends in a transport failure without anything leaving the machine, and the test asserts
+the dialog names the reason, that dismissing it leaves the cached score intact, and that after a
+reload the row still says why.
 
 ---
 
@@ -452,32 +502,26 @@ and 241 actions, so 45 and 169 of them respectively sit outside every window. Wi
 trades directly against request size and the 60 s timeout, so it needs a deliberate choice rather
 than a bigger constant.
 
-### 5. `full-transcript` mode has no entry cap
-
-`take(usize::MAX)` — every message becomes an excerpt of up to 5 000 chars. A large session can
-build a request far beyond what the 60 s timeout can deliver, failing late with "Connection
-failed" after the data has been transmitted.
-
-### 6. `FailedRetries` probability is fabricated, not modelled
+### 5. `FailedRetries` probability is fabricated, not modelled
 
 `0.6 + 0.1 · failed_count` (capped at 0.95) is a local heuristic, yet `EfficiencyPanel` renders it
 as "N% likelihood" identically to a Jev-derived probability. A reader cannot tell which numbers
 came from the model.
 
-### 7. The progress sequence reports work that already happened
+### 6. The progress sequence reports work that already happened
 
 `preparing (10%)`, `redacting (25%)`, `sending (35%)`, and `analysing (60%)` all fire back-to-back
 with no work between them — extraction and redaction happened earlier, in `prepare`. The
 percentages are decorative and will sit at 60% for the entire real wait.
 
-### 8. The analysis cache is never garbage-collected
+### 7. The analysis cache is never garbage-collected
 
 Nothing deletes `analysis/*.json` when a session is removed. `list_summaries` reads and SHA-256s
 **every** cached transcript on every call (it is called on mount and after each completed job), so
 the cost grows with history. For a deleted session `transcript_fingerprint` errors,
 `.unwrap_or(true)` marks it stale, and the orphan row is listed forever.
 
-### 9. The TUI has no dashboard and cannot cancel
+### 8. The TUI has no dashboard and cannot cancel
 
 The TUI can configure analytics, start an analysis behind the privacy notice, and show live
 progress and the resulting score in the session picker. It cannot open the findings dashboard

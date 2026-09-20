@@ -34,6 +34,7 @@ import { SettingsModal } from "./components/SettingsModal";
 import { BetaBadge } from "./components/BetaBadge";
 import { EfficiencyPrivacyModal } from "./components/EfficiencyPrivacyModal";
 import { JevKeyRequiredModal } from "./components/JevKeyRequiredModal";
+import { OperationResultModal } from "./components/OperationResultModal";
 import {
   shouldRecycle,
   saveRestoreState,
@@ -114,7 +115,13 @@ export function App() {
 
   const session = useSession();
   const picker = usePicker(selectedProject);
-  const efficiencyJobs = useEfficiencyJobs();
+  // A failed analysis otherwise showed up only as the picker's button changing
+  // to "Retry analysis", with the reason left on a job record nobody renders.
+  const reportEfficiencyFailure = useCallback((job: EfficiencyAnalysisJob) => {
+    const name = job.sessionName || job.sessionId;
+    setEfficiencyError(`Jev analysis failed for ${name}: ${job.error || job.message}`);
+  }, []);
+  const efficiencyJobs = useEfficiencyJobs(reportEfficiencyFailure);
   // The open session's full SessionInfo (liveness, session_id), looked up from
   // the picker's list by path — useSession's meta only carries cwd/branch/mode.
   const selectedSessionInfo =
@@ -863,16 +870,11 @@ export function App() {
         />
       )}
       {efficiencyError && (
-        <div className="efficiency-error" role="alert">
-          {efficiencyError}
-          <button
-            type="button"
-            onClick={() => setEfficiencyError("")}
-            aria-label="Dismiss efficiency error"
-          >
-            ×
-          </button>
-        </div>
+        <OperationResultModal
+          kind="error"
+          message={efficiencyError}
+          onClose={() => setEfficiencyError("")}
+        />
       )}
     </div>
   );

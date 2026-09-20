@@ -408,3 +408,64 @@ async def test_pressing_a_analyses_the_highlighted_session(monkeypatch):
 
         assert prepared_for == ["/p/s1.jsonl"]
         assert isinstance(app.screen, EfficiencyPrivacyScreen)
+
+
+@pytest.mark.asyncio
+async def test_a_failed_analysis_is_raised_not_only_written_into_the_row():
+    """An analysis takes minutes — by the time it fails the user is usually
+    looking at something else."""
+    async with app_module.CCTraceApp().run_test() as pilot:
+        app = pilot.app
+        notices = _capture_notices(app)
+
+        await app._on_efficiency_update(
+            {
+                "analysisId": "a1",
+                "sessionPath": "/p/s1.jsonl",
+                "sessionName": "Fix login",
+                "status": "failed",
+                "message": "Efficiency analysis failed",
+                "error": "Jev did not respond within 60s",
+            }
+        )
+
+        assert notices == [("Fix login: Jev did not respond within 60s", "error")]
+
+
+@pytest.mark.asyncio
+async def test_a_failure_without_detail_falls_back_to_the_job_message():
+    async with app_module.CCTraceApp().run_test() as pilot:
+        app = pilot.app
+        notices = _capture_notices(app)
+
+        await app._on_efficiency_update(
+            {
+                "analysisId": "a1",
+                "sessionPath": "/p/s1.jsonl",
+                "sessionId": "sid-one",
+                "status": "failed",
+                "message": "Could not save analysis",
+                "error": None,
+            }
+        )
+
+        assert notices == [("sid-one: Could not save analysis", "error")]
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_analysis_says_nothing():
+    """The user cancelled it; telling them it stopped is noise."""
+    async with app_module.CCTraceApp().run_test() as pilot:
+        app = pilot.app
+        notices = _capture_notices(app)
+
+        await app._on_efficiency_update(
+            {
+                "analysisId": "a1",
+                "sessionPath": "/p/s1.jsonl",
+                "status": "cancelled",
+                "message": "Analysis cancelled",
+            }
+        )
+
+        assert notices == []

@@ -259,6 +259,15 @@ export function SessionPicker({
                         <BetaBadge />
                       </button>
                     )}
+                    {efficiencyJob?.status === "failed" && (
+                      <span
+                        className="picker__analysis-error"
+                        role="status"
+                        title={efficiencyJob.error || efficiencyJob.message}
+                      >
+                        {efficiencyJob.error || efficiencyJob.message}
+                      </span>
+                    )}
                     <button
                       className="message__detail-btn"
                       onClick={(e) => {

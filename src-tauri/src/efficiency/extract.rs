@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use crate::convert::DisplayMessage;
 
+use super::jev;
 use super::settings::PayloadMode;
 use super::{EfficiencyAction, EfficiencyInput, EfficiencySignals, EfficiencyTask};
 
@@ -9,6 +10,12 @@ const MAX_SUMMARY_CHARS: usize = 500;
 const MAX_EXCERPT_CHARS: usize = 1_200;
 const MAX_FULL_TRANSCRIPT_ENTRY_CHARS: usize = 5_000;
 const MAX_EXCERPTS: usize = 24;
+const SUMMARY_SHRINK_CHARS: [usize; 4] = [300, 200, 140, 90];
+const MIN_EXCERPT_CHARS: usize = 150;
+const MIN_EXCERPTS: usize = 4;
+/// Every action below this count still has a window question asked about it,
+/// so they are the last thing to go.
+const MIN_ACTIONS: usize = jev::WINDOW_ACTIONS * jev::MAX_WINDOWS;
 
 fn truncate(value: &str, limit: usize) -> String {
     if value.chars().count() <= limit {
@@ -62,6 +69,70 @@ fn evenly_spaced(candidates: &[usize], cap: usize) -> Vec<usize> {
     }
     let last = candidates.len() - 1;
     (0..cap).map(|i| candidates[i * last / (cap - 1)]).collect()
+}
+
+fn evenly_sampled<T: Clone>(items: &[T], keep: usize) -> Vec<T> {
+    let positions = (0..items.len()).collect::<Vec<_>>();
+    evenly_spaced(&positions, keep)
+        .into_iter()
+        .map(|position| items[position].clone())
+        .collect()
+}
+
+fn state_chars(input: &EfficiencyInput) -> usize {
+    serde_json::to_string(input)
+        .map(|state| state.chars().count())
+        .unwrap_or(0)
+}
+
+/// Trim the payload until Jev will take it (see `jev::MAX_STATE_CHARS`).
+///
+/// A long session overshot the limit and came back as an unexplained 400, so
+/// detail is given up here instead, in the order it can be spared: action
+/// summaries first — 331 actions carried 97k characters of them — then excerpt
+/// length, then the number of excerpts, and only last the actions themselves.
+/// `signals` is computed before any of this, so the counts stay true.
+fn fit_within_jev_budget(input: &mut EfficiencyInput, mode: PayloadMode) {
+    if state_chars(input) <= jev::MAX_STATE_CHARS {
+        return;
+    }
+    for cap in SUMMARY_SHRINK_CHARS {
+        for action in &mut input.actions {
+            action.summary = truncate(&action.summary, cap);
+        }
+        if state_chars(input) <= jev::MAX_STATE_CHARS {
+            return;
+        }
+    }
+    let start = if mode == PayloadMode::FullTranscript {
+        MAX_FULL_TRANSCRIPT_ENTRY_CHARS
+    } else {
+        MAX_EXCERPT_CHARS
+    };
+    let mut cap = start / 2;
+    while cap >= MIN_EXCERPT_CHARS {
+        for excerpt in &mut input.selected_excerpts {
+            *excerpt = truncate(excerpt, cap);
+        }
+        if state_chars(input) <= jev::MAX_STATE_CHARS {
+            return;
+        }
+        cap /= 2;
+    }
+    while input.selected_excerpts.len() > MIN_EXCERPTS {
+        let keep = (input.selected_excerpts.len() * 3 / 4).max(MIN_EXCERPTS);
+        input.selected_excerpts = evenly_sampled(&input.selected_excerpts, keep);
+        if state_chars(input) <= jev::MAX_STATE_CHARS {
+            return;
+        }
+    }
+    while input.actions.len() > MIN_ACTIONS {
+        let keep = (input.actions.len() * 3 / 4).max(MIN_ACTIONS);
+        input.actions = evenly_sampled(&input.actions, keep);
+        if state_chars(input) <= jev::MAX_STATE_CHARS {
+            return;
+        }
+    }
 }
 
 fn has_failure(message: &DisplayMessage) -> bool {
@@ -224,7 +295,7 @@ pub fn extract_input(
         .filter(|action| action.repeated_similar_call_count > 0)
         .count();
 
-    EfficiencyInput {
+    let mut input = EfficiencyInput {
         task: EfficiencyTask {
             first_user_message,
             turns: messages.len(),
@@ -246,7 +317,9 @@ pub fn extract_input(
         },
         actions,
         selected_excerpts,
-    }
+    };
+    fit_within_jev_budget(&mut input, mode);
+    input
 }
 
 #[cfg(test)]
@@ -511,6 +584,77 @@ mod tests {
         );
         assert_eq!(input.actions[0].repeated_similar_call_count, 1);
         assert_eq!(input.signals.repeated_tool_calls, 2);
+    }
+
+    fn busy_session(count: usize) -> Vec<DisplayMessage> {
+        (0..count)
+            .map(|i| {
+                let mut message = message(
+                    "claude",
+                    &format!("step {i} {}", "context ".repeat(80)),
+                    Some("Bash"),
+                );
+                message.items[0].tool_summary = format!("call {i} {}", "detail ".repeat(90));
+                message.items[0].tool_input = format!("command {i} {}", "argument ".repeat(90));
+                message
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_long_session_is_trimmed_to_what_jev_will_take() {
+        // 300 actions carrying full-length summaries ran to ~150k characters,
+        // and Jev answered a bare 400.
+        let messages = busy_session(300);
+        let input = extract_input(&messages, 1_000, PayloadMode::Minimized);
+
+        assert!(
+            state_chars(&input) <= jev::MAX_STATE_CHARS,
+            "state was {} characters",
+            state_chars(&input)
+        );
+        // Only the detail is given up: every action is still described, and the
+        // signals Jev scores against still count the whole session.
+        assert_eq!(input.actions.len(), 300);
+        assert_eq!(input.signals.tool_calls, 300);
+        assert!(input
+            .actions
+            .iter()
+            .all(|action| action.summary.chars().count()
+                <= SUMMARY_SHRINK_CHARS[SUMMARY_SHRINK_CHARS.len() - 1] + 1));
+        assert!(input
+            .actions
+            .iter()
+            .any(|action| action.summary.starts_with("call 299")));
+    }
+
+    #[test]
+    fn a_full_transcript_of_a_huge_session_still_fits() {
+        // Full-transcript mode quotes every message, so the excerpts are what
+        // has to give here — and the windowed actions survive it.
+        let messages = busy_session(1_200);
+        let input = extract_input(&messages, 1_000, PayloadMode::FullTranscript);
+
+        assert!(
+            state_chars(&input) <= jev::MAX_STATE_CHARS,
+            "state was {} characters",
+            state_chars(&input)
+        );
+        assert!(input.actions.len() >= MIN_ACTIONS);
+        assert_eq!(input.signals.tool_calls, 1_200);
+    }
+
+    #[test]
+    fn a_short_session_keeps_its_full_detail() {
+        let messages = busy_session(3);
+        let input = extract_input(&messages, 1_000, PayloadMode::Minimized);
+
+        assert_eq!(input.actions.len(), 3);
+        assert!(
+            input.actions[0].summary.chars().count() > SUMMARY_SHRINK_CHARS[0],
+            "nothing is trimmed while the payload is small: {}",
+            input.actions[0].summary
+        );
     }
 
     #[test]

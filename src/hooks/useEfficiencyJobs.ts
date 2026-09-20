@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "../lib/invoke";
 import { listen } from "../lib/listen";
 import type { EfficiencyAnalysisJob, EfficiencySummary } from "../types";
@@ -14,9 +14,21 @@ export function latestJobsBySession(jobs: EfficiencyAnalysisJob[]) {
   return latest;
 }
 
-export function useEfficiencyJobs() {
+/**
+ * @param onFailure Called when a job *arrives* failed, so the reason reaches the
+ *   user instead of the picker silently offering "Retry analysis". Only live
+ *   updates fire it: the jobs read on mount may be old failures the user has
+ *   already seen, and re-announcing them on every launch would be noise.
+ */
+export function useEfficiencyJobs(onFailure?: (job: EfficiencyAnalysisJob) => void) {
   const [jobs, setJobs] = useState<EfficiencyAnalysisJob[]>([]);
   const [summaries, setSummaries] = useState<EfficiencySummary[]>([]);
+  // Held in a ref so the listener, registered once, always calls the latest
+  // callback without re-subscribing on every render.
+  const onFailureRef = useRef(onFailure);
+  useEffect(() => {
+    onFailureRef.current = onFailure;
+  }, [onFailure]);
 
   const refreshSummaries = useCallback(async () => {
     setSummaries(await invoke<EfficiencySummary[]>("list_efficiency_summaries"));
@@ -57,6 +69,7 @@ export function useEfficiencyJobs() {
           console.error("Failed to refresh efficiency summaries:", error),
         );
       }
+      if (payload.status === "failed") onFailureRef.current?.(payload);
     }).then((stop) => {
       if (disposed) stop();
       else unlisten = stop;

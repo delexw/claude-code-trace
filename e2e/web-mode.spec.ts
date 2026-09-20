@@ -144,3 +144,32 @@ test("a reissue by another client reaches an open tab over HMR", async ({
   expect(req.headers()["x-cctrace-token"]).toBe(reissued);
   expect((await req.response())?.status()).toBe(200);
 });
+
+test("a re-analysis that fails says why, rather than only offering Retry", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByText(FIXTURE_FIRST_MESSAGE)).toBeVisible();
+
+  await page.getByRole("button", { name: /^Re-analyse/ }).click();
+  await page.getByRole("checkbox").check();
+  await page.getByRole("button", { name: /Continue & Analyse/ }).click();
+
+  // The backend's Jev request cannot leave the machine (see playwright.config.ts),
+  // so the job fails and the reason has to reach the user.
+  const dialog = page.getByRole("alertdialog");
+  await expect(dialog).toContainText("Jev analysis failed", { timeout: 20_000 });
+  await expect(dialog).toContainText("Connection failed");
+  await page.screenshot({ path: "e2e/.tmp/web-analysis-failure-modal.png" });
+  await dialog.getByRole("button", { name: "OK" }).click();
+  await expect(dialog).toHaveCount(0);
+
+  // The cached score survives the failed run — dropping it would leave nothing.
+  await expect(page.getByRole("button", { name: "Dashboard · 82" })).toBeVisible();
+
+  // The dialog only fires for a failure seen live. After a reload the row itself
+  // still says why, rather than offering Retry with no explanation.
+  await page.reload();
+  await expect(page.getByText(FIXTURE_FIRST_MESSAGE)).toBeVisible();
+  await expect(page.getByRole("alertdialog")).toHaveCount(0);
+  await expect(page.getByRole("status").filter({ hasText: "Connection failed" })).toBeVisible();
+  await page.screenshot({ path: "e2e/.tmp/web-analysis-failure-row.png" });
+});

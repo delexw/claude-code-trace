@@ -499,6 +499,10 @@ sequenceDiagram
     end
 ```
 
+A job that arrives `failed` raises a 30-second error toast naming the session, as well as
+writing the reason into its picker row — an analysis takes minutes, by which time the user is
+usually looking at something else. A `cancelled` job says nothing: the user stopped it.
+
 On start-up `_load_efficiency_state()` reads `/api/efficiency/jobs` and
 `/api/efficiency/summaries`, so analyses run from the desktop app, a browser,
 or an earlier TUI run show their score and any run still in flight.
