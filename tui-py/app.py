@@ -26,20 +26,36 @@ import api as api_client
 import auth
 from data_types import (
     DisplayMessage,
+    IndexProgress,
     SessionInfo,
     SessionMeta,
     SessionTotals,
+    index_progress_from_dict,
+)
+from efficiency import (
+    EfficiencyJob,
+    EfficiencySummary,
+    job_from_dict,
+    latest_jobs_by_session,
 )
 from format_utils import project_key as _project_key
 from project_tree import resolve_fork_root
 from resume_command import resume_command
 from sse import SSEClient
+from widgets.analytics_settings import AnalyticsSettingsScreen
 from widgets.debug_viewer import DebugViewer
 from widgets.detail_view import DetailView
+from widgets.efficiency_privacy import EfficiencyPrivacyScreen
+from widgets.index_progress import IndexProgressBar
 from widgets.message_list import MessageList
 from widgets.project_tree import ProjectTree
 from widgets.session_picker import SessionPicker
 from widgets.team_board import TeamBoard
+
+JEV_KEY_REQUIRED = (
+    "Set JEV_API_KEY before starting the backend, or store the key with the desktop "
+    "app, then reopen the analytics settings to confirm it."
+)
 
 API_BASE = "http://127.0.0.1:11423"
 
@@ -114,7 +130,14 @@ class CCTraceApp(App):
         # see check_action. Deliberately NOT priority=True and NOT shown in
         # the picker footer, which already overflows on narrow terminals.
         Binding("y", "copy_resume", "Copy resume", show=True),
+        # Picker-only, for the same reason — see check_action.
+        Binding("a", "analyse_session", "Analyse", show=True),
+        Binding("comma", "analytics_settings", "Analytics", show=True),
     ]
+
+    # Derived from BINDINGS so a key added above cannot be forgotten here —
+    # see check_action, which disarms exactly these while a modal is open.
+    OWN_ACTIONS = frozenset(binding.action for binding in BINDINGS)
 
     # ---- State ----
     view: reactive[str] = reactive("picker")
@@ -124,6 +147,13 @@ class CCTraceApp(App):
     picker_loading: reactive[bool] = reactive(True)
     picker_error: reactive[str] = reactive("")
     selected_project: reactive[str | None] = reactive(None)
+    # How far the backend's walk of the project directories has got.
+    index_progress: reactive[IndexProgress | None] = reactive(None)
+
+    # Jev efficiency analysis, keyed by session path. Includes analyses
+    # started from the desktop app or a browser against the same backend.
+    efficiency_jobs: reactive[dict[str, EfficiencyJob]] = reactive(dict)
+    efficiency_summaries: reactive[dict[str, EfficiencySummary]] = reactive(dict)
 
     # Session
     session_path: reactive[str] = reactive("")
@@ -174,6 +204,7 @@ class CCTraceApp(App):
                 yield DetailView(id="detail")
                 yield TeamBoard(id="team")
                 yield DebugViewer(id="debug")
+        yield IndexProgressBar(id="index-progress")
         yield Footer()
 
     # ----------------------------------------------------------------
@@ -183,6 +214,7 @@ class CCTraceApp(App):
     def on_mount(self) -> None:
         self.title = "cctrace"
         self.run_worker(self._init_sessions(), exclusive=False, name="init")
+        self.run_worker(self._load_efficiency_state(), exclusive=False, name="efficiency")
         self._start_sse()
 
     def _start_sse(self) -> None:
@@ -191,6 +223,8 @@ class CCTraceApp(App):
         self._sse = SSEClient(f"{API_BASE}/api/events", headers=auth.auth_headers)
         self._sse.on("picker-refresh", self._on_picker_refresh)
         self._sse.on("session-update", self._on_session_update)
+        self._sse.on("index-progress", self._on_index_progress)
+        self._sse.on("efficiency-analysis-update", self._on_efficiency_update)
         self._sse.start()
 
     async def on_unmount(self) -> None:
@@ -268,6 +302,98 @@ class CCTraceApp(App):
         self.totals = result.session_totals
         self.messages = result.messages
         self._sync_all_widgets()
+
+    def _on_index_progress(self, payload) -> None:
+        """`index-progress`: how much of the projects directory has been read.
+
+        Sent while the backend walks the session files — the picker fills in
+        newest-first as it goes, so this says how much is still to come.
+        """
+        self.index_progress = index_progress_from_dict(payload or {})
+
+    async def _on_efficiency_update(self, payload) -> None:
+        """`efficiency-analysis-update`: one job's progress, from any client."""
+        job = job_from_dict(payload or {})
+        if not job.session_path:
+            return
+        self.efficiency_jobs = {**self.efficiency_jobs, job.session_path: job}
+        if job.status == "completed":
+            # The score lands in the summaries, not in the job.
+            await self._refresh_efficiency_summaries()
+
+    # ----------------------------------------------------------------
+    # Jev efficiency analysis
+    # ----------------------------------------------------------------
+
+    async def _load_efficiency_state(self) -> None:
+        """Pick up analyses already run against this backend — from the
+        desktop app, a browser, or an earlier TUI run — so the picker shows
+        their scores and any analysis still in flight."""
+        try:
+            jobs = await api_client.list_efficiency_jobs()
+            summaries = await api_client.list_efficiency_summaries()
+        except Exception:
+            return
+        self.efficiency_jobs = latest_jobs_by_session(jobs)
+        self.efficiency_summaries = {s.session_path: s for s in summaries}
+
+    async def _refresh_efficiency_summaries(self) -> None:
+        try:
+            summaries = await api_client.list_efficiency_summaries()
+        except Exception:
+            return
+        self.efficiency_summaries = {s.session_path: s for s in summaries}
+
+    async def _analyse_session(self, session: SessionInfo) -> None:
+        """Prepare, confirm, then send one session to Jev.
+
+        The payload is built and redacted locally first; nothing leaves the
+        machine until the privacy notice is accepted, which is asked again
+        for every analysis and re-analysis.
+        """
+        try:
+            settings = await api_client.get_analytics_settings()
+        except Exception as error:
+            self.notify(
+                str(error), title="Analytics settings unavailable", severity="error", markup=False
+            )
+            return
+        if not settings.jev.configured:
+            self.notify(
+                JEV_KEY_REQUIRED, title="Jev API key required", severity="warning", markup=False
+            )
+            return
+        try:
+            payload = await api_client.prepare_efficiency_payload(
+                session.path, settings.default_payload_mode
+            )
+        except Exception as error:
+            self.notify(
+                str(error), title="Could not prepare the analysis", severity="error", markup=False
+            )
+            return
+
+        if not await self.push_screen_wait(EfficiencyPrivacyScreen(payload)):
+            return
+
+        try:
+            job = await api_client.start_efficiency_analysis(payload)
+        except Exception as error:
+            self.notify(
+                str(error), title="Could not start the analysis", severity="error", markup=False
+            )
+            return
+        self.efficiency_jobs = {**self.efficiency_jobs, job.session_path: job}
+
+    async def _open_analytics_settings(self) -> None:
+        try:
+            settings = await api_client.get_analytics_settings()
+        except Exception as error:
+            self.notify(
+                str(error), title="Analytics settings unavailable", severity="error", markup=False
+            )
+            return
+        self.push_screen(AnalyticsSettingsScreen(settings))
 
     # ----------------------------------------------------------------
     # Session loading
@@ -506,12 +632,46 @@ class CCTraceApp(App):
             return
         self.copy_to_clipboard(resume_command(sel.cwd, sel.session_id))
 
+    def action_analyse_session(self) -> None:
+        """a: analyse the highlighted session's efficiency with Jev."""
+        session = self._highlighted_picker_session()
+        if session is None:
+            return
+        self.run_worker(self._analyse_session(session), exclusive=True, group="analyse")
+
+    def action_analytics_settings(self) -> None:
+        """,: open the Jev and recommendation-provider settings."""
+        self.run_worker(self._open_analytics_settings(), exclusive=True, group="analytics-settings")
+
+    def _highlighted_picker_session(self) -> SessionInfo | None:
+        try:
+            picker = self.query_one("#picker", SessionPicker)
+            if picker.index is None:
+                return None
+            return picker.session_at_raw_index(picker.index)
+        except Exception:
+            return None
+
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
-        """Hide copy_resume outside the list/detail views (no session in
-        context in the picker) — kept a per-view binding rather than a global
-        footer key so it doesn't add to the picker footer's known overflow."""
+        """Per-view bindings. copy_resume is hidden outside the list/detail
+        views (no session in context in the picker), and the Jev keys are
+        shown only in the picker — both kept off the global footer, which
+        already overflows on narrow terminals.
+
+        While a modal screen (the privacy notice, the analytics settings) is
+        open it owns the keyboard: without this the app's priority bindings
+        would steal Escape and swallow characters typed into its inputs.
+        Only this app's own actions are disarmed — Textual's app-level
+        actions (`focus_next`, `focus_previous`, …) are what a modal's own
+        Tab bindings run, so blanking those out leaves the modal navigable
+        by mouse only.
+        """
+        if len(self.screen_stack) > 1 and action in self.OWN_ACTIONS:
+            return False
         if action == "copy_resume":
             return self.view in ("list", "detail") and self._current_session is not None
+        if action in ("analyse_session", "analytics_settings"):
+            return self.view == "picker"
         return True
 
     def action_d_action(self) -> None:
@@ -779,9 +939,19 @@ class CCTraceApp(App):
                 sessions=self._picker_sessions(),
                 loading=self.picker_loading,
                 error=self.picker_error,
+                jobs=self.efficiency_jobs,
+                summaries=self.efficiency_summaries,
             )
         except Exception:
             pass
+
+    def _sync_picker_analysis(self) -> None:
+        """Re-render only the analysed rows. A full populate() would clear the
+        list and drop the cursor, and a running job reports progress often."""
+        with contextlib.suppress(Exception):
+            self.query_one("#picker", SessionPicker).update_analysis(
+                self.efficiency_jobs, self.efficiency_summaries
+            )
 
     def _sync_message_list(self) -> None:
         try:
@@ -939,6 +1109,16 @@ class CCTraceApp(App):
     def watch_picker_error(self, _e) -> None:
         if self.view == "picker":
             self._sync_session_picker()
+
+    def watch_index_progress(self, _p) -> None:
+        with contextlib.suppress(Exception):
+            self.query_one("#index-progress", IndexProgressBar).progress = self.index_progress
+
+    def watch_efficiency_jobs(self, _j) -> None:
+        self._sync_picker_analysis()
+
+    def watch_efficiency_summaries(self, _s) -> None:
+        self._sync_picker_analysis()
 
     def watch_selected_project(self, _p) -> None:
         if self.view == "picker":

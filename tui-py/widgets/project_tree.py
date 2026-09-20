@@ -109,6 +109,11 @@ class ProjectTree(Widget):
         except Exception:
             return
 
+        # Every rebuild re-adds every node, which puts the sidebar back at the
+        # top. A refresh (or a live session update, which arrives on its own)
+        # must not throw away wherever the user had scrolled to.
+        scroll_offset = tree.scroll_offset
+
         tree.clear()
         self._ongoing_nodes = []
         entries = build_flat_items(self._sessions, self._collapsed_keys)
@@ -136,6 +141,10 @@ class ProjectTree(Widget):
 
         # Highlight the currently selected project
         self._highlight_selected(tree)
+
+        # After the highlight, which moves the cursor and can scroll with it.
+        # Textual clamps the offset, so a tree that shrank lands at its end.
+        tree.scroll_to(x=scroll_offset.x, y=scroll_offset.y, animate=False)
 
     def _format_label(self, item: FlatItem) -> str:
         """Build the Rich-markup label text for a tree node."""
