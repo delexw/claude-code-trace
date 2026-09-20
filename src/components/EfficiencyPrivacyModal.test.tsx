@@ -32,6 +32,8 @@ const payload: PreparedEfficiencyPayload = {
       repeatedToolCalls: 0,
       subagentCount: 0,
       contextGrowth: 0,
+      thinkingBlocks: 3,
+      thinkingChars: 1200,
     },
     selectedExcerpts: ["user: Fix login"],
   },

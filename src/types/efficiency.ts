@@ -31,6 +31,8 @@ export interface EfficiencyInput {
     repeatedToolCalls: number;
     subagentCount: number;
     contextGrowth: number;
+    thinkingBlocks: number;
+    thinkingChars: number;
   };
   selectedExcerpts: string[];
 }
@@ -72,8 +74,16 @@ export interface JevEfficiencyDecisions {
   likelyThrashing: number;
   effectiveRecovery: number;
   tokenUsageEfficient: number;
+  /** Position along the thinking rubric's levels, not a probability. */
+  thinkingBalance: number;
   subagentsUseful: number;
   likelyTaskCompleted: number;
+}
+
+export interface EfficiencyMetricScale {
+  levels: string[];
+  position: number;
+  level: string;
 }
 
 export interface EfficiencyMetricEvaluation {
@@ -83,6 +93,8 @@ export interface EfficiencyMetricEvaluation {
   higherProbabilityIsBetter: boolean;
   probability: number;
   score: number;
+  /** Present only when Jev answered with an ordered rubric instead of yes/no. */
+  scale?: EfficiencyMetricScale | null;
 }
 
 export interface SessionEfficiencyAnalysis {
@@ -96,6 +108,7 @@ export interface SessionEfficiencyAnalysis {
     exploration: number;
     recovery: number;
     tokenUse: number;
+    thinking: number;
   };
   metricEvaluations: EfficiencyMetricEvaluation[];
   findings: EfficiencyFinding[];

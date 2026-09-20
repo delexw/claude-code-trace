@@ -14,6 +14,7 @@ const analysis: SessionEfficiencyAnalysis = {
     exploration: 50,
     recovery: 40,
     tokenUse: 30,
+    thinking: 30,
   },
   metricEvaluations: [
     {
@@ -34,6 +35,7 @@ const analysis: SessionEfficiencyAnalysis = {
     likelyThrashing: 0.4,
     effectiveRecovery: 0.4,
     tokenUsageEfficient: 0.3,
+    thinkingBalance: 2,
     subagentsUseful: 0.5,
     likelyTaskCompleted: 0.8,
   },

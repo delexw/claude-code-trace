@@ -74,9 +74,13 @@ export function EfficiencyChart({ metrics }: EfficiencyChartProps) {
                 </button>
                 <span id={tooltipId} role="tooltip" className="efficiency-chart__tooltip">
                   Jev question: “{metric.question}”{" "}
-                  {metric.higherProbabilityIsBetter
-                    ? "Higher is better."
-                    : "This bar reverses Jev's probability so higher is better."}
+                  {metric.scale
+                    ? `Jev rated this “${metric.scale.level}”. The bar measures how close that is to “${
+                        metric.scale.levels[Math.floor(metric.scale.levels.length / 2)]
+                      }”, so higher is better.`
+                    : metric.higherProbabilityIsBetter
+                      ? "Higher is better."
+                      : "This bar reverses Jev's probability so higher is better."}
                 </span>
               </span>
             </div>
