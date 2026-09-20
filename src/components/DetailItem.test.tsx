@@ -446,6 +446,24 @@ describe("DetailItem", () => {
     expect(container.querySelector(".detail-item__text--thinking")).toBeInTheDocument();
   });
 
+  it("shows a placeholder body for redacted thinking with no text", () => {
+    const { container } = render(
+      <DetailItem
+        item={makeItem({ item_type: "Thinking", text: "" })}
+        index={0}
+        isSelected={false}
+        isExpanded={true}
+        onToggle={vi.fn()}
+        onToggleExpand={vi.fn()}
+        onSelect={vi.fn()}
+      />,
+    );
+    expect(
+      screen.getByText("Thinking content is not recorded in session logs."),
+    ).toBeInTheDocument();
+    expect(container.querySelector(".detail-item__text--thinking")).toBeInTheDocument();
+  });
+
   it("shows orphan badge when is_orphan is true", () => {
     render(
       <DetailItem

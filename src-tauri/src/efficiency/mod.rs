@@ -8,8 +8,8 @@ pub mod settings;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-pub const ANALYSIS_VERSION: u32 = 5;
-pub const DECISION_SET_VERSION: u32 = 3;
+pub const ANALYSIS_VERSION: u32 = 7;
+pub const DECISION_SET_VERSION: u32 = 4;
 pub const SCORE_FORMULA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

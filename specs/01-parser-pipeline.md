@@ -235,6 +235,19 @@ flowchart LR
 | `Compact` | compact_boundary    | (separator marker)                                 |
 | `Recap`   | away_summary        | output text                                        |
 
+### Thinking Blocks Are Always Redacted
+
+Claude Code writes extended-thinking blocks into the JSONL with an encrypted `signature`
+and an empty `thinking` string — the reasoning text itself is never persisted.
+
+- `chunk.rs` emits a `Thinking` `DisplayItem` for **every** thinking block, empty text
+  included, so the detail list shows where in the turn the model thought. The render
+  layers substitute a placeholder for the missing text (see `specs/13-item-rendering.md`).
+- `ongoing.rs` does **not** treat an empty-text `Thinking` item as AI activity, matching
+  `session.rs::scan_ongoing_assistant`, which skips thinking blocks whose text is blank.
+  Both completion-detection paths must agree; a redacted thinking block is not evidence
+  that a turn is still in flight.
+
 ### DisplayItem Types
 
 ```mermaid

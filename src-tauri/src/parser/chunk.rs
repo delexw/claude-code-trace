@@ -315,10 +315,10 @@ fn merge_ai_buffer(buf: &[AIMsg], orphan_pending: bool) -> Chunk {
             for b in &m.blocks {
                 match b.block_type.as_str() {
                     // Extended thinking blocks store an encrypted signature in the JSONL
-                    // but redact the actual text (thinking field is ""). Only emit a
-                    // Thinking DisplayItem when there is real content to show; thinking_count
-                    // already tracks the presence of thinking blocks regardless.
-                    "thinking" if !b.text.is_empty() => {
+                    // but redact the actual text (thinking field is ""). Emit the item
+                    // regardless so the turn shows where the model thought; the render
+                    // layers substitute a "not recorded" placeholder for empty text.
+                    "thinking" => {
                         items.push(DisplayItem {
                             item_type: DisplayItemType::Thinking,
                             text: b.text.clone(),
@@ -551,6 +551,62 @@ mod tests {
             stop_reason: String::new(),
             is_meta,
         }
+    }
+
+    fn thinking_block(text: &str) -> ContentBlock {
+        ContentBlock {
+            block_type: "thinking".to_string(),
+            text: text.to_string(),
+            ..Default::default()
+        }
+    }
+
+    fn text_block(text: &str) -> ContentBlock {
+        ContentBlock {
+            block_type: "text".to_string(),
+            text: text.to_string(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn redacted_thinking_block_still_emits_a_thinking_item() {
+        // Claude Code writes thinking blocks with an encrypted signature and an empty
+        // `thinking` string, so the item must survive with no text of its own.
+        let msgs = vec![ClassifiedMsg::AI(make_ai_msg(
+            vec![thinking_block(""), text_block("done")],
+            false,
+        ))];
+        let chunks = build_chunks(&msgs);
+        assert_eq!(chunks.len(), 1);
+        let items = &chunks[0].items;
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].item_type, DisplayItemType::Thinking);
+        assert!(items[0].text.is_empty());
+        assert_eq!(items[1].item_type, DisplayItemType::Output);
+    }
+
+    #[test]
+    fn thinking_block_with_text_keeps_its_text() {
+        let msgs = vec![ClassifiedMsg::AI(make_ai_msg(
+            vec![thinking_block("weighing the options")],
+            false,
+        ))];
+        let chunks = build_chunks(&msgs);
+        let items = &chunks[0].items;
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].item_type, DisplayItemType::Thinking);
+        assert_eq!(items[0].text, "weighing the options");
+    }
+
+    #[test]
+    fn meta_thinking_block_emits_no_item() {
+        let msgs = vec![ClassifiedMsg::AI(make_ai_msg(
+            vec![thinking_block("")],
+            true,
+        ))];
+        let chunks = build_chunks(&msgs);
+        assert!(chunks.iter().all(|c| c.items.is_empty()));
     }
 
     fn tool_use_block(id: &str, name: &str) -> ContentBlock {

@@ -53,8 +53,8 @@ const BASE_METRICS: [BaseMetricDefinition; 9] = [
     },
     BaseMetricDefinition {
         key: "redundantWorkPresent",
-        label: "Avoided repeated work",
-        question: "Was materially redundant or repeated work present?",
+        label: "Avoided redundant work",
+        question: "Was materially redundant work present? An action is redundant only when it repeats earlier work whose result could not have changed, because nothing relevant was modified in between — for example re-reading an unchanged file, or re-running the same search after no edits. Do NOT count: re-running a command after a change that could alter its result, such as re-running tests or a build after an edit; the same tool applied to a different target or different input; or a retry after an error or interruption. Each entry in state.actions carries repeatedSimilarCallCount, the number of other actions with the identical tool and input; treat that as evidence, not proof, since an identical call can still be legitimate once the state it reads has changed.",
         higher_probability_is_better: false,
     },
     BaseMetricDefinition {
@@ -156,7 +156,7 @@ fn questions(input: &EfficiencyInput) -> HashMap<String, NoulQuestion> {
         for (kind, prompt) in [
             (
                 "repeated",
-                "Does this action window contain materially repeated work?",
+                "Does this action window contain materially redundant work — an action repeating earlier work whose result could not have changed, because nothing relevant was modified in between? Do not count a re-run after a change that could alter the result, the same tool on a different target or input, or a retry after an error.",
             ),
             (
                 "thrashing",
@@ -468,6 +468,43 @@ mod tests {
             },
             selected_excerpts: vec![],
         }
+    }
+
+    #[test]
+    fn the_redundant_work_question_defines_what_counts_and_what_does_not() {
+        // A bare "was repeated work present?" left the model to invent the rule and
+        // left the dashboard label unexplained. Both the base metric and the window
+        // question must state the test and name the excluded cases.
+        let metric = BASE_METRICS
+            .iter()
+            .find(|m| m.key == "redundantWorkPresent")
+            .expect("metric exists");
+        for required in [
+            "could not have changed",
+            "Do NOT count",
+            "retry",
+            "different target",
+        ] {
+            assert!(
+                metric.question.contains(required),
+                "base question must state {required:?}"
+            );
+        }
+        assert_eq!(metric.label, "Avoided redundant work");
+
+        let mut input = empty_input();
+        input.actions = vec![EfficiencyAction {
+            index: 0,
+            tool: "Bash".into(),
+            category: "Bash".into(),
+            summary: "cargo test".into(),
+            duration_ms: 1,
+            error: false,
+            repeated_similar_call_count: 0,
+        }];
+        let window = &questions(&input)["window_0_repeated"].instructions;
+        assert!(window.contains("could not have changed"));
+        assert!(window.contains("retry after an error"));
     }
 
     #[test]

@@ -644,7 +644,8 @@ export function App() {
                     analysis={efficiencyAnalysis}
                     currentTurns={session.count}
                     onReanalyse={() =>
-                      session.sessionPath && void requestEfficiencyAnalysis(session.sessionPath)
+                      session.sessionPath &&
+                      void requestEfficiencyAnalysis(session.sessionPath, true)
                     }
                     onJumpToFinding={jumpToEfficiencyFinding}
                   />
@@ -654,7 +655,7 @@ export function App() {
                   type="button"
                   className="settings-modal__btn"
                   onClick={() =>
-                    session.sessionPath && void requestEfficiencyAnalysis(session.sessionPath)
+                    session.sessionPath && void requestEfficiencyAnalysis(session.sessionPath, true)
                   }
                   disabled={
                     !session.sessionPath ||

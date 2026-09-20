@@ -14,7 +14,12 @@ from textual.widgets import Collapsible, Static
 
 from data_types import DisplayItem, DisplayMessage
 from items import get_item_summary
-from widgets.detail_view import DetailView, _render_edit_diff, _render_msg_title
+from widgets.detail_view import (
+    DetailView,
+    _render_edit_diff,
+    _render_item_body,
+    _render_msg_title,
+)
 
 
 class _DVApp(App):
@@ -144,6 +149,17 @@ async def test_subagent_task_failure_shows_error_content():
 
         box = dv.query_one("#item-0 Static.diff-block", Static)
         assert "not_found_error" in str(box.render())
+
+
+def test_redacted_thinking_body_falls_back_to_placeholder():
+    item = DisplayItem(id="t", item_type="Thinking", text="")
+    assert _render_item_body(item) == "*Thinking content is not recorded in session logs.*"
+    assert get_item_summary(item) == "Content not recorded"
+
+
+def test_thinking_body_uses_its_text_when_recorded():
+    item = DisplayItem(id="t", item_type="Thinking", text="weighing the options")
+    assert _render_item_body(item) == "weighing the options"
 
 
 def test_output_summary_is_empty_so_prose_is_not_duplicated():

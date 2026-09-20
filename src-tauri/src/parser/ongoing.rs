@@ -107,9 +107,13 @@ impl ActivityLog {
                     continue;
                 }
                 match item.item_type {
+                    // Redacted thinking (empty text) is not evidence of activity, matching
+                    // the raw-JSONL scanner in session.rs::scan_ongoing_assistant.
                     DisplayItemType::Thinking => {
-                        entries.push((ActivityType::Thinking, idx));
-                        idx += 1;
+                        if !item.text.trim().is_empty() {
+                            entries.push((ActivityType::Thinking, idx));
+                            idx += 1;
+                        }
                     }
                     DisplayItemType::Output => {
                         if !item.text.trim().is_empty() {
@@ -662,10 +666,25 @@ mod tests {
     #[test]
     fn activity_log_thinking_only_is_ongoing() {
         let mut chunk = make_chunk(ChunkType::AI);
-        chunk.items.push(make_item(DisplayItemType::Thinking));
+        chunk.items.push(DisplayItem {
+            item_type: DisplayItemType::Thinking,
+            text: "Let me reconsider.".to_string(),
+            ..Default::default()
+        });
         let log = ActivityLog::from_chunks(&[chunk]);
         assert!(log.has_items);
         assert!(log.is_ongoing());
+    }
+
+    #[test]
+    fn activity_log_redacted_thinking_is_not_activity() {
+        // Real transcripts always redact thinking text, so a Thinking item with empty
+        // text must not make a finished turn look ongoing.
+        let mut chunk = make_chunk(ChunkType::AI);
+        chunk.items.push(make_item(DisplayItemType::Thinking));
+        let log = ActivityLog::from_chunks(&[chunk]);
+        assert!(log.has_items);
+        assert!(!log.is_ongoing());
     }
 
     #[test]
