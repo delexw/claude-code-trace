@@ -1954,6 +1954,61 @@ mod tests {
         assert!(classify(e).is_none(), "Non-hook attachment must be dropped");
     }
 
+    // --- Issue #318: v2.1.267+ /fork worktree briefing must not display as a user message ---
+
+    #[test]
+    fn classify_drops_environment_attachment_for_forked_worktree_session() {
+        // Claude Code delivers the working-directory/worktree briefing (including for a
+        // freshly forked background session) as a {type:"attachment", attachment:{type:
+        // "environment", snapshot:{...isWorktree...}}} entry with no hookEvent, matching the
+        // shape observed for real worktree sessions. It carries no message.role, so it must
+        // fall through to the generic no-role drop rather than surfacing as a Hook or, worse,
+        // being misread as something the user typed.
+        let e = Entry {
+            entry_type: "attachment".to_string(),
+            uuid: "uuid-att-environment".to_string(),
+            timestamp: "2026-09-19T22:23:41.439Z".to_string(),
+            attachment: Some(json!({
+                "type": "environment",
+                "snapshot": {
+                    "workingDirectory": "/repo/.claude/worktrees/fork-session",
+                    "isWorktree": true,
+                    "isGitRepo": true,
+                    "additionalWorkingDirectories": [],
+                    "platform": "darwin",
+                    "shell": "zsh",
+                    "osVersion": "Darwin 25.6.0"
+                }
+            })),
+            entrypoint: "sdk-ts".to_string(),
+            forked_session_id: "parent-session-abc".to_string(),
+            ..Default::default()
+        };
+        assert!(
+            classify(e).is_none(),
+            "environment/worktree-briefing attachment must be dropped, not shown as a user message"
+        );
+    }
+
+    #[test]
+    fn classify_drops_forked_worktree_briefing_wrapped_in_system_reminder() {
+        // If Claude Code instead delivers the /fork worktree briefing as a plain "user" entry
+        // (message.content wrapped entirely in <system-reminder>...</system-reminder>, the
+        // established convention for harness-injected context), it must be treated as noise
+        // like every other pure system-reminder entry -- not displayed as if the user typed it.
+        let content = json!(
+            "<system-reminder>\n# Environment\nYou have been invoked in the following environment:\n - Primary working directory: /repo/.claude/worktrees/fork-session\n - This is a git worktree.\n</system-reminder>"
+        );
+        let mut e = make_entry("user", Some(content));
+        e.entrypoint = "sdk-ts".to_string();
+        e.forked_session_id = "parent-session-abc".to_string();
+        e.message.role = "user".to_string();
+        assert!(
+            classify(e).is_none(),
+            "worktree briefing fully wrapped in <system-reminder> must be dropped as noise"
+        );
+    }
+
     // --- Hook output compat tests (v2.1.89+) ---
 
     #[test]
