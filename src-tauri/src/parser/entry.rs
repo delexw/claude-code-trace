@@ -283,6 +283,21 @@ pub struct Entry {
     pub heartbeat_elapsed_ms: u64,
     #[serde(default, rename = "seq", deserialize_with = "null_as_default")]
     pub heartbeat_seq: u32,
+    // Present on synthetic tool_result entries Claude Code writes when a tool_use never ran
+    // to completion (v2.1.265+ confirmed via a real kill -9 mid-tool-call + --resume capture,
+    // issue #313). Real values observed: "interrupted" (process died mid-tool-call, resume
+    // keeps the original tool_use and appends this marker instead of rewriting the prompt),
+    // "automode-blocked", "permission-rule", "user-rejected". All four already carry
+    // is_error:true on the tool_result content block, so this field only adds the *reason*
+    // a tool never produced a real result — callers that want to distinguish a denial/
+    // interruption from a genuine tool failure should key off this instead of guessing from
+    // the error text.
+    #[serde(
+        default,
+        rename = "toolDenialKind",
+        deserialize_with = "null_as_default"
+    )]
+    pub tool_denial_kind: String,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -2650,5 +2665,56 @@ mod tests {
             block.get("id").is_none(),
             "missing id must be preserved as absent, not synthesized at this layer"
         );
+    }
+
+    // --- Issue #313: v2.1.265 "kept and marked interrupted" resume shape, confirmed by a real
+    // kill -9 mid-tool-call + `claude --resume` capture. The synthetic tool_result entry
+    // Claude Code appends carries a new top-level `toolDenialKind` field (also seen with
+    // "automode-blocked", "permission-rule", "user-rejected" values in real session history). ---
+
+    #[test]
+    fn parse_entry_captures_tool_denial_kind_interrupted() {
+        let line = json!({
+            "type": "user",
+            "uuid": "interrupted-result-uuid",
+            "parentUuid": "toolu-assistant-uuid",
+            "timestamp": "2026-09-19T22:28:17.660Z",
+            "message": {
+                "role": "user",
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_01RH4JxjicfwBfmDkdvRNGUX",
+                    "content": "[Request interrupted by user for tool use]",
+                    "is_error": true
+                }]
+            },
+            "toolUseResult": "[Request interrupted by user for tool use]",
+            "toolDenialKind": "interrupted"
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry =
+            parse_entry(&bytes).expect("must parse resumed-session interrupted tool_result");
+        assert_eq!(entry.tool_denial_kind, "interrupted");
+    }
+
+    #[test]
+    fn parse_entry_tool_denial_kind_defaults_to_empty_when_absent() {
+        let line = json!({
+            "type": "user",
+            "uuid": "regular-tool-result-uuid",
+            "timestamp": "2026-09-19T22:28:17.660Z",
+            "message": {
+                "role": "user",
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_regular",
+                    "content": "output",
+                    "is_error": false
+                }]
+            }
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("must parse regular tool_result entry");
+        assert_eq!(entry.tool_denial_kind, "");
     }
 }

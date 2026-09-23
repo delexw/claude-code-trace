@@ -35,6 +35,7 @@ function makeItem(overrides: Partial<DisplayItem> = {}): DisplayItem {
     hook_source_agent_name: "",
     hook_requesting_agent_uuid: "",
     advisor_model: "",
+    tool_denial_kind: "",
     ...overrides,
   };
 }
@@ -561,6 +562,45 @@ describe("DetailItem", () => {
       />,
     );
     expect(screen.queryByText("pending")).not.toBeInTheDocument();
+  });
+
+  it("shows a denial badge when tool_denial_kind is set", () => {
+    // Issue #313: Claude Code 2.1.265+ keeps the original tool_use on resume after a
+    // crash mid-tool-call and appends a synthetic tool_result marked toolDenialKind:
+    // "interrupted" instead of leaving it dangling — confirmed via a real kill -9 +
+    // `claude --resume` capture. Same field also covers "automode-blocked",
+    // "permission-rule", and "user-rejected" denials.
+    render(
+      <DetailItem
+        item={makeItem({
+          tool_error: true,
+          tool_result: "[Request interrupted by user for tool use]",
+          tool_denial_kind: "interrupted",
+        })}
+        index={0}
+        isSelected={false}
+        isExpanded={false}
+        onToggle={vi.fn()}
+        onToggleExpand={vi.fn()}
+        onSelect={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("interrupted")).toBeInTheDocument();
+  });
+
+  it("omits denial badge when tool_denial_kind is empty", () => {
+    render(
+      <DetailItem
+        item={makeItem({ tool_denial_kind: "" })}
+        index={0}
+        isSelected={false}
+        isExpanded={false}
+        onToggle={vi.fn()}
+        onToggleExpand={vi.fn()}
+        onSelect={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText("interrupted")).not.toBeInTheDocument();
   });
 
   it("calls onToggle when header is clicked", () => {

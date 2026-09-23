@@ -51,6 +51,10 @@ pub struct FrontendDisplayItem {
     pub hook_requesting_agent_uuid: String,
     /// For the advisor tool call: the model that produced the advice (e.g. "claude-opus-4-8").
     pub advisor_model: String,
+    /// Why the tool call's result is a denial/interruption rather than a real outcome (e.g.
+    /// "interrupted", "automode-blocked", "permission-rule", "user-rejected"). Empty for a
+    /// genuine tool success/failure.
+    pub tool_denial_kind: String,
 }
 
 /// Frontend last output.
@@ -298,6 +302,7 @@ fn convert_display_items(
                 hook_source_agent_name: it.hook_source_agent_name.clone(),
                 hook_requesting_agent_uuid: it.hook_requesting_agent_uuid.clone(),
                 advisor_model: it.advisor_model.clone(),
+                tool_denial_kind: it.tool_denial_kind.clone(),
             };
 
             // Link subagent process if available (Subagent items and ToolCall items like Skill).
@@ -911,6 +916,34 @@ mod tests {
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].advisor_model, "claude-opus-4-8");
+    }
+
+    #[test]
+    fn tool_denial_kind_is_propagated_to_frontend_display_item() {
+        // Issue #313: v2.1.265 confirmed "interrupted" as a real toolDenialKind value on
+        // resume after a crash mid-tool-call; the frontend needs it to distinguish that from
+        // a genuine tool failure.
+        use crate::parser::chunk::{DisplayItem, DisplayItemType};
+
+        let items = vec![DisplayItem {
+            item_type: DisplayItemType::ToolCall,
+            tool_id: "toolu_interrupted".to_string(),
+            tool_name: "Bash".to_string(),
+            tool_error: true,
+            tool_denial_kind: "interrupted".to_string(),
+            ..Default::default()
+        }];
+
+        let subagents = vec![];
+        let graph = ProcGraph::new(&subagents);
+        let color_map = std::collections::HashMap::new();
+        let mut pool_idx = 0;
+
+        let result =
+            convert_display_items(&items, &graph, &color_map, &mut pool_idx, &HashSet::new());
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].tool_denial_kind, "interrupted");
     }
 
     #[test]

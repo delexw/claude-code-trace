@@ -376,6 +376,7 @@ mod tests {
                         hook_source_agent_name: String::new(),
                         hook_requesting_agent_uuid: String::new(),
                         advisor_model: String::new(),
+                        tool_denial_kind: String::new(),
                     }]
                 })
                 .unwrap_or_default(),
