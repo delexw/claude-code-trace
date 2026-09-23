@@ -256,8 +256,10 @@ struct PendingTool {
 }
 
 /// Fills in a pending ToolCall/Subagent DisplayItem's result once its matching "tool_result"
-/// block arrives, or emits a standalone Output item if no matching call was pending (orphan
-/// result). Shared by both the non-meta (advisor) and meta (every other tool) result paths.
+/// block arrives, or emits an orphaned ToolCall item (output-only, no matching tool_use) when
+/// no call was pending — e.g. Claude Code v2.1.274+ self-healing rewrote, dropped, or
+/// re-paired a corrupted tool_use/tool_result id after an "unexpected tool_use_id" error.
+/// Shared by both the non-meta (advisor) and meta (every other tool) result paths.
 fn resolve_tool_result(
     items: &mut Vec<DisplayItem>,
     pending: &mut HashMap<String, PendingTool>,
@@ -275,8 +277,13 @@ fn resolve_tool_result(
         items[p.index].duration_ms = dur.num_milliseconds();
     } else {
         items.push(DisplayItem {
-            item_type: DisplayItemType::Output,
-            text: b.content.clone(),
+            item_type: DisplayItemType::ToolCall,
+            tool_id: b.tool_id.clone(),
+            tool_result: b.content.clone(),
+            tool_result_json: b.content_json.clone(),
+            tool_error: b.is_error,
+            advisor_model: b.advisor_model.clone(),
+            is_orphan: true,
             ..Default::default()
         });
     }
@@ -990,5 +997,97 @@ mod tests {
     fn is_team_task_false_for_no_input() {
         let item = make_subagent_item(None);
         assert!(!is_team_task(&item));
+    }
+
+    // --- Issue #312: Claude Code v2.1.274+ self-healing can rewrite/drop a paired
+    // tool_use or tool_result after an "unexpected tool_use_id" error, leaving a
+    // tool_result whose id matches no pending tool_use in the file. ---
+
+    #[test]
+    fn tool_result_with_no_matching_tool_use_renders_as_orphaned_tool_call() {
+        // The tool_use side of this pair was rewritten or dropped by self-healing, so
+        // "healed-result-id" never appears in `pending`. The result must still render
+        // (not be dropped or panic) and must be flagged is_orphan so it does not get
+        // mistaken for genuine assistant prose or count toward "session is ongoing".
+        let mut result = tool_result_block("healed-result-id", "some output");
+        result.is_error = true;
+        let msgs = vec![ClassifiedMsg::AI(make_ai_msg(vec![result], true))];
+
+        let chunks = build_chunks(&msgs);
+        assert_eq!(chunks.len(), 1);
+        let items = &chunks[0].items;
+        assert_eq!(items.len(), 1, "the orphaned result must not be dropped");
+        assert_eq!(
+            items[0].item_type,
+            DisplayItemType::ToolCall,
+            "an orphaned tool_result must render as an output-only tool call, not a text blob"
+        );
+        assert!(
+            items[0].is_orphan,
+            "orphaned tool_result must be flagged is_orphan"
+        );
+        assert_eq!(items[0].tool_result, "some output");
+        assert!(items[0].tool_error);
+        assert_eq!(items[0].tool_id, "healed-result-id");
+    }
+
+    #[test]
+    fn mismatched_self_healed_tool_use_id_does_not_drop_either_side() {
+        // Simulates a self-healed transcript: the original tool_use ("toolu_original")
+        // never receives a matching result (self-healing rewrote its id away), while a
+        // tool_result referencing a different, synthesized id ("toolu_healed") appears
+        // with no tool_use of its own. Both entries must survive as distinct items.
+        let msgs = vec![
+            ClassifiedMsg::AI(make_ai_msg(
+                vec![tool_use_block("toolu_original", "Bash")],
+                false,
+            )),
+            ClassifiedMsg::AI(make_ai_msg(
+                vec![tool_result_block("toolu_healed", "healed output")],
+                true,
+            )),
+        ];
+
+        let chunks = build_chunks(&msgs);
+        assert_eq!(chunks.len(), 1);
+        let items = &chunks[0].items;
+        assert_eq!(items.len(), 2, "both mismatched sides must still render");
+
+        let call = items
+            .iter()
+            .find(|i| i.tool_id == "toolu_original")
+            .expect("unresolved tool_use must still render");
+        assert_eq!(call.item_type, DisplayItemType::ToolCall);
+        assert!(
+            call.is_deferred,
+            "unresolved tool_use ends the session deferred"
+        );
+
+        let result = items
+            .iter()
+            .find(|i| i.tool_id == "toolu_healed")
+            .expect("unmatched tool_result must still render");
+        assert!(
+            result.is_orphan,
+            "unmatched tool_result must be flagged is_orphan"
+        );
+        assert_eq!(result.tool_result, "healed output");
+    }
+
+    #[test]
+    fn orphaned_tool_result_does_not_make_session_appear_ongoing() {
+        // End-to-end: an orphaned tool_result (mismatched/self-healed id) must not be
+        // mistaken for real assistant activity by the ongoing-session heuristic.
+        use crate::parser::ongoing::OngoingChecker;
+
+        let msgs = vec![ClassifiedMsg::AI(make_ai_msg(
+            vec![tool_result_block("toolu_healed_orphan", "healed output")],
+            true,
+        ))];
+        let chunks = build_chunks(&msgs);
+        assert!(
+            !OngoingChecker::is_chunks_ongoing(&chunks),
+            "a session whose only activity is an orphaned tool_result must not appear ongoing"
+        );
     }
 }
