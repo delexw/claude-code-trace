@@ -4030,6 +4030,63 @@ mod tests {
     }
 
     #[test]
+    fn read_session_incremental_batched_queue_flush_preserves_order() {
+        // Issue #316: Claude Code v2.1.275's send-now key (ctrl+enter) interrupts the
+        // current turn and flushes every queued message at once, instead of one at a
+        // time as each prior turn completes. On disk this can write several
+        // "queue-operation" bookkeeping lines back to back, followed by several
+        // chained user entries (one per flushed message) answered by a single
+        // assistant reply. All of it must still parse and render in file order, with
+        // the queue-operation lines contributing no chunks of their own.
+        use crate::parser::chunk::{build_chunks, ChunkType};
+
+        let tmp = env::temp_dir().join("tail-test-issue316-batched-queue-flush");
+        std::fs::create_dir_all(&tmp).unwrap();
+        let path = tmp.join("session.jsonl");
+
+        let u1 = "{\"type\":\"user\",\"uuid\":\"u1\",\"parentUuid\":null,\"isSidechain\":false,\"timestamp\":\"2026-09-17T10:00:00Z\",\"message\":{\"role\":\"user\",\"content\":\"first message\"}}\n";
+        let a1 = "{\"type\":\"assistant\",\"uuid\":\"a1\",\"parentUuid\":\"u1\",\"isSidechain\":false,\"timestamp\":\"2026-09-17T10:00:01Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"working on it\"}]}}\n";
+        // send-now flushes the queue as a batch: several bookkeeping lines in a row.
+        let queue_ops = "{\"type\":\"queue-operation\"}\n".repeat(3);
+        let u2 = "{\"type\":\"user\",\"uuid\":\"u2\",\"parentUuid\":\"a1\",\"isSidechain\":false,\"timestamp\":\"2026-09-17T10:00:02Z\",\"message\":{\"role\":\"user\",\"content\":\"queued: do X\"}}\n";
+        let u3 = "{\"type\":\"user\",\"uuid\":\"u3\",\"parentUuid\":\"u2\",\"isSidechain\":false,\"timestamp\":\"2026-09-17T10:00:02Z\",\"message\":{\"role\":\"user\",\"content\":\"queued: do Y\"}}\n";
+        let u4 = "{\"type\":\"user\",\"uuid\":\"u4\",\"parentUuid\":\"u3\",\"isSidechain\":false,\"timestamp\":\"2026-09-17T10:00:02Z\",\"message\":{\"role\":\"user\",\"content\":\"queued: do Z\"}}\n";
+        let a2 = "{\"type\":\"assistant\",\"uuid\":\"a2\",\"parentUuid\":\"u4\",\"isSidechain\":false,\"timestamp\":\"2026-09-17T10:00:03Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"done with X, Y, Z\"}]}}\n";
+
+        std::fs::write(&path, format!("{u1}{a1}{queue_ops}{u2}{u3}{u4}{a2}")).unwrap();
+
+        let (msgs, _, _) = read_session_incremental(path.to_str().unwrap(), 0).unwrap();
+        assert_eq!(
+            msgs.len(),
+            6,
+            "the 3 queue-operation lines must contribute no messages of their own"
+        );
+
+        let chunks = build_chunks(&msgs);
+        let types: Vec<&ChunkType> = chunks.iter().map(|c| &c.chunk_type).collect();
+        assert_eq!(
+            types,
+            vec![
+                &ChunkType::User,
+                &ChunkType::AI,
+                &ChunkType::User,
+                &ChunkType::User,
+                &ChunkType::User,
+                &ChunkType::AI,
+            ],
+            "batched queue-operation lines must not reorder or merge the flushed messages"
+        );
+        assert_eq!(chunks[0].user_text, "first message");
+        assert_eq!(chunks[1].text, "working on it");
+        assert_eq!(chunks[2].user_text, "queued: do X");
+        assert_eq!(chunks[3].user_text, "queued: do Y");
+        assert_eq!(chunks[4].user_text, "queued: do Z");
+        assert_eq!(chunks[5].text, "done with X, Y, Z");
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
     fn forked_session_conversation_view_includes_all_entries() {
         // read_session_incremental must include inherited entries — they provide fork context.
         // Chain pu1→pa1→fu1→fa1; fa1 is the live leaf so the live-chain filter keeps all 4.
