@@ -243,6 +243,58 @@ describe("Edit tool diff view", () => {
   });
 });
 
+describe("Bash tool_result embedded diff rendering", () => {
+  it("renders an embedded diff hunk distinctly from plain stdout", () => {
+    const toolResult = [
+      "Applied patch successfully",
+      "--- a/foo.txt",
+      "+++ b/foo.txt",
+      "@@ -1,2 +1,2 @@",
+      " context line",
+      "-old line",
+      "+new line",
+    ].join("\n");
+    const { container } = render(
+      <DetailItem
+        item={makeItem({
+          tool_name: "Bash",
+          tool_input: '{"command":"sed -i ..."}',
+          tool_result: toolResult,
+        })}
+        index={0}
+        isSelected={false}
+        isExpanded={true}
+        onToggle={vi.fn()}
+        onToggleExpand={vi.fn()}
+        onSelect={vi.fn()}
+      />,
+    );
+    expect(container.querySelector(".detail-item__diff")).toBeInTheDocument();
+    // The plain-stdout portion stays outside the diff box.
+    expect(container.textContent).toContain("Applied patch successfully");
+    expect(container.querySelectorAll(".detail-item__diff-line--header")).toHaveLength(3);
+    expect(container.querySelectorAll(".detail-item__diff-line--context")).toHaveLength(1);
+    expect(container.querySelectorAll(".detail-item__diff-line--removed")).toHaveLength(1);
+    expect(container.querySelectorAll(".detail-item__diff-line--added")).toHaveLength(1);
+  });
+
+  it("renders plain stdout with no diff box when no diff hunk is present", () => {
+    const { container } = render(
+      <DetailItem
+        item={makeItem({ tool_name: "Bash", tool_result: "file1.txt\nfile2.txt" })}
+        index={0}
+        isSelected={false}
+        isExpanded={true}
+        onToggle={vi.fn()}
+        onToggleExpand={vi.fn()}
+        onSelect={vi.fn()}
+      />,
+    );
+    expect(container.querySelector(".detail-item__diff")).not.toBeInTheDocument();
+    expect(container.textContent).toContain("file1.txt");
+  });
+});
+
 describe("DetailItem", () => {
   it("renders item name and summary", () => {
     render(

@@ -1970,6 +1970,11 @@ body {
   color: var(--text-dim);
 }
 
+.detail-item__diff-line--header {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
 .detail-item__diff-line--removed {
   background: rgba(248, 81, 73, 0.15);
   color: #f85149;

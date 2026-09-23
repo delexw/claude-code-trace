@@ -196,3 +196,74 @@ def compute_edit_diff(old_lines: list[str], new_lines: list[str]) -> list[DiffLi
             segs = wd[1] if wd else [DiffSegment(text, False)]
             result.append(DiffLine("added", segs))
     return result
+
+
+# ---------------------------------------------------------------------------
+# Embedded unified-diff detection (e.g. Claude Code's `bashEditDiffEnabled`
+# diff of files a Bash command changed, appended to the tool result text).
+#
+# The parser's generic content-block flattening joins separate content blocks
+# with "\n" into one string with no separator, so a diff blob appended after
+# stdout/stderr is otherwise indistinguishable from plain command output.
+#
+# Mirror of shared/diff.ts's splitDiffSections — keep in sync.
+# ---------------------------------------------------------------------------
+
+_HUNK_HEADER_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@")
+_FILE_HEADER_RE = re.compile(r"^(?:---|\+\+\+) ")
+
+
+@dataclass
+class DiffTextSegment:
+    kind: str  # "text" | "diff"
+    content: str
+
+
+def split_diff_sections(text: str) -> list[DiffTextSegment]:
+    lines = text.split("\n")
+    segments: list[DiffTextSegment] = []
+    plain_start = 0
+    i = 0
+    n = len(lines)
+
+    while i < n:
+        if not _HUNK_HEADER_RE.match(lines[i]):
+            i += 1
+            continue
+
+        # Found a hunk header — walk backwards over adjacent `---`/`+++` file
+        # headers so they're included in the same diff segment.
+        block_start = i
+        while block_start > plain_start and _FILE_HEADER_RE.match(lines[block_start - 1]):
+            block_start -= 1
+        if block_start > plain_start:
+            segments.append(DiffTextSegment("text", "\n".join(lines[plain_start:block_start])))
+
+        # Walk forward consuming hunk lines (context/added/removed) and any
+        # further hunk headers for the same file. A `---`/`+++` pair
+        # immediately followed by a hunk header starts the NEXT file's diff,
+        # not a removed/added content line of this one.
+        j = i + 1
+        while j < n:
+            line = lines[j]
+            if _HUNK_HEADER_RE.match(line):
+                j += 1
+                continue
+            if (
+                line.startswith("--- ")
+                and _FILE_HEADER_RE.match(lines[j + 1] if j + 1 < n else "")
+                and _HUNK_HEADER_RE.match(lines[j + 2] if j + 2 < n else "")
+            ):
+                break
+            if line.startswith((" ", "+", "-")):
+                j += 1
+                continue
+            break
+        segments.append(DiffTextSegment("diff", "\n".join(lines[block_start:j])))
+        plain_start = j
+        i = j
+
+    if plain_start < n:
+        segments.append(DiffTextSegment("text", "\n".join(lines[plain_start:])))
+
+    return segments if segments else [DiffTextSegment("text", text)]

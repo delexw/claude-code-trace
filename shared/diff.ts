@@ -219,3 +219,81 @@ export function computeEditDiff(oldLines: string[], newLines: string[]): DiffLin
   }
   return result;
 }
+
+// Detects embedded unified-diff hunks (e.g. Claude Code's `bashEditDiffEnabled`
+// diff of files a Bash command changed) within otherwise plain tool output text.
+//
+// The parser's generic content-block flattening (`stringify_content` in
+// classify.rs) joins separate content blocks with "\n" into one string with no
+// separator, so a diff blob appended after stdout/stderr is otherwise
+// indistinguishable from plain command output. This lets the UI render the
+// diff portion distinctly instead of as plain stdout.
+//
+// Mirrored in tui-py/diff_utils.py — keep the two implementations in sync.
+export type DiffTextSegmentKind = "text" | "diff";
+
+export interface DiffTextSegment {
+  kind: DiffTextSegmentKind;
+  content: string;
+}
+
+const HUNK_HEADER_RE = /^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@/;
+const FILE_HEADER_RE = /^(?:---|\+\+\+) /;
+
+export function splitDiffSections(text: string): DiffTextSegment[] {
+  const lines = text.split("\n");
+  const segments: DiffTextSegment[] = [];
+  let plainStart = 0;
+  let i = 0;
+
+  while (i < lines.length) {
+    if (!HUNK_HEADER_RE.test(lines[i])) {
+      i++;
+      continue;
+    }
+
+    // Found a hunk header — walk backwards over adjacent `---`/`+++` file
+    // headers so they're included in the same diff segment.
+    let blockStart = i;
+    while (blockStart > plainStart && FILE_HEADER_RE.test(lines[blockStart - 1])) {
+      blockStart--;
+    }
+    if (blockStart > plainStart) {
+      segments.push({ kind: "text", content: lines.slice(plainStart, blockStart).join("\n") });
+    }
+
+    // Walk forward consuming hunk lines (context/added/removed) and any
+    // further hunk headers for the same file. A `---`/`+++` pair immediately
+    // followed by a hunk header starts the NEXT file's diff, not a removed/
+    // added content line of this one, so stop there instead of swallowing it.
+    let j = i + 1;
+    while (j < lines.length) {
+      const l = lines[j];
+      if (HUNK_HEADER_RE.test(l)) {
+        j++;
+        continue;
+      }
+      if (
+        l.startsWith("--- ") &&
+        FILE_HEADER_RE.test(lines[j + 1] ?? "") &&
+        HUNK_HEADER_RE.test(lines[j + 2] ?? "")
+      ) {
+        break;
+      }
+      if (l.startsWith(" ") || l.startsWith("+") || l.startsWith("-")) {
+        j++;
+        continue;
+      }
+      break;
+    }
+    segments.push({ kind: "diff", content: lines.slice(blockStart, j).join("\n") });
+    plainStart = j;
+    i = j;
+  }
+
+  if (plainStart < lines.length) {
+    segments.push({ kind: "text", content: lines.slice(plainStart).join("\n") });
+  }
+
+  return segments.length ? segments : [{ kind: "text", content: text }];
+}

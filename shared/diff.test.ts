@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { tokenize, wordDiff, computeEditDiff } from "./diff";
+import { tokenize, wordDiff, computeEditDiff, splitDiffSections } from "./diff";
 
 describe("tokenize", () => {
   it("splits into words, whitespace, and punctuation", () => {
@@ -107,5 +107,77 @@ describe("computeEditDiff", () => {
     }
     const changed = diff.find((l) => l.kind === "removed")!;
     expect(changed.segments.map((s) => s.text).join("")).toBe("  return a + 1;");
+  });
+});
+
+describe("splitDiffSections", () => {
+  it("returns a single text segment when no diff hunk is present", () => {
+    const sections = splitDiffSections("file1.txt\nfile2.txt\n");
+    expect(sections).toEqual([{ kind: "text", content: "file1.txt\nfile2.txt\n" }]);
+  });
+
+  it("detects a diff hunk appended after plain stdout", () => {
+    const text = [
+      "Applied patch successfully",
+      "--- a/foo.txt",
+      "+++ b/foo.txt",
+      "@@ -1,2 +1,2 @@",
+      " context line",
+      "-old line",
+      "+new line",
+    ].join("\n");
+    const sections = splitDiffSections(text);
+    expect(sections.map((s) => s.kind)).toEqual(["text", "diff"]);
+    expect(sections[0].content).toBe("Applied patch successfully");
+    expect(sections[1].content).toBe(
+      [
+        "--- a/foo.txt",
+        "+++ b/foo.txt",
+        "@@ -1,2 +1,2 @@",
+        " context line",
+        "-old line",
+        "+new line",
+      ].join("\n"),
+    );
+  });
+
+  it("detects a bare hunk with no file headers", () => {
+    const text = ["@@ -1 +1 @@", "-a", "+b"].join("\n");
+    const sections = splitDiffSections(text);
+    expect(sections).toEqual([{ kind: "diff", content: text }]);
+  });
+
+  it("splits text before and after a diff block", () => {
+    const text = ["before", "@@ -1 +1 @@", "-a", "+b", "after"].join("\n");
+    const sections = splitDiffSections(text);
+    expect(sections.map((s) => s.kind)).toEqual(["text", "diff", "text"]);
+    expect(sections[0].content).toBe("before");
+    expect(sections[1].content).toBe(["@@ -1 +1 @@", "-a", "+b"].join("\n"));
+    expect(sections[2].content).toBe("after");
+  });
+
+  it("handles multiple diff blocks for different files", () => {
+    const text = [
+      "--- a/one.txt",
+      "+++ b/one.txt",
+      "@@ -1 +1 @@",
+      "-a",
+      "+b",
+      "--- a/two.txt",
+      "+++ b/two.txt",
+      "@@ -1 +1 @@",
+      "-c",
+      "+d",
+    ].join("\n");
+    const sections = splitDiffSections(text);
+    expect(sections.map((s) => s.kind)).toEqual(["diff", "diff"]);
+    expect(sections[0].content).toContain("one.txt");
+    expect(sections[1].content).toContain("two.txt");
+  });
+
+  it("returns the original text unchanged when concatenated back", () => {
+    const text = ["stdout line", "@@ -1 +1 @@", "-a", "+b", "trailing"].join("\n");
+    const sections = splitDiffSections(text);
+    expect(sections.map((s) => s.content).join("\n")).toBe(text);
   });
 });

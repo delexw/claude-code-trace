@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from diff_utils import compute_edit_diff, tokenize, word_diff
+from diff_utils import compute_edit_diff, split_diff_sections, tokenize, word_diff
 
 
 def test_tokenize_splits_words_whitespace_punctuation():
@@ -92,3 +92,77 @@ def test_compute_edit_diff_reconstructs_line_from_segments():
     )
     changed = next(d for d in diff if d.kind == "removed")
     assert "".join(s.text for s in changed.segments) == "  return a + 1;"
+
+
+def test_split_diff_sections_returns_single_text_segment_when_no_hunk():
+    sections = split_diff_sections("file1.txt\nfile2.txt\n")
+    assert [(s.kind, s.content) for s in sections] == [("text", "file1.txt\nfile2.txt\n")]
+
+
+def test_split_diff_sections_detects_hunk_appended_after_stdout():
+    text = "\n".join(
+        [
+            "Applied patch successfully",
+            "--- a/foo.txt",
+            "+++ b/foo.txt",
+            "@@ -1,2 +1,2 @@",
+            " context line",
+            "-old line",
+            "+new line",
+        ]
+    )
+    sections = split_diff_sections(text)
+    assert [s.kind for s in sections] == ["text", "diff"]
+    assert sections[0].content == "Applied patch successfully"
+    assert sections[1].content == "\n".join(
+        [
+            "--- a/foo.txt",
+            "+++ b/foo.txt",
+            "@@ -1,2 +1,2 @@",
+            " context line",
+            "-old line",
+            "+new line",
+        ]
+    )
+
+
+def test_split_diff_sections_detects_bare_hunk_with_no_file_headers():
+    text = "\n".join(["@@ -1 +1 @@", "-a", "+b"])
+    sections = split_diff_sections(text)
+    assert [(s.kind, s.content) for s in sections] == [("diff", text)]
+
+
+def test_split_diff_sections_splits_text_before_and_after_diff_block():
+    text = "\n".join(["before", "@@ -1 +1 @@", "-a", "+b", "after"])
+    sections = split_diff_sections(text)
+    assert [s.kind for s in sections] == ["text", "diff", "text"]
+    assert sections[0].content == "before"
+    assert sections[1].content == "\n".join(["@@ -1 +1 @@", "-a", "+b"])
+    assert sections[2].content == "after"
+
+
+def test_split_diff_sections_handles_multiple_diff_blocks_for_different_files():
+    text = "\n".join(
+        [
+            "--- a/one.txt",
+            "+++ b/one.txt",
+            "@@ -1 +1 @@",
+            "-a",
+            "+b",
+            "--- a/two.txt",
+            "+++ b/two.txt",
+            "@@ -1 +1 @@",
+            "-c",
+            "+d",
+        ]
+    )
+    sections = split_diff_sections(text)
+    assert [s.kind for s in sections] == ["diff", "diff"]
+    assert "one.txt" in sections[0].content
+    assert "two.txt" in sections[1].content
+
+
+def test_split_diff_sections_reconstructs_original_text():
+    text = "\n".join(["stdout line", "@@ -1 +1 @@", "-a", "+b", "trailing"])
+    sections = split_diff_sections(text)
+    assert "\n".join(s.content for s in sections) == text
