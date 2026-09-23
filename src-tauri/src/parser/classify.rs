@@ -4151,6 +4151,80 @@ mod tests {
         }
     }
 
+    // --- Issue #314: v2.1.267+ commit/PR attribution text delivered as an in-conversation
+    // note (instead of tool-definition metadata), re-sent on every model change ---
+
+    const V2_1_267_ATTRIBUTION_NOTE: &str = "When creating a git commit or a pull request, \
+        follow these attribution rules: never mention that the change was authored by Claude \
+        or any AI, and only add a Co-Authored-By trailer when the user explicitly asks for one.";
+
+    #[test]
+    fn classify_v2_1_267_plain_system_entry_attribution_note_is_dropped_as_noise() {
+        // v2.1.267+: if the attribution note arrives as a bare type:"system" entry (no
+        // recognized hook subtype, no hookEvent), the existing NOISE_ENTRY_TYPES filter
+        // already drops every plain "system" entry before its content is ever inspected —
+        // see classify_returns_none_for_noise_entry_types. Document the specific scenario
+        // from issue #314 so a future regression here is caught by name.
+        let e = make_entry("system", Some(json!(V2_1_267_ATTRIBUTION_NOTE)));
+        assert!(
+            classify(e).is_none(),
+            "a bare system-type attribution note must not surface as a message"
+        );
+    }
+
+    #[test]
+    fn classify_v2_1_267_system_reminder_wrapped_attribution_note_is_dropped_as_noise() {
+        // v2.1.267+: if instead the note is delivered as a type:"user" entry fully wrapped
+        // in <system-reminder>, matching every other harness-injected note in this codebase
+        // (task notifications, harness reminders), the existing HARD_NOISE_TAGS check in
+        // is_user_noise() already drops it as reminder noise.
+        let content = format!("<system-reminder>{V2_1_267_ATTRIBUTION_NOTE}</system-reminder>");
+        let e = make_entry("user", Some(json!(content)));
+        assert!(
+            classify(e).is_none(),
+            "a system-reminder-wrapped attribution note must not surface as a message"
+        );
+    }
+
+    #[test]
+    fn classify_v2_1_267_system_reminder_wrapped_attribution_note_mixed_with_user_text_is_stripped()
+    {
+        // If the note is prepended to the next real user turn after a model switch (rather
+        // than delivered standalone), classify() already treats the entry as a normal UserMsg
+        // and sanitize_content() strips the <system-reminder> block, leaving only the text the
+        // human actually typed — see the v2.1.201+ handling a few tests above.
+        let content = format!(
+            "<system-reminder>{V2_1_267_ATTRIBUTION_NOTE}</system-reminder>\nPlease commit this."
+        );
+        let e = make_entry("user", Some(json!(content)));
+        match classify(e) {
+            Some(ClassifiedMsg::User(u)) => {
+                assert_eq!(u.text, "Please commit this.");
+                assert!(!u.text.contains("Co-Authored-By"));
+            }
+            other => panic!("Expected UserMsg with reminder stripped, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_v2_1_267_attribution_note_recurs_across_model_switches_each_dropped_independently()
+    {
+        // The release note calls out that the note "updates on model changes," i.e. it may be
+        // re-sent multiple times per session (once per /model switch). Each occurrence is a
+        // separate JSONL entry classified independently, so recurrence cannot accumulate
+        // clutter as long as each standalone occurrence keeps being dropped.
+        for i in 0..3 {
+            let content = format!(
+                "<system-reminder>{V2_1_267_ATTRIBUTION_NOTE} (revision {i})</system-reminder>"
+            );
+            let e = make_entry("user", Some(json!(content)));
+            assert!(
+                classify(e).is_none(),
+                "occurrence {i} of the recurring attribution note must still be dropped"
+            );
+        }
+    }
+
     // --- Issue #237: v2.1.224+ cross-session SendMessage compat ---
 
     #[test]
