@@ -2717,4 +2717,33 @@ mod tests {
         let entry = parse_entry(&bytes).expect("must parse regular tool_result entry");
         assert_eq!(entry.tool_denial_kind, "");
     }
+
+    // --- Issue #336: v2.1.283 added a `path` field to `--plugin-dir` load-failure entries in
+    // the stream-json `system`/`init` entry's `plugin_errors` array. `Entry` does not model
+    // `plugin_errors` at all, so this is unknown-field territory; `parse_entry` must not
+    // discard the entry (system/init is one of the entry types that must always parse). ---
+
+    #[test]
+    fn parse_entry_system_init_with_plugin_errors_path_field_v2_1_283() {
+        let line = json!({
+            "type": "system",
+            "subtype": "init",
+            "uuid": "system-init-uuid-336",
+            "timestamp": "2026-09-25T10:00:00Z",
+            "cwd": "/home/user/project",
+            "tools": ["Bash", "Read", "Edit"],
+            "mcp_servers": [],
+            "plugin_errors": [
+                {
+                    "path": "/home/user/.claude/plugins/broken-plugin",
+                    "error": "invalid plugin manifest"
+                }
+            ]
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry =
+            parse_entry(&bytes).expect("system/init entry with plugin_errors[].path must parse");
+        assert_eq!(entry.entry_type, "system");
+        assert_eq!(entry.subtype, "init");
+    }
 }
