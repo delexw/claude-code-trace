@@ -292,6 +292,11 @@ pub struct Entry {
     // a tool never produced a real result — callers that want to distinguish a denial/
     // interruption from a genuine tool failure should key off this instead of guessing from
     // the error text.
+    // v2.1.282+ (issue #334): resuming a session that ended mid-tool-call no longer injects
+    // a hidden "Continue" user message; Claude sees the original tool_use directly and is
+    // told the outcome is unknown. This field is read as an opaque string with no fixed set
+    // of values, so whatever marker that release uses for the "outcome unknown" framing is
+    // captured the same way as the four values above, with no parser change required.
     #[serde(
         default,
         rename = "toolDenialKind",
@@ -2745,5 +2750,35 @@ mod tests {
             parse_entry(&bytes).expect("system/init entry with plugin_errors[].path must parse");
         assert_eq!(entry.entry_type, "system");
         assert_eq!(entry.subtype, "init");
+    }
+
+    // --- Issue #334: v2.1.282 stops injecting a hidden "Continue" user message on manual
+    // resume of a session that ended mid-tool-call; instead Claude sees the original tool_use
+    // and is told the outcome is unknown. Since toolDenialKind is read as a plain string with
+    // no fixed set of accepted values (see the field's doc comment), a value this repo has
+    // not seen before must still parse instead of being silently dropped. ---
+
+    #[test]
+    fn parse_entry_captures_tool_denial_kind_for_unrecognized_value() {
+        let line = json!({
+            "type": "user",
+            "uuid": "unknown-outcome-result-uuid",
+            "parentUuid": "toolu-assistant-uuid",
+            "timestamp": "2026-09-24T22:28:17.660Z",
+            "message": {
+                "role": "user",
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_01RH4JxjicfwBfmDkdvRNGUX",
+                    "content": "[Tool outcome unknown: session resumed after interruption]",
+                    "is_error": true
+                }]
+            },
+            "toolUseResult": "[Tool outcome unknown: session resumed after interruption]",
+            "toolDenialKind": "outcome-unknown"
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("must parse unrecognized toolDenialKind value");
+        assert_eq!(entry.tool_denial_kind, "outcome-unknown");
     }
 }

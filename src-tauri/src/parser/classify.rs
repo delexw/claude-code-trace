@@ -470,6 +470,10 @@ pub fn classify(e: Entry) -> Option<ClassifiedMsg> {
         // v2.1.183+: synthetic re-prompt user entries are internal Claude Code markers
         // inserted when a thinking-only assistant turn triggers a re-prompt. They are not
         // human-typed messages; drop them to avoid spurious meta-AI bubbles in the UI.
+        // This same generic drop also covers the hidden "Continue" message a manual resume
+        // used to inject after a session ended mid-tool-call; v2.1.282 (issue #334) stopped
+        // writing that entry, so sessions from both before and after that release render the
+        // same way — dropped when present, simply absent otherwise.
         return None;
     }
 
@@ -1457,6 +1461,21 @@ mod tests {
         assert!(
             classify(e).is_none(),
             "isMeta user entry with empty content must be dropped"
+        );
+    }
+
+    #[test]
+    fn classify_drops_hidden_continue_resume_message() {
+        // Issue #334: pre-2.1.282 sessions record a manual resume of a session that ended
+        // mid-tool-call as a hidden isMeta user message with the literal text "Continue".
+        // v2.1.282+ no longer writes this entry at all, so the parser only needs to keep
+        // dropping it when it does appear — the generic isMeta-user drop below (not any
+        // text match on "Continue" specifically) is what makes both cases work.
+        let mut e = make_entry("user", Some(json!("Continue")));
+        e.is_meta = true;
+        assert!(
+            classify(e).is_none(),
+            "hidden Continue resume message must be dropped, not shown as a user turn"
         );
     }
 
@@ -2614,6 +2633,45 @@ mod tests {
                 );
             }
             other => panic!("Expected meta AI, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_surfaces_unrecognized_denial_kind_without_a_continue_bridge() {
+        // Issue #334: on v2.1.282+, resuming mid-tool-call no longer writes a hidden
+        // "Continue" entry between the tool_use and its outcome — the synthetic tool_result
+        // follows directly. classify() must still surface whatever denial-kind marker that
+        // release uses (not just the four values confirmed for #313) since the field is a
+        // passthrough string, not a validated enum.
+        let mut e = Entry {
+            entry_type: "user".to_string(),
+            uuid: "uuid-outcome-unknown".to_string(),
+            timestamp: "2026-09-24T22:28:17.660Z".to_string(),
+            message: super::super::entry::EntryMessage {
+                role: "user".to_string(),
+                content: Some(json!([{
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_01RH4JxjicfwBfmDkdvRNGUX",
+                    "content": "[Tool outcome unknown: session resumed after interruption]",
+                    "is_error": true
+                }])),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        e.tool_use_result = Some(json!(
+            "[Tool outcome unknown: session resumed after interruption]"
+        ));
+        e.tool_denial_kind = "outcome-unknown".to_string();
+
+        match classify(e) {
+            Some(ClassifiedMsg::AI(ai)) => {
+                assert_eq!(ai.blocks.len(), 1);
+                let b = &ai.blocks[0];
+                assert!(b.is_error);
+                assert_eq!(b.tool_denial_kind, "outcome-unknown");
+            }
+            other => panic!("Expected meta AI with denial kind, got {other:?}"),
         }
     }
 
