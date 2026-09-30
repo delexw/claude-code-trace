@@ -1480,13 +1480,19 @@ body {
   opacity: 0.9;
 }
 
+/* Antigravity transcript step badge — a small mono chip. The extra left
+ * margin on top of the flex gap makes the chip read as a discrete piece of
+ * metadata even when it sits next to the role label; without it the chip's
+ * own background visually fuses into the role label (e.g. "Error#415"). */
 .message__step {
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: 10px;
-  color: var(--text-dim);
+  color: var(--text-secondary);
   background: var(--bg-elevated);
-  padding: 1px 6px;
+  padding: 2px 7px;
   border-radius: 3px;
+  border: 1px solid var(--border-subtle);
+  margin-left: 2px;
 }
 
 /* Antigravity session-viewer topbar. Reuses the picker__provider layout

@@ -141,4 +141,19 @@ describe("AntigravityMessageItem", () => {
     fireEvent.click(screen.getByText("نعم، أراه."));
     expect(onClick).toHaveBeenCalledWith(7);
   });
+
+  it("renders the step badge as a discrete chip inside the header", () => {
+    // Locks the wire-format chip so it stays visually separated from the
+    // role label even at narrow widths. Without .message__step the chip
+    // collapses into the role text and the header looks like
+    // "Error#42026-09-30 18:40:11" with no breathing room.
+    renderOne(ERROR_MSG);
+    const header = document.querySelector(".message__header");
+    expect(header).not.toBeNull();
+    const step = header?.querySelector(".message__step");
+    expect(step).not.toBeNull();
+    expect(step?.textContent).toBe(`#${ERROR_MSG.step_index}`);
+    expect(header?.querySelector(".message__role")).not.toBeNull();
+    expect(header?.querySelector(".message__timestamp")).not.toBeNull();
+  });
 });
