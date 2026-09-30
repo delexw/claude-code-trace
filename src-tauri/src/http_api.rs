@@ -228,6 +228,15 @@ fn build_router(state: Arc<HttpState>, static_dir: Option<String>) -> Router {
             "/api/wsl/distros",
             get(api_list_wsl_distros).post(api_set_wsl_distros),
         )
+        .route(
+            "/api/antigravity/folders",
+            get(api_list_antigravity_brain_folders),
+        )
+        .route("/api/antigravity/root", get(api_get_antigravity_brain_root))
+        .route(
+            "/api/antigravity/enabled",
+            post(api_set_antigravity_enabled),
+        )
         .route("/api/project-dirs", get(api_get_project_dirs))
         .route("/api/sessions", post(api_discover_sessions))
         .route("/api/session", get(api_get_session_by_id))
@@ -243,6 +252,19 @@ fn build_router(state: Arc<HttpState>, static_dir: Option<String>) -> Router {
         .route("/api/focus", post(api_focus_session_window))
         .route("/api/events", get(api_events))
         .route_layer(from_fn_with_state(state.clone(), auth::require_client));
+
+    // The `open` endpoint depends on `tauri_plugin_opener`, which is only
+    // compiled in with the `desktop` feature. In headless builds the route
+    // is intentionally absent — `invoke.ts` sees "Unknown command" and the
+    // picker's open action becomes a no-op (its handler already swallows
+    // errors and logs them).
+    #[cfg(feature = "desktop")]
+    {
+        router = Router::new()
+            .route("/api/antigravity/open", post(api_open_antigravity_folder))
+            .route_layer(from_fn_with_state(state.clone(), auth::require_client))
+            .merge(router);
+    }
 
     if let Some(dir) = static_dir {
         let serve = ServeDir::new(&dir).append_index_html_on_directories(true);
@@ -651,6 +673,94 @@ async fn api_set_wsl_distros(
         }
     };
     guard.wsl_distros = crate::commands::wsl::sanitize_distros(body.distros);
+    if let Err(e) = crate::settings::save_settings(&guard) {
+        return err_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e);
+    }
+    ok_json(&crate::commands::settings::build_response_pub(
+        &guard,
+        &app_state.auth_snapshot(),
+        app_state.clients_snapshot(),
+    ))
+}
+
+// ---------------------------------------------------------------------------
+// Antigravity (Gemini IDE) brain folders — read-only envelopes.
+//
+// Mirrors the Tauri commands in `commands::antigravity`. The pure helpers
+// (`list_visible_antigravity_folders`, `resolve_root`) are reused so the
+// desktop Tauri path and the HTTP API agree on what's visible.
+// ---------------------------------------------------------------------------
+
+async fn api_list_antigravity_brain_folders(State(state): State<Arc<HttpState>>) -> Response {
+    let app_state = app_state(&state);
+    let guard = match app_state.settings.lock() {
+        Ok(g) => g,
+        Err(e) => {
+            return err_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+        }
+    };
+    ok_json(&crate::commands::antigravity::list_visible_antigravity_folders(&guard))
+}
+
+async fn api_get_antigravity_brain_root(State(state): State<Arc<HttpState>>) -> Response {
+    let app_state = app_state(&state);
+    let guard = match app_state.settings.lock() {
+        Ok(g) => g,
+        Err(e) => {
+            return err_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+        }
+    };
+    let (root, exists) = crate::commands::antigravity::resolve_root(&guard);
+    ok_json(&(root.to_string_lossy().into_owned(), exists))
+}
+
+#[derive(Deserialize)]
+struct OpenAntigravityBody {
+    path: String,
+}
+
+/// Reveals an Antigravity folder in the host file manager. Uses
+/// `tauri_plugin_opener`, which is only compiled with the `desktop` feature —
+/// the picker is the desktop path for the foreground click, and the HTTP
+/// API exists so the JS side can also reach it (web mode would 404).
+#[cfg(feature = "desktop")]
+async fn api_open_antigravity_folder(Json(body): Json<OpenAntigravityBody>) -> Response {
+    let p = std::path::PathBuf::from(&body.path);
+    if !p.exists() {
+        return err_response(
+            axum::http::StatusCode::BAD_REQUEST,
+            format!("path does not exist: {}", body.path),
+        );
+    }
+    if !p.is_dir() {
+        return err_response(
+            axum::http::StatusCode::BAD_REQUEST,
+            format!("path is not a directory: {}", body.path),
+        );
+    }
+    match tauri_plugin_opener::open_path(&body.path, None::<&str>) {
+        Ok(()) => ok_json(&()),
+        Err(e) => err_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
+#[derive(Deserialize)]
+struct SetAntigravityEnabledBody {
+    enabled: bool,
+}
+
+async fn api_set_antigravity_enabled(
+    State(state): State<Arc<HttpState>>,
+    Json(body): Json<SetAntigravityEnabledBody>,
+) -> Response {
+    let app_state = app_state(&state);
+    let mut guard = match app_state.settings.lock() {
+        Ok(g) => g,
+        Err(e) => {
+            return err_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+        }
+    };
+    guard.enable_antigravity = body.enabled;
     if let Err(e) = crate::settings::save_settings(&guard) {
         return err_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e);
     }

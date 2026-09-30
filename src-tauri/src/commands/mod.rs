@@ -8,6 +8,10 @@ pub mod picker;
 #[cfg(feature = "desktop")]
 pub mod session;
 
+// antigravity is also exposed via the Settings response, so it is compiled in
+// all builds; only its `#[tauri::command]` wrappers are desktop-gated.
+pub mod antigravity;
+
 // Modules with impl functions the HTTP API also uses. These stay compiled in
 // all builds; only their `#[tauri::command]` wrappers are desktop-gated.
 pub mod clients;

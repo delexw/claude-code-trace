@@ -15,6 +15,17 @@ pub struct Settings {
     /// and the `CCTRACE_ALLOWED_ORIGINS` env var — see `http_api::build_cors`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allowed_origins: Vec<String>,
+    /// Whether the picker also lists Antigravity (Gemini IDE) brain folders
+    /// as read-only envelopes. Off by default — it requires the user to opt
+    /// in via Settings. Read-only listing is intentional: full transcript
+    /// parsing for Antigravity is not yet implemented.
+    #[serde(default)]
+    pub enable_antigravity: bool,
+    /// Optional override for the Antigravity brain root. When unset the
+    /// picker resolves `$GEMINI_HOME/.gemini/antigravity-ide/brain` and then
+    /// `~/.gemini/antigravity-ide/brain` (see `commands::antigravity`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub antigravity_root: Option<String>,
 }
 
 /// Env var that relocates the whole per-user config directory (`settings.json`,
@@ -121,6 +132,44 @@ mod tests {
         assert!(settings.projects_dir.is_none());
         assert!(settings.wsl_distros.is_empty());
         assert!(settings.allowed_origins.is_empty());
+        assert!(!settings.enable_antigravity);
+        assert!(settings.antigravity_root.is_none());
+    }
+
+    #[test]
+    fn enable_antigravity_default_is_false() {
+        assert!(!Settings::default().enable_antigravity);
+    }
+
+    #[test]
+    fn enable_antigravity_roundtrip() {
+        let settings = Settings {
+            enable_antigravity: true,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&settings).unwrap();
+        let loaded: Settings = serde_json::from_str(&json).unwrap();
+        assert!(loaded.enable_antigravity);
+    }
+
+    #[test]
+    fn empty_antigravity_root_omitted_from_json() {
+        let settings = Settings::default();
+        let json = serde_json::to_string(&settings).unwrap();
+        assert!(!json.contains("antigravity_root"));
+    }
+
+    #[test]
+    fn settings_from_older_app_remain_compatible() {
+        // A settings.json written before enable_antigravity/antigravity_root
+        // existed should still deserialize and keep both new fields at their
+        // defaults, so upgrading users don't lose their projects_dir etc.
+        let legacy = r#"{"projects_dir":"/keep/me","wsl_distros":["Ubuntu"]}"#;
+        let settings: Settings = serde_json::from_str(legacy).unwrap();
+        assert_eq!(settings.projects_dir.as_deref(), Some("/keep/me"));
+        assert_eq!(settings.wsl_distros, vec!["Ubuntu"]);
+        assert!(!settings.enable_antigravity);
+        assert!(settings.antigravity_root.is_none());
     }
 
     #[test]

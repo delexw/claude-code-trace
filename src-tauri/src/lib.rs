@@ -2,7 +2,9 @@
 
 mod auth;
 mod clients;
-mod commands;
+// `pub` so the antigravity_demo example can reach `antigravity_brain_root`
+// and friends; the rest of the crate goes through `commands::*`.
+pub mod commands;
 mod convert;
 mod credentials;
 mod efficiency;
@@ -114,6 +116,10 @@ fn run_desktop(args: &[String]) {
             commands::debug::get_debug_log,
             commands::settings::get_settings,
             commands::settings::set_projects_dir,
+            commands::settings::set_antigravity_enabled,
+            commands::antigravity::list_antigravity_brain_folders,
+            commands::antigravity::get_antigravity_brain_root,
+            commands::antigravity::open_antigravity_folder,
             commands::wsl::list_wsl_distros,
             commands::wsl::set_wsl_distros,
             commands::cors::set_allowed_origins,

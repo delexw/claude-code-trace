@@ -39,6 +39,17 @@ pub struct SettingsResponse {
     pub api_auth_source: &'static str,
     /// The accepted clients (never their credentials). See `crate::clients`.
     pub clients: Vec<crate::clients::Client>,
+    /// Whether the picker also lists Antigravity (Gemini IDE) brain folders
+    /// as read-only envelopes. Off by default — see `Settings.enable_antigravity`.
+    pub enable_antigravity: bool,
+    /// Resolved Antigravity brain root (override > `$GEMINI_HOME` > `~/.gemini`
+    /// for the `antigravity-ide` flavor). Empty when no home is known.
+    pub antigravity_brain_root: String,
+    /// Whether the resolved Antigravity brain root exists on disk. The toggle
+    /// in Settings can still be enabled without this being true — it just
+    /// means the picker will surface "no folders" until the user installs
+    /// Antigravity.
+    pub antigravity_brain_root_exists: bool,
 }
 
 pub fn platform_default_dir() -> String {
@@ -60,6 +71,26 @@ pub fn build_response_pub(
     let effective = crate::parser::session::claude_projects_dir(settings.projects_dir.as_deref())
         .unwrap_or_else(|_| std::path::PathBuf::from(platform_default_dir()));
     let effective_dir_exists = effective.exists();
+    // The Antigravity root is read-only metadata — letting the toggle be
+    // turned on even when the root does not exist (Antigravity not installed
+    // yet) is intentional, so we never gate on `exists` here.
+    let antigravity_root = crate::commands::antigravity::antigravity_brain_root(
+        settings.antigravity_root.as_deref(),
+        std::env::var(crate::commands::antigravity::ENV_GEMINI_HOME)
+            .ok()
+            .as_deref(),
+        dirs::home_dir()
+            .map(|h| h.to_string_lossy().into_owned())
+            .as_deref(),
+    );
+    let (antigravity_brain_root, antigravity_brain_root_exists) = match antigravity_root {
+        Some(p) => {
+            let s = p.to_string_lossy().into_owned();
+            let exists = p.exists();
+            (s, exists)
+        }
+        None => (String::new(), false),
+    };
     SettingsResponse {
         projects_dir: settings.projects_dir.clone(),
         default_dir: platform_default_dir(),
@@ -71,6 +102,9 @@ pub fn build_response_pub(
         api_auth_enabled: auth.is_enabled(),
         api_auth_source: auth.source(),
         clients,
+        enable_antigravity: settings.enable_antigravity,
+        antigravity_brain_root,
+        antigravity_brain_root_exists,
     }
 }
 
@@ -111,6 +145,27 @@ pub async fn set_projects_dir(
     ))
 }
 
+/// Toggles the Antigravity (Gemini IDE) brain-folder discovery. Persists to
+/// `settings.json`. When turned off the picker hides every Antigravity
+/// envelope, even if folders exist on disk. Does not validate the brain
+/// root — turning it on for a system without Antigravity installed simply
+/// results in an empty picker section.
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn set_antigravity_enabled(
+    enabled: bool,
+    state: State<'_, Arc<AppState>>,
+) -> Result<SettingsResponse, String> {
+    let mut guard = state.settings.lock().map_err(|e| e.to_string())?;
+    guard.enable_antigravity = enabled;
+    crate::settings::save_settings(&guard)?;
+    Ok(build_response_pub(
+        &guard,
+        &state.auth_snapshot(),
+        state.clients_snapshot(),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -126,6 +181,48 @@ mod tests {
         assert_eq!(
             json.get("can_focus").and_then(|v| v.as_bool()),
             Some(crate::commands::terminal::can_focus())
+        );
+    }
+
+    #[test]
+    fn settings_response_reports_antigravity_root_from_os_home() {
+        // On a host with a discoverable home, the resolved brain root
+        // points at `<home>/.gemini/antigravity-ide/brain`.
+        let response = build_response_pub(
+            &crate::settings::Settings::default(),
+            &crate::auth::AuthMode::Disabled,
+            vec![],
+        );
+        assert!(!response.enable_antigravity);
+        if let Some(home) = dirs::home_dir() {
+            let expected = home
+                .join(".gemini")
+                .join(crate::commands::antigravity::ANTIGRAVITY_FLAVOR)
+                .join("brain");
+            assert_eq!(
+                response.antigravity_brain_root,
+                expected.to_string_lossy().to_string()
+            );
+        } else {
+            // No home → empty resolved path.
+            assert!(response.antigravity_brain_root.is_empty());
+        }
+    }
+
+    #[test]
+    fn settings_response_reports_antigravity_root_exists_flag() {
+        // The `exists` flag is just a snapshot of `path.exists()` — we only
+        // verify the type, not the value (depends on host install state).
+        let response = build_response_pub(
+            &crate::settings::Settings::default(),
+            &crate::auth::AuthMode::Disabled,
+            vec![],
+        );
+        let json = serde_json::to_value(&response).expect("serializes");
+        assert!(json.get("antigravity_brain_root_exists").is_some());
+        assert_eq!(
+            json.get("enable_antigravity").and_then(|v| v.as_bool()),
+            Some(false)
         );
     }
 
