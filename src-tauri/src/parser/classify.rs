@@ -1826,6 +1826,22 @@ mod tests {
     }
 
     #[test]
+    fn classify_drops_system_init_entry_as_noise_v2_1_283() {
+        // Issue #336: v2.1.283 added a `path` field to `plugin_errors` entries inside
+        // system/init. `Entry` doesn't model `plugin_errors` at all (unknown field, silently
+        // ignored), and system/init carries no hookEvent, so it must still fall through to
+        // NOISE_ENTRY_TYPES like any other plain system entry.
+        let e = Entry {
+            entry_type: "system".to_string(),
+            uuid: "uuid-sys-init-336".to_string(),
+            timestamp: "2026-09-25T10:00:00Z".to_string(),
+            subtype: "init".to_string(),
+            ..Default::default()
+        };
+        assert!(classify(e).is_none(), "system/init entry must remain noise");
+    }
+
+    #[test]
     fn classify_rescues_stop_hook_summary_as_hook() {
         // stop_hook_summary is written every time Stop hooks run (even on success).
         // It must be rescued and shown as a HookMsg so hooks always appear in the transcript.
