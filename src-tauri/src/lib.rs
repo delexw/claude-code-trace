@@ -120,6 +120,7 @@ fn run_desktop(args: &[String]) {
             commands::antigravity::list_antigravity_brain_folders,
             commands::antigravity::get_antigravity_brain_root,
             commands::antigravity::open_antigravity_folder,
+            commands::antigravity::load_antigravity_session,
             commands::wsl::list_wsl_distros,
             commands::wsl::set_wsl_distros,
             commands::cors::set_allowed_origins,

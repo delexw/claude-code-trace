@@ -11,6 +11,8 @@ import type {
   PreparedEfficiencyPayload,
   SessionEfficiencyAnalysis,
   AntigravityBrainFolder,
+  AntigravityMessage,
+  AntigravitySession,
 } from "./types";
 import { useSession } from "./hooks/useSession";
 import { usePicker } from "./hooks/usePicker";
@@ -22,6 +24,7 @@ import { useRecapPreview } from "./hooks/useRecapPreview";
 import { useEfficiencyJobs } from "./hooks/useEfficiencyJobs";
 import { useCompletedEfficiencyDashboard } from "./hooks/useCompletedEfficiencyDashboard";
 import { SessionPicker } from "./components/SessionPicker";
+import { AntigravitySessionView } from "./components/AntigravitySessionView";
 import { MessageList } from "./components/MessageList";
 import { MessageDetail } from "./components/MessageDetail";
 import { TeamBoard } from "./components/TeamBoard";
@@ -137,11 +140,26 @@ export function App() {
       setAntigravityFolders([]);
     }
   }, []);
-  // Reveal an Antigravity folder in the host file manager. Read-only —
-  // clicking a card never opens a transcript (yet).
+  // Currently-open Antigravity session (v2). Loading is implicit in the
+  // invoke promise — the transcript reads in a few hundred ms even via
+  // /mnt/c/ from WSL, so we don't show a separate spinner.
+  const [antigravitySession, setAntigravitySession] = useState<AntigravitySession | null>(null);
   const openAntigravityFolder = useCallback(async (folder: AntigravityBrainFolder) => {
     try {
-      await invoke("open_antigravity_folder", { path: folder.path });
+      const messages = await invoke<AntigravityMessage[]>("load_antigravity_session", {
+        path: folder.path,
+      });
+      setAntigravitySession({ folder, messages });
+    } catch (err) {
+      console.warn("Failed to load Antigravity session:", err);
+      setAntigravitySession(null);
+    }
+  }, []);
+  // Reveal an Antigravity folder in the host file manager. Used by the
+  // session viewer's "Open folder" button while a transcript is on screen.
+  const revealAntigravityFolder = useCallback(async (path: string) => {
+    try {
+      await invoke("open_antigravity_folder", { path });
     } catch (err) {
       console.warn("Failed to open Antigravity folder:", err);
     }
@@ -636,6 +654,20 @@ export function App() {
   const renderView = () => {
     switch (view) {
       case "picker":
+        // When an Antigravity session is open, swap the picker for the
+        // read-only viewer. Same dashboard container so the toolbar
+        // (font scale, etc.) still applies.
+        if (antigravitySession) {
+          return (
+            <div className="picker-dashboard">
+              <AntigravitySessionView
+                session={antigravitySession}
+                onBack={() => setAntigravitySession(null)}
+                onOpenFolder={() => void revealAntigravityFolder(antigravitySession.folder.path)}
+              />
+            </div>
+          );
+        }
         return (
           <div className="picker-dashboard">
             <SessionPicker

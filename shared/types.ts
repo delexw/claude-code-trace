@@ -235,3 +235,52 @@ export interface AntigravityBrainFolder {
   title: string | null;
   provider_id: "antigravity";
 }
+
+/**
+ * One normalized transcript step for an Antigravity conversation.
+ * Mirrors `crate::commands::antigravity::AntigravityMessage`. The shape
+ * is intentionally close to `DisplayMessage` so the same renderer can
+ * draw both Claude and Antigravity sessions.
+ *
+ * `role` is one of:
+ *  - `"user"` — first USER_INPUT message from the user
+ *  - `"assistant"` — PLANNER_RESPONSE (model output)
+ *  - `"tool"` — MCP_TOOL call (payload shown raw in `content`)
+ *  - `"file"` — VIEW_FILE result
+ *  - `"search"` — GREP_SEARCH result
+ *  - `"error"` — ERROR_MESSAGE
+ *  - `"checkpoint"` — compaction marker (CHECKPOINT)
+ *  - `"system"` — anything else; system-context rows that the reader
+ *    doesn't want to see (CONVERSATION_HISTORY, KNOWLEDGE_ARTIFACTS)
+ *    are filtered server-side and never reach the UI.
+ *
+ * `content` is the raw JSONL `content` string with no embellishment —
+ * `<USER_REQUEST>` markers stay visible so the reader sees the exact
+ * wire shape Antigravity produces.
+ */
+export interface AntigravityMessage {
+  step_index: number;
+  role:
+    | "user"
+    | "assistant"
+    | "tool"
+    | "file"
+    | "search"
+    | "error"
+    | "checkpoint"
+    | "context"
+    | "system";
+  content: string;
+  created_at: string | null;
+  tool_name: string | null;
+}
+
+/**
+ * Bundle returned when the picker opens an Antigravity conversation.
+ * Holds the original folder metadata plus the loaded message list, so
+ * the viewer can render both the breadcrumb and the body.
+ */
+export interface AntigravitySession {
+  folder: AntigravityBrainFolder;
+  messages: AntigravityMessage[];
+}

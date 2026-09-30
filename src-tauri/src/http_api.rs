@@ -237,6 +237,10 @@ fn build_router(state: Arc<HttpState>, static_dir: Option<String>) -> Router {
             "/api/antigravity/enabled",
             post(api_set_antigravity_enabled),
         )
+        .route(
+            "/api/antigravity/session",
+            post(api_load_antigravity_session),
+        )
         .route("/api/project-dirs", get(api_get_project_dirs))
         .route("/api/sessions", post(api_discover_sessions))
         .route("/api/session", get(api_get_session_by_id))
@@ -768,6 +772,27 @@ async fn api_set_antigravity_enabled(
         &guard,
         &app_state.auth_snapshot(),
         app_state.clients_snapshot(),
+    ))
+}
+
+#[derive(Deserialize)]
+struct LoadAntigravitySessionBody {
+    path: String,
+}
+
+/// Loads the conversation transcript for a brain folder and returns it as
+/// a list of normalized messages. Always returns 200 with `[]` when the
+/// folder has no local transcript (e.g. reference-only folders).
+async fn api_load_antigravity_session(Json(body): Json<LoadAntigravitySessionBody>) -> Response {
+    let path = std::path::PathBuf::from(&body.path);
+    if !path.is_dir() {
+        return err_response(
+            axum::http::StatusCode::BAD_REQUEST,
+            format!("path is not a directory: {}", body.path),
+        );
+    }
+    ok_json(&crate::commands::antigravity::load_antigravity_transcript(
+        &path,
     ))
 }
 

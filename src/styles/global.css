@@ -1456,6 +1456,121 @@ body {
   padding: 4px 16px;
 }
 
+/* Antigravity transcript roles — distinct border colors so the read-only
+   viewer reads visually like Claude but each step type stays scannable. */
+.message--tool {
+  border-left-color: #8b5cf6; /* purple — agent tool calls */
+  background: rgba(139, 92, 246, 0.04);
+}
+
+.message--file {
+  border-left-color: #06b6d4; /* cyan — file reads */
+}
+
+.message--search {
+  border-left-color: #f59e0b; /* amber — search hits */
+}
+
+/* CONVERSATION_HISTORY roll-up — carries summaries of the recent
+   sessions with their UUIDs and topics. Highlighted so the reader can
+   spot it while scrolling, dimmed so it doesn't shout. */
+.message--context {
+  border-left-color: #64748b; /* slate — context summary */
+  background: rgba(100, 116, 139, 0.05);
+  opacity: 0.9;
+}
+
+.message__step {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10px;
+  color: var(--text-dim);
+  background: var(--bg-elevated);
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+
+/* Antigravity session-viewer topbar. Reuses the picker__provider layout
+   shape so a viewer session feels like a continuation of the picker. */
+.message-list--antigravity .message-list__topbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
+}
+
+.message-list--antigravity .message-list__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.message-list--antigravity .message-list__count {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.message-list--antigravity .message-list__btn {
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.message-list--antigravity .message-list__btn:hover {
+  background: var(--bg-base);
+  color: var(--text-default);
+}
+
+.message-list--antigravity .message-list__open-folder {
+  background: linear-gradient(135deg, #1a73e8 0%, #34a853 100%);
+  color: #ffffff;
+  border: none;
+  padding: 4px 10px;
+  border-radius: 3px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.message-list--antigravity .message-list__open-folder:hover {
+  filter: brightness(1.05);
+}
+
+.message-list--antigravity .message-list__scroll {
+  overflow-y: auto;
+  max-height: calc(100vh - 80px);
+  padding: 8px 0;
+}
+
+.message-list--antigravity-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.message-list--antigravity-empty .message-list__empty {
+  padding: 32px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.message-list--antigravity-empty .message-list__empty code {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  background: var(--bg-elevated);
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+
 .message__header {
   display: flex;
   align-items: center;

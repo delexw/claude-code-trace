@@ -47,6 +47,33 @@ pub struct AntigravityBrainFolder {
     pub provider_id: &'static str,
 }
 
+/// One transcript step, normalized to a Claude-like shape so the frontend
+/// can reuse the existing `MessageItem` rendering. Roles we emit:
+/// - `"user"`        — first USER_INPUT row
+/// - `"assistant"`   — PLANNER_RESPONSE
+/// - `"tool"`        — MCP_TOOL
+/// - `"file"`        — VIEW_FILE
+/// - `"search"`      — GREP_SEARCH
+/// - `"error"`       — ERROR_MESSAGE
+/// - `"checkpoint"`  — CHECKPOINT (compaction)
+/// - `"ignored"`     — CONVERSATION_HISTORY / KNOWLEDGE_ARTIFACTS (system
+///                     context that the picker hides)
+///
+/// Content is the raw `content` string from the JSONL row (no embellishment,
+/// no fabricated code blocks). `<USER_REQUEST>` markers stay visible so the
+/// reader sees the exact wire shape.
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[allow(clippy::doc_overindented_list_items)]
+pub struct AntigravityMessage {
+    pub step_index: u64,
+    pub role: String,
+    pub content: String,
+    pub created_at: Option<String>,
+    /// Tool name when the row is an MCP_TOOL call (e.g. `"execute_url"`).
+    pub tool_name: Option<String>,
+}
+
 /// Pure core for tests. Resolves the brain root in this order:
 /// 1. `override_dir` (Settings.antigravity_root) when non-empty,
 /// 2. `$GEMINI_HOME/.gemini/<flavor>/brain` when `gemini_home` is set,
@@ -320,6 +347,90 @@ pub async fn open_antigravity_folder(path: String) -> Result<(), String> {
     tauri_plugin_opener::open_path(&path, None::<&str>).map_err(|e| e.to_string())
 }
 
+/// Read the conversation transcript for a brain folder. Walks
+/// `.system_generated/logs/transcript.jsonl` row by row and emits a
+/// Claude-shape message per step (see [`AntigravityMessage`]). Returns
+/// an empty vec when the transcript is missing — the call site then shows
+/// "no messages" rather than an error, since some brain folders reference
+/// other sessions and have no local transcript.
+///
+/// Pure helper, used by both the Tauri command and the HTTP API.
+pub fn load_antigravity_transcript(path: &Path) -> Vec<AntigravityMessage> {
+    let transcript = path.join(".system_generated/logs/transcript.jsonl");
+    let text = match std::fs::read_to_string(&transcript) {
+        Ok(t) => t,
+        Err(_) => return Vec::new(),
+    };
+    let mut out = Vec::new();
+    for line in text.lines() {
+        let value: serde_json::Value = match serde_json::from_str(line) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        if let Some(msg) = parse_transcript_row(&value) {
+            out.push(msg);
+        }
+    }
+    out
+}
+
+/// Map a single transcript.jsonl row to our normalized message shape.
+/// Returns `None` for system-context rows the reader doesn't want to see
+/// (`CONVERSATION_HISTORY`, `KNOWLEDGE_ARTIFACTS`).
+fn parse_transcript_row(value: &serde_json::Value) -> Option<AntigravityMessage> {
+    let step_index = value.get("step_index")?.as_u64()?;
+    let r#type = value.get("type").and_then(|t| t.as_str()).unwrap_or("");
+    let content = value
+        .get("content")
+        .and_then(|c| c.as_str())
+        .unwrap_or("")
+        .to_owned();
+    let created_at = value
+        .get("created_at")
+        .and_then(|c| c.as_str())
+        .map(str::to_owned);
+    let role = match r#type {
+        "USER_INPUT" => "user",
+        "PLANNER_RESPONSE" => "assistant",
+        "MCP_TOOL" => "tool",
+        "VIEW_FILE" => "file",
+        "GREP_SEARCH" => "search",
+        "ERROR_MESSAGE" => "error",
+        "CHECKPOINT" => "checkpoint",
+        // Surface Antigravity's periodic roll-up of recent conversations —
+        // it carries `<conversation_summaries>` with conversation IDs, titles
+        // and objectives. Useful for the reader, harmless if ignored.
+        "CONVERSATION_HISTORY" => "context",
+        // Knowledge artefacts are pure engine state with no reader value.
+        "KNOWLEDGE_ARTIFACTS" => return None,
+        // Unknown type — still surface it as system so we don't silently drop.
+        _ => "system",
+    };
+    let tool_name = if role == "tool" {
+        // The MCP tool name isn't a separate field; the first content line
+        // is something like `Created At: ...` and the rest is the tool
+        // payload. We leave it `None` for now — v3 can parse it from the
+        // protobuf-backed `messages/` folder if needed.
+        None
+    } else {
+        None
+    };
+    Some(AntigravityMessage {
+        step_index,
+        role: role.to_owned(),
+        content,
+        created_at,
+        tool_name,
+    })
+}
+
+/// Tauri command — returns all messages for a brain folder path.
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn load_antigravity_session(path: String) -> Result<Vec<AntigravityMessage>, String> {
+    Ok(load_antigravity_transcript(&PathBuf::from(path)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -528,5 +639,73 @@ mod tests {
             v[0].title.is_none(),
             "no USER_INPUT → title is None (UUID fallback in UI)"
         );
+    }
+
+    #[test]
+    fn load_transcript_returns_empty_when_transcript_missing() {
+        let tmp = std::env::temp_dir().join("cctrace-antig-load-empty");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+        let folder = tmp.join("77777777-7777-7777-7777-777777777777");
+        fs::create_dir_all(&folder).unwrap();
+        // No .system_generated/logs directory at all.
+        assert!(load_antigravity_transcript(&folder).is_empty());
+    }
+
+    #[test]
+    fn load_transcript_maps_types_to_roles_and_skips_system_rows() {
+        let tmp = std::env::temp_dir().join("cctrace-antig-load-roles");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+        let folder = tmp.join("88888888-8888-8888-8888-888888888888");
+        let logs = folder.join(".system_generated/logs");
+        fs::create_dir_all(&logs).unwrap();
+
+        let transcript = "\
+{\"step_index\":0,\"type\":\"USER_INPUT\",\"created_at\":\"2026-09-29T20:08:27Z\",\"content\":\"<USER_REQUEST>hi</USER_REQUEST>\"}\n\
+{\"step_index\":1,\"type\":\"CONVERSATION_HISTORY\",\"created_at\":\"2026-09-29T20:08:28Z\",\"content\":\"# Conversation History\\n<conversation_summaries>\\n## Conversation abc: title\\n</conversation_summaries>\"}\n\
+{\"step_index\":2,\"type\":\"PLANNER_RESPONSE\",\"created_at\":\"2026-09-29T20:08:30Z\",\"content\":\"hello\"}\n\
+{\"step_index\":3,\"type\":\"MCP_TOOL\",\"created_at\":\"2026-09-29T20:08:31Z\",\"content\":\"Created At: ...\\nargs\"}\n\
+{\"step_index\":4,\"type\":\"VIEW_FILE\",\"created_at\":\"2026-09-29T20:08:32Z\",\"content\":\"x = 1\"}\n\
+{\"step_index\":5,\"type\":\"GREP_SEARCH\",\"created_at\":\"2026-09-29T20:08:33Z\",\"content\":\"no results\"}\n\
+{\"step_index\":6,\"type\":\"ERROR_MESSAGE\",\"created_at\":\"2026-09-29T20:08:34Z\",\"content\":\"boom\"}\n\
+{\"step_index\":7,\"type\":\"CHECKPOINT\",\"created_at\":\"2026-09-29T20:08:35Z\",\"content\":\"# Resuming...\"}\n\
+{\"step_index\":8,\"type\":\"KNOWLEDGE_ARTIFACTS\",\"created_at\":\"2026-09-29T20:08:36Z\",\"content\":\"hidden\"}\n\
+";
+        fs::write(logs.join("transcript.jsonl"), transcript).unwrap();
+
+        let msgs = load_antigravity_transcript(&folder);
+        // Only KNOWLEDGE_ARTIFACTS (8) is hidden. CONVERSATION_HISTORY (1)
+        // is surfaced as the "context" role because it carries titles + objectives.
+        assert_eq!(msgs.len(), 8, "expected 8 visible rows, got {msgs:#?}");
+
+        let roles: Vec<&str> = msgs.iter().map(|m| m.role.as_str()).collect();
+        assert_eq!(
+            roles,
+            vec![
+                "user",
+                "context", // ← was hidden before; now surfaced
+                "assistant",
+                "tool",
+                "file",
+                "search",
+                "error",
+                "checkpoint",
+            ],
+        );
+
+        // Step indexes preserved in order.
+        let steps: Vec<u64> = msgs.iter().map(|m| m.step_index).collect();
+        assert_eq!(steps, vec![0, 1, 2, 3, 4, 5, 6, 7]);
+
+        // USER_INPUT content is preserved verbatim (no embellishment).
+        assert!(msgs[0].content.contains("<USER_REQUEST>"));
+        assert_eq!(msgs[0].created_at.as_deref(), Some("2026-09-29T20:08:27Z"));
+
+        // CONVERSATION_HISTORY content is preserved (titles + summaries intact).
+        let context = &msgs[1];
+        assert_eq!(context.role, "context");
+        assert!(context.content.contains("conversation_summaries"));
+        assert!(context.content.contains("## Conversation abc: title"));
     }
 }

@@ -87,6 +87,11 @@ const routes: Record<string, Route> = {
     path: "/api/antigravity/enabled",
     body: (a) => ({ enabled: a.enabled }),
   },
+  load_antigravity_session: {
+    method: "POST",
+    path: "/api/antigravity/session",
+    body: (a) => ({ path: a.path }),
+  },
   set_allowed_origins: {
     method: "POST",
     path: "/api/settings/origins",
