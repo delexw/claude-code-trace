@@ -20,6 +20,14 @@ interface SettingsResponse {
   api_auth_source?: ApiAuthSource;
   /** The accepted clients. Credentials are never included. */
   clients?: ApiClient[];
+  /** Whether the picker also lists Antigravity (Gemini IDE) brain folders
+   *  as read-only envelopes. Off by default — see `Settings.enable_antigravity`. */
+  enable_antigravity?: boolean;
+  /** Resolved Antigravity brain root (override > $GEMINI_HOME > ~/.gemini for
+   *  the `antigravity-ide` flavor). Empty when no home is known. */
+  antigravity_brain_root?: string;
+  /** Whether the resolved Antigravity brain root exists on disk. */
+  antigravity_brain_root_exists?: boolean;
 }
 
 type ApiAuthSource = "file" | "ephemeral" | "disabled";
@@ -115,6 +123,10 @@ export function SettingsModal({
   const [pending, setPending] = useState<PendingAction | null>(null);
   const [busyClient, setBusyClient] = useState<string | null>(null);
   const [clientNotice, setClientNotice] = useState("");
+  const [enableAntigravity, setEnableAntigravity] = useState(false);
+  const [antigravityBrainRoot, setAntigravityBrainRoot] = useState("");
+  const [antigravityBrainRootExists, setAntigravityBrainRootExists] = useState(false);
+  const [savingAntigravity, setSavingAntigravity] = useState(false);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -127,6 +139,9 @@ export function SettingsModal({
     setAllowedOriginsText((res.allowed_origins ?? []).join("\n"));
     setAuthSource(res.api_auth_source ?? (res.api_auth_enabled === false ? "disabled" : "file"));
     setClients(res.clients ?? []);
+    setEnableAntigravity(res.enable_antigravity ?? false);
+    setAntigravityBrainRoot(res.antigravity_brain_root ?? "");
+    setAntigravityBrainRootExists(res.antigravity_brain_root_exists ?? false);
   }, []);
 
   useEffect(() => {
@@ -193,6 +208,30 @@ export function SettingsModal({
       setSaving(false);
     }
   }, [applyResponse, onSaved, onClose]);
+
+  // Toggling Antigravity happens immediately (no Save button) so the picker
+  // reflects the new state right away. The other fields still require Save.
+  const toggleAntigravity = useCallback(async () => {
+    if (savingAntigravity) return;
+    setSavingAntigravity(true);
+    setError("");
+    try {
+      const next = !enableAntigravity;
+      const res = await invoke<SettingsResponse>("set_antigravity_enabled", {
+        enabled: next,
+      });
+      applyResponse(res);
+      // Refresh the picker through the parent's saved-callback too — onSaved
+      // is the same hook the Save button uses, so the parent already knows
+      // how to refetch session lists. Calling it keeps Antigravity in sync
+      // with Claude's refresh path.
+      onSaved();
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setSavingAntigravity(false);
+    }
+  }, [enableAntigravity, savingAntigravity, applyResponse, onSaved]);
 
   const replaceClient = useCallback((client: ApiClient) => {
     setClients((prev) => prev.map((c) => (c.id === client.id ? client : c)));
@@ -398,6 +437,41 @@ export function SettingsModal({
                   ))}
                 </div>
               </>
+            )}
+
+            <label className="settings-modal__label settings-modal__label--section">
+              Antigravity (Gemini IDE)
+            </label>
+            <p className="settings-modal__hint">
+              Read-only. List Antigravity conversation folders from the Gemini IDE `brain` directory
+              alongside Claude Code sessions. Transcript parsing for Antigravity is not yet
+              implemented — only folder names are shown.
+            </p>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={enableAntigravity}
+              aria-label="Show Antigravity conversations"
+              className={`settings-modal__toggle${enableAntigravity ? " settings-modal__toggle--on" : ""}`}
+              onClick={() => void toggleAntigravity()}
+              disabled={savingAntigravity}
+            >
+              <span className="settings-modal__toggle-knob" />
+              <span className="settings-modal__toggle-label">
+                {enableAntigravity ? "On" : "Off"}
+              </span>
+            </button>
+            {antigravityBrainRoot && (
+              <p
+                className={
+                  antigravityBrainRootExists
+                    ? "settings-modal__hint settings-modal__hint--effective"
+                    : "settings-modal__hint settings-modal__hint--missing"
+                }
+              >
+                {antigravityBrainRootExists ? "✓ Reading from:" : "✗ Not found:"}{" "}
+                {antigravityBrainRoot}
+              </p>
             )}
           </>
         )}

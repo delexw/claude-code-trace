@@ -17,6 +17,7 @@ export type {
   DebugEntry,
   ViewState,
   IndexProgress,
+  AntigravityBrainFolder,
 } from "../../shared/types";
 
 export type {

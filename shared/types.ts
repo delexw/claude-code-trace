@@ -221,3 +221,17 @@ export interface IndexProgress {
   total_bytes: number;
   done: boolean;
 }
+
+/**
+ * One Antigravity (Gemini IDE) conversation folder under
+ * `~/.gemini/<flavor>/brain/<uuid>/`. Read-only envelope in the picker —
+ * no transcript parsing yet. Mirrors
+ * `crate::commands::antigravity::AntigravityBrainFolder`.
+ */
+export interface AntigravityBrainFolder {
+  uuid: string;
+  path: string;
+  mod_time_ms: number;
+  title: string | null;
+  provider_id: "antigravity";
+}

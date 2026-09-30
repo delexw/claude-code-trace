@@ -678,3 +678,108 @@ describe("SessionPicker indexing progress", () => {
     expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
   });
 });
+
+describe("SessionPicker Antigravity section", () => {
+  const folder = {
+    uuid: "00000000-0000-0000-0000-000000000001",
+    path: "/home/user/.gemini/antigravity-ide/brain/00000000-0000-0000-0000-000000000001",
+    mod_time_ms: Date.parse("2026-09-30T12:00:00Z"),
+    title: "Build a Rust trading bot",
+    provider_id: "antigravity" as const,
+  };
+
+  it("hides the Antigravity section when no folders are provided", () => {
+    render(
+      <SessionPicker
+        index={indexed}
+        sessions={[]}
+        loading={false}
+        searchQuery=""
+        selectedIndex={0}
+        onSelect={vi.fn()}
+        onSearchChange={vi.fn()}
+        antigravityFolders={[]}
+      />,
+    );
+    expect(screen.queryByText(/Antigravity/i)).not.toBeInTheDocument();
+  });
+
+  it("treats a null antigravityFolders prop as empty (no crash)", () => {
+    // Defensive against older call sites that lazily hydrate the list.
+    expect(() =>
+      render(
+        <SessionPicker
+          index={indexed}
+          sessions={[]}
+          loading={false}
+          searchQuery=""
+          selectedIndex={0}
+          onSelect={vi.fn()}
+          onSearchChange={vi.fn()}
+          antigravityFolders={null}
+        />,
+      ),
+    ).not.toThrow();
+  });
+
+  it("renders the section header and folder card when folders are provided", () => {
+    render(
+      <SessionPicker
+        index={indexed}
+        sessions={[]}
+        loading={false}
+        searchQuery=""
+        selectedIndex={0}
+        onSelect={vi.fn()}
+        onSearchChange={vi.fn()}
+        antigravityFolders={[folder]}
+        onSelectAntigravity={vi.fn()}
+      />,
+    );
+    expect(screen.getAllByText(/Antigravity/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(folder.title!).length).toBeGreaterThan(0);
+    expect(screen.getByText(/read-only/i)).toBeInTheDocument();
+  });
+
+  it("invokes onSelectAntigravity when the card is clicked", () => {
+    const onSelectAntigravity = vi.fn();
+    render(
+      <SessionPicker
+        index={indexed}
+        sessions={[]}
+        loading={false}
+        searchQuery=""
+        selectedIndex={0}
+        onSelect={vi.fn()}
+        onSearchChange={vi.fn()}
+        antigravityFolders={[folder]}
+        onSelectAntigravity={onSelectAntigravity}
+      />,
+    );
+    fireEvent.click(screen.getAllByRole("button", { name: new RegExp(folder.title!) })[0]);
+    expect(onSelectAntigravity).toHaveBeenCalledTimes(1);
+    expect(onSelectAntigravity).toHaveBeenCalledWith(folder);
+  });
+
+  it("does not invoke onSelect when an Antigravity card is clicked", () => {
+    // The Antigravity section is read-only — clicking must not open the
+    // standard session flow.
+    const onSelect = vi.fn();
+    const onSelectAntigravity = vi.fn();
+    render(
+      <SessionPicker
+        index={indexed}
+        sessions={[]}
+        loading={false}
+        searchQuery=""
+        selectedIndex={0}
+        onSelect={onSelect}
+        onSearchChange={vi.fn()}
+        antigravityFolders={[folder]}
+        onSelectAntigravity={onSelectAntigravity}
+      />,
+    );
+    fireEvent.click(screen.getAllByRole("button", { name: new RegExp(folder.title!) })[0]);
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+});

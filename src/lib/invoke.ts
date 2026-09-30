@@ -71,6 +71,22 @@ const routes: Record<string, Route> = {
     path: "/api/wsl/distros",
     body: (a) => ({ distros: (a.distros as string[]) ?? [] }),
   },
+  // Antigravity (Gemini IDE) brain folders — read-only envelopes in the
+  // picker. The HTTP routes here mirror the Tauri commands registered in
+  // `src-tauri/src/lib.rs`; both paths reuse the same pure helpers in
+  // `commands::antigravity`.
+  list_antigravity_brain_folders: { path: "/api/antigravity/folders" },
+  get_antigravity_brain_root: { path: "/api/antigravity/root" },
+  open_antigravity_folder: {
+    method: "POST",
+    path: "/api/antigravity/open",
+    body: (a) => ({ path: a.path }),
+  },
+  set_antigravity_enabled: {
+    method: "POST",
+    path: "/api/antigravity/enabled",
+    body: (a) => ({ enabled: a.enabled }),
+  },
   set_allowed_origins: {
     method: "POST",
     path: "/api/settings/origins",

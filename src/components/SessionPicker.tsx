@@ -7,6 +7,7 @@ import type {
   EfficiencySummary,
   IndexProgress,
   SessionInfo,
+  AntigravityBrainFolder,
 } from "../types";
 import { OngoingDots } from "./OngoingDots";
 import {
@@ -27,6 +28,7 @@ import { BetaBadge } from "./BetaBadge";
 
 const NO_EFFICIENCY_JOBS = new Map<string, EfficiencyAnalysisJob>();
 const NO_EFFICIENCY_SUMMARIES = new Map<string, EfficiencySummary>();
+const NO_ANTIGRAVITY_FOLDERS: AntigravityBrainFolder[] = [];
 
 function SessionAnalysisProgress({ progress }: { progress: number }) {
   return (
@@ -76,6 +78,17 @@ interface SessionPickerProps {
   efficiencySummaries?: Map<string, EfficiencySummary>;
   onAnalyse?: (path: string) => void;
   onOpenEfficiencyDashboard?: (session: SessionInfo) => void;
+  /**
+   * Read-only Antigravity (Gemini IDE) brain folders. When non-empty, the
+   * picker renders a separate section below the Claude sessions with a
+   * badge. The picker never opens the transcript for these envelopes — the
+   * caller's `onSelectAntigravity` handler is responsible for any UI
+   * follow-up (e.g. a "Open folder" affordance). Accepts null for callers
+   * that lazily hydrate the list (e.g. older tests).
+   */
+  antigravityFolders?: AntigravityBrainFolder[] | null;
+  /** Triggered when the user clicks an Antigravity folder card. */
+  onSelectAntigravity?: (folder: AntigravityBrainFolder) => void;
 }
 
 export function SessionPicker({
@@ -94,7 +107,12 @@ export function SessionPicker({
   efficiencySummaries = NO_EFFICIENCY_SUMMARIES,
   onAnalyse,
   onOpenEfficiencyDashboard,
+  antigravityFolders = NO_ANTIGRAVITY_FOLDERS,
+  onSelectAntigravity,
 }: SessionPickerProps) {
+  // Defensive: existing call sites (and tests) may pass `null` when they
+  // haven't loaded the list yet. Treat it as empty rather than throwing.
+  const antigravityList = antigravityFolders ?? NO_ANTIGRAVITY_FOLDERS;
   const listRef = useRef<HTMLDivElement>(null);
   const selectedRef = useScrollToSelected(selectedIndex);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -330,6 +348,60 @@ export function SessionPicker({
             })}
           </div>
         ))}
+
+        {antigravityList.length > 0 && (
+          <div className="picker__provider picker__provider--antigravity">
+            <div className="picker__group-header picker__group-header--antigravity">
+              <span className="picker__provider-badge picker__provider-badge--antigravity">
+                Antigravity
+              </span>
+              <span className="picker__provider-count">{antigravityList.length}</span>
+              <span className="picker__provider-hint">read-only · folder names</span>
+            </div>
+            {antigravityList.map((folder) => (
+              <div
+                key={folder.path}
+                className="picker__session picker__session--antigravity"
+                role="button"
+                tabIndex={0}
+                aria-label={`Open Antigravity folder ${folder.title ?? folder.uuid}`}
+                onClick={() => onSelectAntigravity?.(folder)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    onSelectAntigravity?.(folder);
+                  }
+                }}
+              >
+                <div className="picker__session-top">
+                  <span className="picker__session-icon picker__session-icon--antigravity">AG</span>
+                  <span className="picker__session-preview">
+                    {truncate(folder.title ?? folder.uuid, 80)}
+                  </span>
+                  <span
+                    className="picker__provider-badge picker__provider-badge--antigravity picker__provider-badge--small"
+                    title={folder.path}
+                  >
+                    Antigravity
+                  </span>
+                </div>
+                <div className="picker__session-meta">
+                  <span
+                    className="picker__session-stat picker__session-stat--uuid"
+                    title={folder.uuid}
+                  >
+                    {truncate(folder.uuid, 36)}
+                  </span>
+                  {folder.mod_time_ms > 0 && (
+                    <span className="picker__session-time">
+                      {formatExactTime(String(folder.mod_time_ms))}
+                    </span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

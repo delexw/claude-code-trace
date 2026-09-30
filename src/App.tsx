@@ -10,6 +10,7 @@ import type {
   EfficiencyFinding,
   PreparedEfficiencyPayload,
   SessionEfficiencyAnalysis,
+  AntigravityBrainFolder,
 } from "./types";
 import { useSession } from "./hooks/useSession";
 import { usePicker } from "./hooks/usePicker";
@@ -122,6 +123,29 @@ export function App() {
     setEfficiencyError(`Jev analysis failed for ${name}: ${job.error || job.message}`);
   }, []);
   const efficiencyJobs = useEfficiencyJobs(reportEfficiencyFailure);
+  // Read-only Antigravity (Gemini IDE) brain folders. Empty unless the user
+  // opted in via Settings — the backend filters at the source.
+  const [antigravityFolders, setAntigravityFolders] = useState<AntigravityBrainFolder[]>([]);
+  const loadAntigravityFolders = useCallback(async () => {
+    try {
+      const folders = await invoke<AntigravityBrainFolder[]>("list_antigravity_brain_folders");
+      setAntigravityFolders(folders);
+    } catch (err) {
+      // The picker is a nice-to-have — log and keep the empty list so the UI
+      // shows "no folders" instead of crashing.
+      console.warn("Failed to list Antigravity folders:", err);
+      setAntigravityFolders([]);
+    }
+  }, []);
+  // Reveal an Antigravity folder in the host file manager. Read-only —
+  // clicking a card never opens a transcript (yet).
+  const openAntigravityFolder = useCallback(async (folder: AntigravityBrainFolder) => {
+    try {
+      await invoke("open_antigravity_folder", { path: folder.path });
+    } catch (err) {
+      console.warn("Failed to open Antigravity folder:", err);
+    }
+  }, []);
   // The open session's full SessionInfo (liveness, session_id), looked up from
   // the picker's list by path — useSession's meta only carries cwd/branch/mode.
   const selectedSessionInfo =
@@ -186,7 +210,10 @@ export function App() {
       return;
     }
     await loadProjectDirs();
-  }, [loadProjectDirs]);
+    // Read-only Antigravity brain folders. Safe even when the user has
+    // not opted in — the backend returns `[]` in that case.
+    void loadAntigravityFolders();
+  }, [loadProjectDirs, loadAntigravityFolders]);
 
   // Auto-discover sessions on mount (once, even under StrictMode's double effect).
   const discoveredRef = useRef(false);
@@ -627,6 +654,8 @@ export function App() {
               efficiencySummaries={efficiencyJobs.summariesBySession}
               onAnalyse={(path) => void requestEfficiencyAnalysis(path, true)}
               onOpenEfficiencyDashboard={(sessionInfo) => void openEfficiencyDashboard(sessionInfo)}
+              antigravityFolders={antigravityFolders}
+              onSelectAntigravity={(folder) => void openAntigravityFolder(folder)}
             />
           </div>
         );
@@ -814,7 +843,10 @@ export function App() {
       {showSettings && (
         <SettingsModal
           onClose={() => setShowSettings(false)}
-          onSaved={loadProjectDirs}
+          onSaved={() => {
+            void loadProjectDirs();
+            void loadAntigravityFolders();
+          }}
           fontScale={fontScale}
           onFontScaleChange={setFontScale}
           recapPreview={recapPreview}

@@ -638,3 +638,92 @@ describe("SettingsModal", () => {
     expect(screen.queryByText("Add client")).toBeNull();
   });
 });
+
+describe("SettingsModal Antigravity toggle", () => {
+  const onClose = vi.fn();
+  const onSaved = vi.fn();
+  const onFontScaleChange = vi.fn();
+  const onRecapPreviewChange = vi.fn();
+
+  const ANTIGRAVITY_BRAIN = "/Users/x/.gemini/antigravity-ide/brain";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setApiToken(null);
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "get_settings") {
+        return Promise.resolve({
+          projects_dir: null,
+          default_dir: DEFAULT_DIR,
+          effective_dir: DEFAULT_DIR,
+          effective_dir_exists: true,
+          wsl_distros: [],
+          allowed_origins: [],
+          enable_antigravity: false,
+          antigravity_brain_root: ANTIGRAVITY_BRAIN,
+          antigravity_brain_root_exists: true,
+        });
+      }
+      if (cmd === "set_antigravity_enabled") {
+        return Promise.resolve({
+          projects_dir: null,
+          default_dir: DEFAULT_DIR,
+          effective_dir: DEFAULT_DIR,
+          effective_dir_exists: true,
+          wsl_distros: [],
+          allowed_origins: [],
+          enable_antigravity: true,
+          antigravity_brain_root: ANTIGRAVITY_BRAIN,
+          antigravity_brain_root_exists: true,
+        });
+      }
+      if (cmd === "list_wsl_distros") return Promise.resolve([]);
+      return Promise.resolve();
+    });
+  });
+
+  it("renders the Antigravity toggle in the off state", async () => {
+    render(
+      <SettingsModal
+        onClose={onClose}
+        onSaved={onSaved}
+        fontScale={1}
+        onFontScaleChange={onFontScaleChange}
+        recapPreview={false}
+        onRecapPreviewChange={onRecapPreviewChange}
+      />,
+    );
+    const toggle = await screen.findByRole("switch", {
+      name: "Show Antigravity conversations",
+    });
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByText(/Reading from:/)).toBeInTheDocument();
+    expect(
+      screen.getByText(new RegExp(ANTIGRAVITY_BRAIN.replace(/[/]/g, "\\/"))),
+    ).toBeInTheDocument();
+  });
+
+  it("invokes set_antigravity_enabled and notifies onSaved when toggled on", async () => {
+    render(
+      <SettingsModal
+        onClose={onClose}
+        onSaved={onSaved}
+        fontScale={1}
+        onFontScaleChange={onFontScaleChange}
+        recapPreview={false}
+        onRecapPreviewChange={onRecapPreviewChange}
+      />,
+    );
+    const toggle = await screen.findByRole("switch", {
+      name: "Show Antigravity conversations",
+    });
+    fireEvent.click(toggle);
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("set_antigravity_enabled", {
+        enabled: true,
+      });
+    });
+    // The picker refresh hook is fired on toggle so the new folders show up.
+    expect(onSaved).toHaveBeenCalledTimes(1);
+  });
+});
