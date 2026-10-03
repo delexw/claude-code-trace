@@ -3255,6 +3255,37 @@ mod tests {
         assert!(!set.contains("X"), "dead-end branch must be excluded");
     }
 
+    #[test]
+    fn live_chain_compact_boundary_with_missing_logical_parent_uuid_terminates_cleanly() {
+        // Issue #347 / v2.1.285: the release notes warn that a "compaction marker" with
+        // missing/malformed fields could crash or lose history on compact/resume in the
+        // official client. This project's fields are permissively typed, so there is no
+        // crash risk — but confirm the walk degrades gracefully: a compact_boundary with
+        // neither parentUuid nor logicalParentUuid set (both empty/null) is treated as a
+        // genuine root, terminating the walk there instead of panicking or looping, while
+        // the live post-compact chain is still fully resolved.
+        let entries = vec![
+            make_entry("A", "", "", false),
+            make_entry("B", "A", "", false),
+            make_compact_boundary("C", ""), // malformed: logicalParentUuid missing
+            make_entry("D", "C", "", false),
+            make_entry("E", "D", "", false), // live leaf
+        ];
+        let set = resolve_live_chain_uuids(&entries);
+
+        assert!(set.contains("E"), "live leaf must be in live set");
+        assert!(set.contains("D"));
+        assert!(
+            set.contains("C"),
+            "compact_boundary itself must still be in live set"
+        );
+        assert!(
+            !set.contains("B") && !set.contains("A"),
+            "with no logicalParentUuid to follow, pre-compact history is unreachable \
+             but must not panic or loop — got {set:?}"
+        );
+    }
+
     // --- Issue #169: v2.1.191+ /rewind support — split-chain resolution ---
 
     fn make_rewind_pointer(uuid: &str, rewind_to_uuid: &str) -> Entry {
