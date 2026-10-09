@@ -103,6 +103,11 @@ pub struct Entry {
     // mark where a compaction occurred. parentUuid is null (breaks the chain), but
     // logicalParentUuid points to the last message before compaction so we can follow the
     // chain back and include pre-compaction messages in the conversation view.
+    // v2.1.285+ (issue #347): these entries also carry a `compactMetadata` object (trigger,
+    // token counts, preservedSegment/preservedMessages uuids, etc.) — confirmed via real
+    // v2.1.285/2.1.286 sessions to be the same parentUuid/logicalParentUuid shape as before,
+    // just with this extra block. It's intentionally left unparsed here; serde ignores
+    // unknown fields by default, so no struct field is needed for it.
     #[serde(
         default,
         rename = "logicalParentUuid",
@@ -303,6 +308,16 @@ pub struct Entry {
         deserialize_with = "null_as_default"
     )]
     pub tool_denial_kind: String,
+    // Present on type:"user" entries (v2.1.285+, issue #347). `promptSource` tags who/what
+    // injected the prompt: "user" (interactive composer), "sdk" (non-interactive/-p/Agent
+    // SDK), "system" (other machine-injected turns), "poll_event", or — the two values this
+    // field exists to capture — "loop_wakeup" (a dynamic /loop self-paced wakeup resubmitting
+    // its saved prompt) and "schedule_wakeup" (a ScheduleWakeup/CronCreate scheduled-task
+    // fire). classify() reads this to rescue loop/schedule wakeup entries from the generic
+    // isMeta-user drop, since unlike other isMeta re-prompt markers these carry real,
+    // user-visible conversation content that must not be silently dropped.
+    #[serde(default, rename = "promptSource", deserialize_with = "null_as_default")]
+    pub prompt_source: String,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -915,6 +930,86 @@ mod tests {
         assert_eq!(entry.subtype, "compact_boundary");
         assert_eq!(entry.parent_uuid, "");
         assert_eq!(entry.logical_parent_uuid, "last-pre-compact-uuid");
+    }
+
+    #[test]
+    fn parse_entry_handles_real_v2_1_285_compact_boundary_shape() {
+        // Issue #347: v2.1.285's release notes warned that "compaction marker" entries with
+        // missing/malformed fields could crash or lose history on compact/resume. Captured
+        // live from a real v2.1.285 session (anonymized uuids/paths): the "compaction marker"
+        // is the same existing compact_boundary shape, just with a populated compactMetadata
+        // block this parser never reads. Confirms the extra real-world fields (trigger,
+        // preTokens/postTokens, preCompactDiscoveredTools, preservedSegment, preservedMessages)
+        // are harmlessly ignored and the fields this parser does read still come through.
+        let line = json!({
+            "parentUuid": null,
+            "logicalParentUuid": "last-pre-compact-uuid",
+            "isSidechain": false,
+            "type": "system",
+            "subtype": "compact_boundary",
+            "content": "Conversation compacted",
+            "level": "info",
+            "compactMetadata": {
+                "trigger": "manual",
+                "preTokens": 470710,
+                "postTokens": 18732,
+                "cumulativeDroppedTokens": 451978,
+                "durationMs": 76965,
+                "preCompactDiscoveredTools": ["Monitor", "mcp__example__tool"],
+                "preCompactArtifactReadVersions": [],
+                "preservedSegment": {
+                    "headUuid": "head-uuid",
+                    "anchorUuid": "anchor-uuid",
+                    "tailUuid": "last-pre-compact-uuid"
+                },
+                "preservedMessages": {
+                    "anchorUuid": "anchor-uuid",
+                    "uuids": ["head-uuid", "last-pre-compact-uuid"],
+                    "allUuids": ["head-uuid", "mid-uuid", "last-pre-compact-uuid"]
+                }
+            },
+            "uuid": "boundary-uuid-001",
+            "timestamp": "2026-09-30T23:22:22.781Z",
+            "userType": "external",
+            "entrypoint": "cli",
+            "cwd": "/home/user/project",
+            "sessionId": "session-uuid",
+            "version": "2.1.285",
+            "gitBranch": "main"
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("must parse real v2.1.285 compact_boundary entry");
+        assert_eq!(entry.entry_type, "system");
+        assert_eq!(entry.subtype, "compact_boundary");
+        assert_eq!(entry.parent_uuid, "");
+        assert_eq!(entry.logical_parent_uuid, "last-pre-compact-uuid");
+        assert_eq!(entry.version, "2.1.285");
+    }
+
+    #[test]
+    fn parse_entry_captures_prompt_source_for_loop_wakeup() {
+        // Issue #347 / v2.1.285: a /loop dynamic wakeup or ScheduleWakeup/CronCreate fire
+        // resubmits its saved prompt as a user entry carrying top-level promptSource. No live
+        // session on this machine has fired a loop/schedule wakeup yet, so this shape is
+        // confirmed by static analysis of the installed v2.1.288 CLI binary instead: its
+        // bundled source defines `source: enum(["user","sdk","system","loop_wakeup",
+        // "schedule_wakeup","poll_event"])` for the prompt-origin field, and the cron/loop
+        // fire path that enqueues the resubmitted prompt sets `isMeta:true` and a
+        // `wakeupSource` of exactly "loop_wakeup"/"schedule_wakeup" (which becomes this
+        // `promptSource` value) with `turnOrigin` computed as "scheduled". It's a plain
+        // top-level string field on an ordinary type:"user" entry, not a new structural type.
+        let line = json!({
+            "type": "user",
+            "uuid": "wakeup-entry-uuid",
+            "parentUuid": "prior-uuid",
+            "message": {"role": "user", "content": "<<autonomous-loop-dynamic>>"},
+            "promptSource": "loop_wakeup",
+            "turnOrigin": "scheduled",
+            "timestamp": "2026-09-30T23:22:22.781Z"
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("must parse loop_wakeup user entry");
+        assert_eq!(entry.prompt_source, "loop_wakeup");
     }
 
     #[test]
