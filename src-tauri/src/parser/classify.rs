@@ -467,6 +467,19 @@ pub fn classify(e: Entry) -> Option<ClassifiedMsg> {
                 requesting_agent_uuid: String::new(),
             }));
         }
+        // v2.1.285+ (issue #347): a /loop dynamic wakeup or a ScheduleWakeup/CronCreate
+        // scheduled-task fire resubmits its saved prompt as a user entry tagged
+        // promptSource:"loop_wakeup"/"schedule_wakeup". Unlike the other isMeta markers
+        // handled below, this one carries real, user-visible conversation content (the
+        // resumed task's prompt) and must render as a normal turn rather than being
+        // dropped as internal noise.
+        if e.prompt_source == "loop_wakeup" || e.prompt_source == "schedule_wakeup" {
+            return Some(ClassifiedMsg::User(UserMsg {
+                timestamp: ts,
+                text: sanitize_content(&content_str),
+                permission_mode: e.permission_mode.clone(),
+            }));
+        }
         // v2.1.183+: synthetic re-prompt user entries are internal Claude Code markers
         // inserted when a thinking-only assistant turn triggers a re-prompt. They are not
         // human-typed messages; drop them to avoid spurious meta-AI bubbles in the UI.
@@ -1477,6 +1490,45 @@ mod tests {
             classify(e).is_none(),
             "hidden Continue resume message must be dropped, not shown as a user turn"
         );
+    }
+
+    #[test]
+    fn classify_rescues_loop_wakeup_is_meta_user_entry() {
+        // Issue #347 / v2.1.285: a /loop dynamic wakeup resubmits its saved prompt as a user
+        // entry with promptSource:"loop_wakeup". Even if Claude Code marks it isMeta:true like
+        // other internal re-prompt markers, its content is a real, user-visible task prompt and
+        // must render as a normal user turn, not be silently dropped.
+        let mut e = make_entry(
+            "user",
+            Some(json!([{"type": "text", "text": "Continue checking for new releases."}])),
+        );
+        e.is_meta = true;
+        e.prompt_source = "loop_wakeup".to_string();
+        match classify(e) {
+            Some(ClassifiedMsg::User(u)) => {
+                assert_eq!(u.text, "Continue checking for new releases.");
+            }
+            other => panic!("Expected UserMsg for loop_wakeup isMeta entry, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_rescues_schedule_wakeup_is_meta_user_entry() {
+        // Issue #347 / v2.1.285: a ScheduleWakeup/CronCreate scheduled-task fire resubmits its
+        // saved prompt as a user entry with promptSource:"schedule_wakeup". Same rescue as the
+        // loop_wakeup case above — it must not be dropped as internal noise.
+        let mut e = make_entry(
+            "user",
+            Some(json!([{"type": "text", "text": "Run the nightly audit."}])),
+        );
+        e.is_meta = true;
+        e.prompt_source = "schedule_wakeup".to_string();
+        match classify(e) {
+            Some(ClassifiedMsg::User(u)) => {
+                assert_eq!(u.text, "Run the nightly audit.");
+            }
+            other => panic!("Expected UserMsg for schedule_wakeup isMeta entry, got {other:?}"),
+        }
     }
 
     #[test]
