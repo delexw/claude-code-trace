@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "../lib/invoke";
 import { setApiToken as setLiveApiToken } from "../lib/apiToken";
+import type { AntigravityBrainRoot } from "../types";
 import { PopoutModal } from "./PopoutModal";
 import { FONT_SCALE_PRESETS, formatFontScale } from "../lib/fontScale";
 import { AnalyticsSettings } from "./AnalyticsSettings";
@@ -23,11 +24,17 @@ interface SettingsResponse {
   /** Whether the picker also lists Antigravity (Gemini IDE) brain folders
    *  as read-only envelopes. Off by default — see `Settings.enable_antigravity`. */
   enable_antigravity?: boolean;
-  /** Resolved Antigravity brain root (override > $GEMINI_HOME > ~/.gemini for
-   *  the `antigravity-ide` flavor). Empty when no home is known. */
+  /** The brain root currently in use: the user's override when set, else the
+   *  first flavor that exists. Empty when no home is known. */
   antigravity_brain_root?: string;
   /** Whether the resolved Antigravity brain root exists on disk. */
   antigravity_brain_root_exists?: boolean;
+  /** The user's explicit override, verbatim. `null` when flavor
+   *  auto-detection is in force — which is what an empty field means. */
+  antigravity_root?: string | null;
+  /** Every flavor root the backend probed, newest first. Lets the UI name the
+   *  other installs it found instead of silently ignoring them. */
+  antigravity_brain_roots?: AntigravityBrainRoot[];
 }
 
 type ApiAuthSource = "file" | "ephemeral" | "disabled";
@@ -126,6 +133,10 @@ export function SettingsModal({
   const [enableAntigravity, setEnableAntigravity] = useState(false);
   const [antigravityBrainRoot, setAntigravityBrainRoot] = useState("");
   const [antigravityBrainRootExists, setAntigravityBrainRootExists] = useState(false);
+  const [antigravityBrainRoots, setAntigravityBrainRoots] = useState<AntigravityBrainRoot[]>([]);
+  /** The editable override. Distinct from `antigravityBrainRoot`, which is the
+   *  resolved path the backend reports back and which the modal only displays. */
+  const [antigravityRootInput, setAntigravityRootInput] = useState("");
   const [savingAntigravity, setSavingAntigravity] = useState(false);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -142,6 +153,8 @@ export function SettingsModal({
     setEnableAntigravity(res.enable_antigravity ?? false);
     setAntigravityBrainRoot(res.antigravity_brain_root ?? "");
     setAntigravityBrainRootExists(res.antigravity_brain_root_exists ?? false);
+    setAntigravityBrainRoots(res.antigravity_brain_roots ?? []);
+    setAntigravityRootInput(res.antigravity_root ?? "");
   }, []);
 
   useEffect(() => {
@@ -184,7 +197,13 @@ export function SettingsModal({
       const originsRes = await invoke<SettingsResponse>("set_allowed_origins", {
         origins: parseOrigins(allowedOriginsText),
       });
-      applyResponse(originsRes ?? wslRes ?? dirRes);
+      // The brain-root override saves here, alongside Projects Directory —
+      // unlike the on/off toggle, which applies immediately. An empty field
+      // clears the override and restores flavor auto-detection.
+      const agRes = await invoke<SettingsResponse>("set_antigravity_root", {
+        path: antigravityRootInput.trim() || null,
+      });
+      applyResponse(agRes ?? originsRes ?? wslRes ?? dirRes);
       onSaved();
       onClose();
     } catch (err) {
@@ -192,13 +211,24 @@ export function SettingsModal({
     } finally {
       setSaving(false);
     }
-  }, [projectsDir, selectedDistros, allowedOriginsText, applyResponse, onSaved, onClose]);
+  }, [
+    projectsDir,
+    selectedDistros,
+    allowedOriginsText,
+    antigravityRootInput,
+    applyResponse,
+    onSaved,
+    onClose,
+  ]);
 
   const handleReset = useCallback(async () => {
     setSaving(true);
     setError("");
     try {
       const res = await invoke<SettingsResponse>("set_projects_dir", { path: null });
+      // Reset means reset: drop the Antigravity override too, so the reader
+      // goes back to auto-detecting every installed version.
+      await invoke<SettingsResponse>("set_antigravity_root", { path: null });
       applyResponse(res);
       onSaved();
       onClose();
@@ -443,9 +473,8 @@ export function SettingsModal({
               Antigravity (Gemini IDE)
             </label>
             <p className="settings-modal__hint">
-              Read-only. List Antigravity conversation folders from the Gemini IDE `brain` directory
-              alongside Claude Code sessions. Transcript parsing for Antigravity is not yet
-              implemented — only folder names are shown.
+              Read-only. Browse Antigravity conversation folders from the Gemini IDE `brain`
+              directory. Transcripts open in a viewer; the files are never modified.
             </p>
             <button
               type="button"
@@ -461,6 +490,29 @@ export function SettingsModal({
                 {enableAntigravity ? "On" : "Off"}
               </span>
             </button>
+
+            <label
+              className="settings-modal__label settings-modal__label--sub"
+              htmlFor="antigravity-root"
+            >
+              Brain Directory
+            </label>
+            <p className="settings-modal__hint">
+              Leave empty to auto-detect every Antigravity version installed for this user. Set a
+              path to read one specific directory instead.
+            </p>
+            <input
+              id="antigravity-root"
+              className="settings-modal__input"
+              type="text"
+              value={antigravityRootInput}
+              onChange={(e) => {
+                setAntigravityRootInput(e.target.value);
+                setError("");
+              }}
+              placeholder={antigravityBrainRoot + " (auto-detected)"}
+              spellCheck={false}
+            />
             {antigravityBrainRoot && (
               <p
                 className={
@@ -471,6 +523,15 @@ export function SettingsModal({
               >
                 {antigravityBrainRootExists ? "✓ Reading from:" : "✗ Not found:"}{" "}
                 {antigravityBrainRoot}
+              </p>
+            )}
+            {antigravityBrainRoots.filter((r) => r.exists).length > 1 && (
+              <p className="settings-modal__hint">
+                Also found:{" "}
+                {antigravityBrainRoots
+                  .filter((r) => r.exists)
+                  .map((r) => `${r.flavor} → ${r.path}`)
+                  .join(" · ")}
               </p>
             )}
           </>

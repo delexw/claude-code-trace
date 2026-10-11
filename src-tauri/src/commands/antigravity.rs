@@ -1,14 +1,17 @@
 //! Read-only listing of Antigravity (Gemini IDE) brain folders.
 //!
 //! Each `~/.gemini/<flavor>/brain/<uuid>/` directory is one Antigravity
-//! conversation. This module surfaces them in the picker as envelopes — it
-//! does not parse the JSONL transcript yet. Adding transcript support later
-//! is a separate concern (see `parser/`).
+//! conversation. Antigravity ships under more than one flavor directory
+//! (`antigravity-ide` on current installs, `antigravity` on older ones), and
+//! a migration copies old conversations into the new root — so the same
+//! conversation UUID can be present under two flavors. This module resolves
+//! every known flavor, merges them and de-duplicates by UUID.
 //!
 //! Gating: enabled via `Settings.enable_antigravity`. Default is off, so the
 //! picker never scans an Antigravity root unless the user opts in.
 
 use serde::Serialize;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 #[cfg(feature = "desktop")]
@@ -19,16 +22,27 @@ use tauri::State;
 #[cfg(feature = "desktop")]
 use crate::state::AppState;
 
-/// The Antigravity "brain" subpath under `.gemini/<flavor>/`. Kept as a
-/// single constant so the picker UI can label it consistently.
-pub const ANTIGRAVITY_FLAVOR: &str = "antigravity-ide";
+/// The Antigravity "brain" subpath lives under `.gemini/<flavor>/`. Antigravity
+/// has shipped under two flavor directory names: `antigravity-ide` on current
+/// installs, `antigravity` on older ones. Ordered newest-first — the first
+/// entry that exists on disk is the primary root the picker reports as
+/// "Active", but every entry that exists is scanned and merged.
+///
+/// `antigravity-backup` is deliberately absent: it is a snapshot of the old
+/// flavor, not an independent install, and scanning it would re-list every
+/// old conversation a second time.
+pub const ANTIGRAVITY_FLAVORS: &[&str] = &["antigravity-ide", "antigravity"];
+
+/// The transcript path inside one conversation folder. Shared by the scanner
+/// (to set `has_transcript`) and the loader.
+const TRANSCRIPT_SUBPATH: &str = ".system_generated/logs/transcript.jsonl";
 
 /// Env var that relocates the whole `.gemini` directory. Mirrors how
 /// `dirs::home_dir()` is used elsewhere in the app.
 pub const ENV_GEMINI_HOME: &str = "GEMINI_HOME";
 
 /// One conversation folder under the brain root. Shown in the picker as a
-/// pseudo-session. The transcript itself is not opened here.
+/// pseudo-session.
 #[derive(Serialize, Debug, Clone, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct AntigravityBrainFolder {
@@ -39,25 +53,50 @@ pub struct AntigravityBrainFolder {
     /// Folder's last-modified time as Unix milliseconds. Drives the picker
     /// sort (`newest first`).
     pub mod_time_ms: i64,
-    /// First non-empty line of `task.md`, truncated to 80 chars, when the
-    /// file is present and readable. Used as a hint label.
+    /// Best available one-line hint: the conversation metadata `summary`,
+    /// else `task.md`'s first line, else the first `USER_INPUT` body.
+    /// Truncated to 80 chars. `None` when no source is readable.
     pub title: Option<String>,
-    /// Always `"antigravity"` for v1. Lets the frontend badge future
-    /// providers without a schema change.
+    /// Which flavor directory this folder was found under (`antigravity-ide`
+    /// or `antigravity`). Lets the picker badge the install a conversation
+    /// came from.
+    pub flavor: String,
+    /// Whether this folder actually holds a transcript. Brain roots also hold
+    /// artifact/attachment folders (screenshots, scratch dirs) that have no
+    /// conversation in them — the picker marks those instead of showing a
+    /// "no transcript" error when they are opened.
+    pub has_transcript: bool,
+    /// Always `"antigravity"`. Lets the frontend badge future providers
+    /// without a schema change.
     pub provider_id: &'static str,
+}
+
+/// One resolved brain root: a flavor directory name and the path it maps to.
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub struct BrainRoot {
+    pub flavor: String,
+    pub path: String,
+    pub exists: bool,
 }
 
 /// One transcript step, normalized to a Claude-like shape so the frontend
 /// can reuse the existing `MessageItem` rendering. Roles we emit:
-/// - `"user"`        — first USER_INPUT row
+/// - `"user"`        — USER_INPUT
 /// - `"assistant"`   — PLANNER_RESPONSE
 /// - `"tool"`        — MCP_TOOL
 /// - `"file"`        — VIEW_FILE
 /// - `"search"`      — GREP_SEARCH
 /// - `"error"`       — ERROR_MESSAGE
 /// - `"checkpoint"`  — CHECKPOINT (compaction)
-/// - `"ignored"`     — CONVERSATION_HISTORY / KNOWLEDGE_ARTIFACTS (system
-///                     context that the picker hides)
+/// - `"context"`     — CONVERSATION_HISTORY (Antigravity's roll-up of recent
+///                     conversations — carries `<conversation_summaries>` with
+///                     ids, titles and objectives)
+/// - `"system"`      — anything else (LIST_DIRECTORY, CODE_ACTION,
+///                     RUN_COMMAND, SYSTEM_MESSAGE, GENERIC, …)
+///
+/// `KNOWLEDGE_ARTIFACTS` is the one type dropped outright: it is pure engine
+/// state with no reader value.
 ///
 /// Content is the raw `content` string from the JSONL row (no embellishment,
 /// no fabricated code blocks). `<USER_REQUEST>` markers stay visible so the
@@ -70,33 +109,102 @@ pub struct AntigravityMessage {
     pub role: String,
     pub content: String,
     pub created_at: Option<String>,
-    /// Tool name when the row is an MCP_TOOL call (e.g. `"execute_url"`).
+    /// Always `None` today. Tool calls arrive in a row's `tool_calls` array
+    /// (`{name, args}`), not in a dedicated MCP_TOOL row — no transcript
+    /// produced by Antigravity emits that type. Populated once the reader
+    /// renders `tool_calls`.
     pub tool_name: Option<String>,
 }
 
-/// Pure core for tests. Resolves the brain root in this order:
-/// 1. `override_dir` (Settings.antigravity_root) when non-empty,
-/// 2. `$GEMINI_HOME/.gemini/<flavor>/brain` when `gemini_home` is set,
-/// 3. `<os_home>/.gemini/<flavor>/brain` when `os_home` is set,
-/// 4. `None` when no usable home exists.
-pub fn antigravity_brain_root(
+/// Join the `.gemini` base for a flavor. If `base` already *is* a `.gemini`
+/// directory (which is what `GEMINI_HOME` conventionally points at — the same
+/// way `dirs::home_dir()` points at the parent), do not append it twice.
+fn gemini_base(base: &Path) -> PathBuf {
+    if base.file_name().is_some_and(|n| n == ".gemini") {
+        base.to_path_buf()
+    } else {
+        base.join(".gemini")
+    }
+}
+
+/// Every brain root worth scanning, in priority order (newest flavor first).
+/// Unlike [`antigravity_brain_root`] this does not require the candidate to
+/// exist — the caller decides what to do with a missing directory (the picker
+/// wants the list for its "also found" line; the scanner wants existing ones
+/// only).
+///
+/// 1. `override_dir` (Settings.antigravity_root) when non-empty — returned
+///    alone and used verbatim, so a user pointing at an arbitrary directory
+///    gets exactly that directory and no flavor probing.
+/// 2. `<gemini_home>/.gemini/<flavor>/brain` when `gemini_home` is set.
+/// 3. `<os_home>/.gemini/<flavor>/brain` when `os_home` is set.
+/// 4. Empty when no usable home exists.
+pub fn brain_root_candidates(
     override_dir: Option<&str>,
     gemini_home: Option<&str>,
     os_home: Option<&str>,
-) -> Option<PathBuf> {
+) -> Vec<BrainRoot> {
     if let Some(p) = override_dir
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(PathBuf::from)
     {
-        return Some(p);
+        let exists = p.exists();
+        return vec![BrainRoot {
+            flavor: "custom".to_owned(),
+            path: p.to_string_lossy().into_owned(),
+            exists,
+        }];
     }
     let base = gemini_home
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(PathBuf::from)
-        .or_else(|| os_home.map(PathBuf::from))?;
-    Some(base.join(".gemini").join(ANTIGRAVITY_FLAVOR).join("brain"))
+        .or_else(|| os_home.map(PathBuf::from));
+    let Some(base) = base else {
+        return Vec::new();
+    };
+    let gemini = gemini_base(&base);
+    ANTIGRAVITY_FLAVORS
+        .iter()
+        .map(|flavor| {
+            let p = gemini.join(flavor).join("brain");
+            let exists = p.exists();
+            BrainRoot {
+                flavor: (*flavor).to_owned(),
+                path: p.to_string_lossy().into_owned(),
+                exists,
+            }
+        })
+        .collect()
+}
+
+/// The primary brain root — the first candidate. Kept as its own function
+/// because the picker, the demo example and the settings response all want
+/// exactly one path, and because it makes the resolution order testable
+/// without touching the filesystem.
+pub fn antigravity_brain_root(
+    override_dir: Option<&str>,
+    gemini_home: Option<&str>,
+    os_home: Option<&str>,
+) -> Option<PathBuf> {
+    brain_root_candidates(override_dir, gemini_home, os_home)
+        .into_iter()
+        .map(|r| PathBuf::from(r.path))
+        .next()
+}
+
+/// Whether a directory name looks like a conversation folder. Antigravity
+/// names them as 36-character UUIDs; a brain root also holds non-conversation
+/// folders (`tempmediaStorage` is a screenshot cache), which must not be listed
+/// as conversations. Permissive enough to survive a future non-UUID naming
+/// scheme — anything 36 characters long made of letters, digits and dashes
+/// passes — while rejecting the caches.
+fn looks_like_conversation_id(name: &str) -> bool {
+    name.len() == 36
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
 /// Read a one-line title hint from the most authoritative source inside a
@@ -170,10 +278,15 @@ fn clean_user_request(text: &str) -> String {
 
 /// Read `.system_generated/logs/transcript.jsonl` and return the first
 /// `USER_INPUT` row's `<USER_REQUEST>` body, cleaned up and truncated to
-/// 80 chars. None when the transcript is missing, no USER_INPUT row
+/// 80 chars. None when the transcript is missing, no usable USER_INPUT row
 /// exists in the first 20 lines, or the request body is empty.
+///
+/// Rows that don't parse, carry no `content`, or wrap their text in something
+/// other than `<USER_REQUEST>` are *skipped*, not fatal — a transcript whose
+/// first user turn is malformed must not cost us the titles of every later
+/// one.
 fn read_first_user_input(folder: &Path) -> Option<String> {
-    let path = folder.join(".system_generated/logs/transcript.jsonl");
+    let path = folder.join(TRANSCRIPT_SUBPATH);
     let text = std::fs::read_to_string(&path).ok()?;
     for line in text.lines().take(20) {
         let value: serde_json::Value = match serde_json::from_str(line) {
@@ -183,8 +296,12 @@ fn read_first_user_input(folder: &Path) -> Option<String> {
         if value.get("type").and_then(|t| t.as_str()) != Some("USER_INPUT") {
             continue;
         }
-        let content = value.get("content").and_then(|c| c.as_str())?;
-        let request = extract_user_request(content)?;
+        let Some(content) = value.get("content").and_then(|c| c.as_str()) else {
+            continue;
+        };
+        let Some(request) = extract_user_request(content) else {
+            continue;
+        };
         let cleaned = clean_user_request(request);
         if cleaned.is_empty() {
             return None;
@@ -235,10 +352,11 @@ fn truncate(s: &str, max: usize) -> String {
     s.chars().take(max).collect()
 }
 
-/// Scan `root` for direct subdirectories and build folder metadata. Returns
-/// `[]` when `root` does not exist (an unconfigured Antigravity install is
-/// not an error). Sort: newest modification first.
-pub fn scan_antigravity_brain(root: &Path) -> Vec<AntigravityBrainFolder> {
+/// Scan one brain root for conversation folders. Returns `[]` when `root`
+/// does not exist (an unconfigured Antigravity install is not an error).
+/// Non-conversation directories (screenshot caches and the like) are
+/// skipped. Sort: newest modification first.
+pub fn scan_antigravity_brain(root: &Path, flavor: &str) -> Vec<AntigravityBrainFolder> {
     let entries = match std::fs::read_dir(root) {
         Ok(it) => it,
         Err(_) => return Vec::new(),
@@ -251,6 +369,9 @@ pub fn scan_antigravity_brain(root: &Path) -> Vec<AntigravityBrainFolder> {
                 return None;
             }
             let uuid = entry.file_name().to_string_lossy().into_owned();
+            if !looks_like_conversation_id(&uuid) {
+                return None;
+            }
             let mod_time_ms = entry
                 .metadata()
                 .and_then(|m| m.modified())
@@ -258,12 +379,15 @@ pub fn scan_antigravity_brain(root: &Path) -> Vec<AntigravityBrainFolder> {
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                 .map(|d| d.as_millis() as i64)
                 .unwrap_or(0);
+            let has_transcript = p.join(TRANSCRIPT_SUBPATH).is_file();
             let title = read_folder_title(&p);
             Some(AntigravityBrainFolder {
                 uuid,
                 path: p.to_string_lossy().into_owned(),
                 mod_time_ms,
                 title,
+                flavor: flavor.to_owned(),
+                has_transcript,
                 provider_id: "antigravity",
             })
         })
@@ -272,41 +396,79 @@ pub fn scan_antigravity_brain(root: &Path) -> Vec<AntigravityBrainFolder> {
     out
 }
 
-/// Resolves the brain root using live settings + environment. Returns
-/// `(path, exists)`. `path` may be empty when no home directory is known.
-/// Resolves the brain root using live settings + environment. Public so
-/// the HTTP API can reuse it (see `api_list_antigravity_brain_folders`).
-pub fn resolve_root(settings: &crate::settings::Settings) -> (PathBuf, bool) {
+/// Which of two copies of the same conversation wins. Prefer the one that
+/// actually has a transcript — a migration can copy a folder's artifacts
+/// across without its transcript. On a tie keep the incumbent, which is the
+/// copy from the earlier (newer) flavor, because roots are scanned in flavor
+/// order.
+fn prefer_folder(current: &AntigravityBrainFolder, incoming: &AntigravityBrainFolder) -> bool {
+    incoming.has_transcript && !current.has_transcript
+}
+
+/// Merge every existing brain root into one de-duplicated list, newest first.
+///
+/// A conversation migrated from `antigravity` to `antigravity-ide` is present
+/// under both UUIDs — identical `uuid`, two paths. Returning both would list
+/// it twice, so the UUID is the key and [`prefer_folder`] picks the survivor.
+pub fn merge_brain_roots(roots: &[BrainRoot]) -> Vec<AntigravityBrainFolder> {
+    let mut by_uuid: HashMap<String, AntigravityBrainFolder> = HashMap::new();
+    for root in roots.iter().filter(|r| r.exists) {
+        for folder in scan_antigravity_brain(Path::new(&root.path), &root.flavor) {
+            match by_uuid.get(&folder.uuid) {
+                Some(existing) if prefer_folder(existing, &folder) => {
+                    by_uuid.insert(folder.uuid.clone(), folder);
+                }
+                Some(_) => {}
+                None => {
+                    by_uuid.insert(folder.uuid.clone(), folder);
+                }
+            }
+        }
+    }
+    let mut out: Vec<AntigravityBrainFolder> = by_uuid.into_values().collect();
+    out.sort_by_key(|b| std::cmp::Reverse(b.mod_time_ms));
+    out
+}
+
+/// Resolves every brain root candidate using live settings + environment.
+/// Public so the HTTP API and the settings response share one answer.
+pub fn resolve_roots(settings: &crate::settings::Settings) -> Vec<BrainRoot> {
     let os_home = dirs::home_dir().map(|h| h.to_string_lossy().into_owned());
-    let root = antigravity_brain_root(
+    brain_root_candidates(
         settings.antigravity_root.as_deref(),
         std::env::var(ENV_GEMINI_HOME).ok().as_deref(),
         os_home.as_deref(),
-    );
-    match root {
-        Some(p) => (p.clone(), p.exists()),
-        None => (PathBuf::new(), false),
+    )
+}
+
+/// The primary brain root plus whether it exists. `path` is empty when no
+/// home directory is known.
+pub fn resolve_root(settings: &crate::settings::Settings) -> (PathBuf, bool) {
+    let (root, exists) = resolve_root_entry(settings);
+    (PathBuf::from(root), exists)
+}
+
+/// [`resolve_root`]'s scalar form, for callers that want a string.
+pub fn resolve_root_entry(settings: &crate::settings::Settings) -> (String, bool) {
+    match resolve_roots(settings).into_iter().next() {
+        Some(r) => (r.path, r.exists),
+        None => (String::new(), false),
     }
 }
 
 /// Pure helper: returns the brain folders currently visible to the user.
-/// Empty when:
-/// - the user has not opted in (`Settings.enable_antigravity == false`), or
-/// - the resolved root does not exist on disk.
+/// Empty when the user has not opted in (`Settings.enable_antigravity ==
+/// false`) or no candidate root exists on disk.
 ///
-/// Shared by the Tauri command and the HTTP API so both paths get the
-/// same answer regardless of which entry point is used.
+/// Shared by the Tauri command and the HTTP API so both paths get the same
+/// answer regardless of which entry point is used.
 pub fn list_visible_antigravity_folders(
     settings: &crate::settings::Settings,
 ) -> Vec<AntigravityBrainFolder> {
     if !settings.enable_antigravity {
         return Vec::new();
     }
-    let (root, exists) = resolve_root(settings);
-    if !exists {
-        return Vec::new();
-    }
-    scan_antigravity_brain(&root)
+    merge_brain_roots(&resolve_roots(settings))
 }
 
 /// Returns the brain folders currently visible to the user.
@@ -356,7 +518,7 @@ pub async fn open_antigravity_folder(path: String) -> Result<(), String> {
 ///
 /// Pure helper, used by both the Tauri command and the HTTP API.
 pub fn load_antigravity_transcript(path: &Path) -> Vec<AntigravityMessage> {
-    let transcript = path.join(".system_generated/logs/transcript.jsonl");
+    let transcript = path.join(TRANSCRIPT_SUBPATH);
     let text = match std::fs::read_to_string(&transcript) {
         Ok(t) => t,
         Err(_) => return Vec::new(),
@@ -404,17 +566,15 @@ fn parse_transcript_row(value: &serde_json::Value) -> Option<AntigravityMessage>
         // Knowledge artefacts are pure engine state with no reader value.
         "KNOWLEDGE_ARTIFACTS" => return None,
         // Unknown type — still surface it as system so we don't silently drop.
+        // Real transcripts also carry LIST_DIRECTORY, CODE_ACTION,
+        // RUN_COMMAND, INVOKE_SUBAGENT, SYSTEM_MESSAGE and GENERIC.
         _ => "system",
     };
-    let tool_name = if role == "tool" {
-        // The MCP tool name isn't a separate field; the first content line
-        // is something like `Created At: ...` and the rest is the tool
-        // payload. We leave it `None` for now — v3 can parse it from the
-        // protobuf-backed `messages/` folder if needed.
-        None
-    } else {
-        None
-    };
+    // Tool names live in the row's `tool_calls` array (`{name, args}`), which
+    // no row type carries as a name of its own — MCP_TOOL, the only type this
+    // field was written for, does not occur in real transcripts. Populated
+    // when the reader starts rendering `tool_calls`.
+    let tool_name: Option<String> = None;
     Some(AntigravityMessage {
         step_index,
         role: role.to_owned(),
@@ -435,6 +595,33 @@ pub async fn load_antigravity_session(path: String) -> Result<Vec<AntigravityMes
 mod tests {
     use super::*;
     use std::fs;
+
+    fn tmpdir(name: &str) -> PathBuf {
+        let tmp = std::env::temp_dir().join(name);
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+        tmp
+    }
+
+    /// Create `<root>/<uuid>` with a one-line task title.
+    fn make_folder(root: &Path, uuid: &str, title: &str) -> PathBuf {
+        let dir = root.join(uuid);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("task.md"), title).unwrap();
+        dir
+    }
+
+    /// Create `<root>/<uuid>/.system_generated/logs/transcript.jsonl`.
+    fn make_transcript(root: &Path, uuid: &str, rows: &str) -> PathBuf {
+        let dir = root.join(uuid).join(".system_generated/logs");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("transcript.jsonl"), rows).unwrap();
+        root.join(uuid)
+    }
+
+    fn candidate_roots(home: &Path) -> Vec<BrainRoot> {
+        brain_root_candidates(None, None, Some(&home.to_string_lossy()))
+    }
 
     #[test]
     fn root_prefers_explicit_override() {
@@ -475,11 +662,71 @@ mod tests {
         assert_eq!(antigravity_brain_root(Some("  "), None, None), None);
     }
 
+    // ---- flavor candidates ------------------------------------------------
+
+    #[test]
+    fn candidates_cover_both_flavors_newest_first() {
+        let c = candidate_roots(Path::new("/home/u"));
+        assert_eq!(c.len(), 2, "got {c:#?}");
+        assert_eq!(c[0].flavor, "antigravity-ide");
+        assert_eq!(c[1].flavor, "antigravity");
+        assert_eq!(c[0].path, "/home/u/.gemini/antigravity-ide/brain");
+        assert_eq!(c[1].path, "/home/u/.gemini/antigravity/brain");
+    }
+
+    #[test]
+    fn candidates_exclude_the_backup_snapshot() {
+        // `antigravity-backup` is a snapshot of the old flavor, not a separate
+        // install. Probing it would list every old conversation twice, so it
+        // must never appear as a candidate.
+        let roots = candidate_roots(Path::new("/home/u"));
+        let flavors: Vec<&str> = roots.iter().map(|r| r.flavor.as_str()).collect();
+        assert!(!flavors.iter().any(|f| f.contains("backup")), "{flavors:?}");
+        assert_eq!(ANTIGRAVITY_FLAVORS, &["antigravity-ide", "antigravity"]);
+    }
+
+    #[test]
+    fn gemini_home_pointing_at_dot_gemini_is_not_doubled() {
+        // GEMINI_HOME conventionally names the `.gemini` directory itself, so
+        // joining `.gemini` again would produce `…/.gemini/.gemini/…`.
+        let r = antigravity_brain_root(None, Some("/data/g/.gemini"), Some("/home/u"));
+        assert_eq!(
+            r,
+            Some(PathBuf::from("/data/g/.gemini/antigravity-ide/brain"))
+        );
+    }
+
+    #[test]
+    fn os_home_never_doubles_the_gemini_segment() {
+        let r = antigravity_brain_root(None, None, Some("/home/u/.gemini"));
+        assert_eq!(
+            r,
+            Some(PathBuf::from("/home/u/.gemini/antigravity-ide/brain"))
+        );
+    }
+
+    #[test]
+    fn override_short_circuits_flavor_probing() {
+        let c = brain_root_candidates(Some("/custom/brain"), Some("/data/g"), Some("/home/u"));
+        assert_eq!(c.len(), 1);
+        assert_eq!(c[0].flavor, "custom");
+        assert_eq!(c[0].path, "/custom/brain");
+    }
+
+    #[test]
+    fn candidates_report_existence() {
+        let tmp = tmpdir("cctrace-antig-cand-exists");
+        fs::create_dir_all(tmp.join(".gemini/antigravity/brain")).unwrap();
+        let c = candidate_roots(&tmp);
+        assert!(!c[0].exists, "antigravity-ide not created → false");
+        assert!(c[1].exists, "antigravity created → true");
+    }
+
     #[test]
     fn scan_returns_empty_when_root_missing() {
         let tmp = std::env::temp_dir().join("cctrace-antig-missing");
         let _ = fs::remove_dir_all(&tmp);
-        let v = scan_antigravity_brain(&tmp);
+        let v = scan_antigravity_brain(&tmp, "antigravity-ide");
         assert!(v.is_empty());
     }
 
@@ -498,7 +745,7 @@ mod tests {
         // Sleep so the newer folder has a strictly later mtime.
         std::thread::sleep(std::time::Duration::from_millis(10));
 
-        let results = scan_antigravity_brain(&tmp);
+        let results = scan_antigravity_brain(&tmp, "antigravity-ide");
         assert_eq!(results.len(), 2);
         assert_eq!(results[0].uuid, "00000000-0000-0000-0000-000000000002");
         assert_eq!(results[1].uuid, "00000000-0000-0000-0000-000000000001");
@@ -527,7 +774,7 @@ mod tests {
         )
         .unwrap();
 
-        let v = scan_antigravity_brain(&tmp);
+        let v = scan_antigravity_brain(&tmp, "antigravity-ide");
         assert_eq!(v.len(), 1);
         assert_eq!(
             v[0].title.as_deref(),
@@ -550,7 +797,7 @@ mod tests {
         )
         .unwrap();
 
-        let v = scan_antigravity_brain(&tmp);
+        let v = scan_antigravity_brain(&tmp, "antigravity-ide");
         assert_eq!(v.len(), 1);
         assert_eq!(v[0].title.as_deref(), Some("Fallback task title"));
     }
@@ -566,7 +813,7 @@ mod tests {
         fs::create_dir_all(&only).unwrap();
         // No task.md → title is None.
 
-        let v = scan_antigravity_brain(&tmp);
+        let v = scan_antigravity_brain(&tmp, "antigravity-ide");
         assert_eq!(v.len(), 1);
         assert_eq!(v[0].uuid, "11111111-1111-1111-1111-111111111111");
         assert!(v[0].title.is_none());
@@ -583,7 +830,7 @@ mod tests {
         fs::create_dir_all(&only).unwrap();
         fs::write(only.join("task.md"), &big).unwrap();
 
-        let v = scan_antigravity_brain(&tmp);
+        let v = scan_antigravity_brain(&tmp, "antigravity-ide");
         assert_eq!(v.len(), 1);
         assert_eq!(v[0].title.as_deref().map(str::len), Some(80));
     }
@@ -606,7 +853,7 @@ mod tests {
 "#;
         fs::write(logs.join("transcript.jsonl"), transcript).unwrap();
 
-        let v = scan_antigravity_brain(&tmp);
+        let v = scan_antigravity_brain(&tmp, "antigravity-ide");
         assert_eq!(v.len(), 1);
         let title = v[0].title.as_deref().expect("title present");
         // The @[…:L…-L…] anchor is stripped; the user's actual request
@@ -633,7 +880,7 @@ mod tests {
         )
         .unwrap();
 
-        let v = scan_antigravity_brain(&tmp);
+        let v = scan_antigravity_brain(&tmp, "antigravity-ide");
         assert_eq!(v.len(), 1);
         assert!(
             v[0].title.is_none(),
@@ -707,5 +954,248 @@ mod tests {
         assert_eq!(context.role, "context");
         assert!(context.content.contains("conversation_summaries"));
         assert!(context.content.contains("## Conversation abc: title"));
+    }
+
+    #[test]
+    fn load_transcript_maps_the_types_real_transcripts_carry() {
+        // Types measured from live Antigravity transcripts that the explicit
+        // match arm does not name. They must surface as `system` rather than
+        // being dropped.
+        let tmp = tmpdir("cctrace-antig-load-unmapped");
+        let uuid = "99999999-9999-9999-9999-999999999999";
+        make_transcript(
+            &tmp,
+            uuid,
+            concat!(
+                r#"{"step_index":0,"type":"LIST_DIRECTORY","content":"a"}"#,
+                "\n",
+                r#"{"step_index":1,"type":"CODE_ACTION","content":"b"}"#,
+                "\n",
+                r#"{"step_index":2,"type":"RUN_COMMAND","content":"c"}"#,
+                "\n",
+                r#"{"step_index":3,"type":"INVOKE_SUBAGENT","content":"d"}"#,
+                "\n",
+                r#"{"step_index":4,"type":"SYSTEM_MESSAGE","content":"e"}"#,
+                "\n",
+                r#"{"step_index":5,"type":"GENERIC","content":"f"}"#,
+                "\n",
+            ),
+        );
+        let msgs = load_antigravity_transcript(&tmp.join(uuid));
+        assert_eq!(msgs.len(), 6, "got {msgs:#?}");
+        assert!(msgs.iter().all(|m| m.role == "system"));
+    }
+
+    // ---- scanning --------------------------------------------------------
+
+    #[test]
+    fn scan_labels_each_folder_with_its_flavor() {
+        let tmp = tmpdir("cctrace-antig-flavor");
+        make_folder(&tmp, "00000000-0000-0000-0000-0000000000aa", "x");
+        let v = scan_antigravity_brain(&tmp, "antigravity");
+        assert_eq!(v[0].flavor, "antigravity");
+    }
+
+    #[test]
+    fn scan_skips_non_conversation_directories() {
+        // Real brain roots carry a `tempmediaStorage` screenshot cache beside
+        // the conversation folders. Listing it would show a phantom
+        // conversation with a garbled title.
+        let tmp = tmpdir("cctrace-antig-nonuuid");
+        make_folder(
+            &tmp,
+            "00000000-0000-0000-0000-0000000000bb",
+            "Real conversation",
+        );
+        fs::create_dir_all(tmp.join("tempmediaStorage")).unwrap();
+        fs::create_dir_all(tmp.join("scrap")).unwrap();
+
+        let v = scan_antigravity_brain(&tmp, "antigravity-ide");
+        assert_eq!(v.len(), 1, "got {v:#?}");
+        assert_eq!(v[0].uuid, "00000000-0000-0000-0000-0000000000bb");
+    }
+
+    #[test]
+    fn scan_marks_which_folders_actually_hold_a_transcript() {
+        let tmp = tmpdir("cctrace-antig-has-transcript");
+        make_transcript(
+            &tmp,
+            "00000000-0000-0000-0000-0000000000cc",
+            "{\"step_index\":0,\"type\":\"USER_INPUT\",\"content\":\"hi\"}\n",
+        );
+        // Artifact-only folder: screenshots and reports, no conversation.
+        let artifacts = make_folder(&tmp, "00000000-0000-0000-0000-0000000000dd", "artifacts");
+        fs::write(artifacts.join("shot.webp"), b"x").unwrap();
+
+        let mut v = scan_antigravity_brain(&tmp, "antigravity-ide");
+        v.sort_by(|a, b| a.uuid.cmp(&b.uuid));
+        assert!(v[0].has_transcript, "{}", v[0].uuid);
+        assert!(!v[1].has_transcript, "{}", v[1].uuid);
+    }
+
+    #[test]
+    fn malformed_first_user_input_does_not_hide_later_titles() {
+        // A transcript whose first USER_INPUT row carries no `content`, or
+        // wraps its text in something other than <USER_REQUEST>, must not cost
+        // us the title a later row provides.
+        let tmp = tmpdir("cctrace-antig-malformed-input");
+        make_transcript(
+            &tmp,
+            "66666666-6666-6666-6666-666666666666",
+            concat!(
+                r#"{"step_index":0,"type":"USER_INPUT"}"#,
+                "\n",
+                r#"{"step_index":1,"type":"USER_INPUT","content":"no markers here"}"#,
+                "\n",
+                r#"{"step_index":2,"type":"USER_INPUT","content":"<USER_REQUEST>the real request</USER_REQUEST>"}"#,
+                "\n",
+            ),
+        );
+
+        let v = scan_antigravity_brain(&tmp, "antigravity-ide");
+        assert_eq!(
+            v[0].title.as_deref(),
+            Some("the real request"),
+            "got {:?}",
+            v[0].title
+        );
+    }
+
+    // ---- merging across flavors -------------------------------------------
+
+    #[test]
+    fn merge_skips_roots_that_do_not_exist() {
+        let tmp = tmpdir("cctrace-antig-merge-missing");
+        let roots = vec![
+            BrainRoot {
+                flavor: "antigravity-ide".into(),
+                path: tmp.join("nope-ide").to_string_lossy().into_owned(),
+                exists: false,
+            },
+            BrainRoot {
+                flavor: "antigravity".into(),
+                path: tmp.join("nope-old").to_string_lossy().into_owned(),
+                exists: false,
+            },
+        ];
+        assert!(merge_brain_roots(&roots).is_empty());
+    }
+
+    #[test]
+    fn merge_lists_each_conversation_once_across_flavors() {
+        // A migration copies old conversations into the new root, so the same
+        // UUID sits under both flavors. Merging naively would double them.
+        let tmp = tmpdir("cctrace-antig-merge-dup");
+        let gemini = tmp.join(".gemini");
+        let ide = gemini.join("antigravity-ide/brain");
+        let old = gemini.join("antigravity/brain");
+        fs::create_dir_all(&ide).unwrap();
+        fs::create_dir_all(&old).unwrap();
+
+        let shared = "aaaaaaaa-0000-0000-0000-000000000001";
+        make_folder(&ide, shared, "Migrated conversation");
+        make_folder(&old, shared, "Migrated conversation");
+        make_folder(
+            &old,
+            "aaaaaaaa-0000-0000-0000-000000000002",
+            "Old-only conversation",
+        );
+        make_folder(
+            &ide,
+            "aaaaaaaa-0000-0000-0000-000000000003",
+            "New-only conversation",
+        );
+
+        let roots = vec![
+            BrainRoot {
+                flavor: "antigravity-ide".into(),
+                path: ide.to_string_lossy().into_owned(),
+                exists: true,
+            },
+            BrainRoot {
+                flavor: "antigravity".into(),
+                path: old.to_string_lossy().into_owned(),
+                exists: true,
+            },
+        ];
+        let v = merge_brain_roots(&roots);
+        assert_eq!(v.len(), 3, "got {v:#?}");
+
+        let shared_entry = v
+            .iter()
+            .find(|f| f.uuid == shared)
+            .expect("shared conversation listed exactly once");
+        // Newest flavor wins the tie.
+        assert_eq!(shared_entry.flavor, "antigravity-ide");
+        assert_eq!(shared_entry.title.as_deref(), Some("Migrated conversation"));
+    }
+
+    #[test]
+    fn merge_prefers_the_copy_that_has_a_transcript() {
+        // A migration can carry a folder's artifacts across without its
+        // transcript. The copy that can actually be opened is the one to show.
+        let tmp = tmpdir("cctrace-antig-merge-transcript");
+        let gemini = tmp.join(".gemini");
+        let ide = gemini.join("antigravity-ide/brain");
+        let old = gemini.join("antigravity/brain");
+        let uuid = "bbbbbbbb-0000-0000-0000-000000000001";
+        make_transcript(
+            &old,
+            uuid,
+            concat!(
+                r#"{"step_index":0,"type":"USER_INPUT","content":"<USER_REQUEST>kept</USER_REQUEST>"}"#,
+                "\n",
+            ),
+        );
+        make_folder(&ide, uuid, "Artifacts only, transcript lost in migration");
+
+        let roots = vec![
+            BrainRoot {
+                flavor: "antigravity-ide".into(),
+                path: ide.to_string_lossy().into_owned(),
+                exists: true,
+            },
+            BrainRoot {
+                flavor: "antigravity".into(),
+                path: old.to_string_lossy().into_owned(),
+                exists: true,
+            },
+        ];
+        let v = merge_brain_roots(&roots);
+        assert_eq!(v.len(), 1, "got {v:#?}");
+        assert!(v[0].has_transcript);
+        assert_eq!(v[0].flavor, "antigravity");
+        assert!(v[0].path.contains("/antigravity/brain/"), "{}", v[0].path);
+        assert_eq!(v[0].title.as_deref(), Some("kept"));
+    }
+
+    #[test]
+    fn merge_sorts_newest_first() {
+        let tmp = tmpdir("cctrace-antig-merge-order");
+        let gemini = tmp.join(".gemini");
+        let ide = gemini.join("antigravity-ide/brain");
+        let old = gemini.join("antigravity/brain");
+        fs::create_dir_all(&ide).unwrap();
+        fs::create_dir_all(&old).unwrap();
+        make_folder(&old, "cccccccc-0000-0000-0000-000000000001", "older");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        make_folder(&ide, "cccccccc-0000-0000-0000-000000000002", "newer");
+
+        let roots = vec![
+            BrainRoot {
+                flavor: "antigravity-ide".into(),
+                path: ide.to_string_lossy().into_owned(),
+                exists: true,
+            },
+            BrainRoot {
+                flavor: "antigravity".into(),
+                path: old.to_string_lossy().into_owned(),
+                exists: true,
+            },
+        ];
+        let v = merge_brain_roots(&roots);
+        assert_eq!(v.len(), 2);
+        assert_eq!(v[0].title.as_deref(), Some("newer"));
+        assert_eq!(v[1].title.as_deref(), Some("older"));
     }
 }

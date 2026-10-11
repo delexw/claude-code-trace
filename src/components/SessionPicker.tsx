@@ -8,12 +8,14 @@ import type {
   IndexProgress,
   SessionInfo,
   AntigravityBrainFolder,
+  BrowseMode,
 } from "../types";
 import { OngoingDots } from "./OngoingDots";
 import {
   formatTokens,
   formatDuration,
   formatExactTime,
+  formatMsTimestamp,
   formatCost,
   truncate,
   groupByDate,
@@ -29,6 +31,17 @@ import { BetaBadge } from "./BetaBadge";
 const NO_EFFICIENCY_JOBS = new Map<string, EfficiencyAnalysisJob>();
 const NO_EFFICIENCY_SUMMARIES = new Map<string, EfficiencySummary>();
 const NO_ANTIGRAVITY_FOLDERS: AntigravityBrainFolder[] = [];
+
+/** The three ways the picker can be read. Module scope so the list identity is
+ *  stable across renders. */
+const BROWSE_MODES: { id: BrowseMode; label: string; title: string }[] = [
+  { id: "claude", label: "Claude", title: "Claude Code sessions only" },
+  { id: "antigravity", label: "Antigravity", title: "Antigravity conversations only" },
+  { id: "all", label: "All", title: "Both sources in one list" },
+];
+
+/** Offered while Antigravity is switched off — no empty promises. */
+const CLAUDE_ONLY_MODES = BROWSE_MODES.slice(0, 1);
 
 function SessionAnalysisProgress({ progress }: { progress: number }) {
   return (
@@ -79,16 +92,26 @@ interface SessionPickerProps {
   onAnalyse?: (path: string) => void;
   onOpenEfficiencyDashboard?: (session: SessionInfo) => void;
   /**
-   * Read-only Antigravity (Gemini IDE) brain folders. When non-empty, the
-   * picker renders a separate section below the Claude sessions with a
-   * badge. The picker never opens the transcript for these envelopes — the
-   * caller's `onSelectAntigravity` handler is responsible for any UI
-   * follow-up (e.g. a "Open folder" affordance). Accepts null for callers
-   * that lazily hydrate the list (e.g. older tests).
+   * Read-only Antigravity (Gemini IDE) brain folders, merged across every
+   * installed version and already filtered against `searchQuery` by the
+   * caller — App owns the filtering so the keyboard selection range and the
+   * rendered list can never disagree. `browseMode` decides which of the two
+   * lists is visible. Accepts null for callers that lazily hydrate the list.
    */
   antigravityFolders?: AntigravityBrainFolder[] | null;
   /** Triggered when the user clicks an Antigravity folder card. */
   onSelectAntigravity?: (folder: AntigravityBrainFolder) => void;
+  /**
+   * Which list to show. `antigravity` and `all` render the Antigravity
+   * section; `claude` hides it and shows only sessions.
+   */
+  browseMode?: BrowseMode;
+  /** Fired when the user picks a different browse mode. */
+  onBrowseModeChange?: (mode: BrowseMode) => void;
+  /** Whether Antigravity is enabled at all — the mode selector hides the
+   *  Antigravity and All options when it is off, so the control never
+   *  offers a mode that would show an empty list. */
+  antigravityEnabled?: boolean;
 }
 
 export function SessionPicker({
@@ -109,10 +132,21 @@ export function SessionPicker({
   onOpenEfficiencyDashboard,
   antigravityFolders = NO_ANTIGRAVITY_FOLDERS,
   onSelectAntigravity,
+  browseMode = "all",
+  onBrowseModeChange,
+  antigravityEnabled = false,
 }: SessionPickerProps) {
   // Defensive: existing call sites (and tests) may pass `null` when they
   // haven't loaded the list yet. Treat it as empty rather than throwing.
   const antigravityList = antigravityFolders ?? NO_ANTIGRAVITY_FOLDERS;
+  // A mode persisted in localStorage can outlive the setting that made it
+  // selectable (Antigravity turned off in Settings). Everything that decides
+  // what to render must read the *clamped* mode, not the raw prop, or the
+  // picker ends up showing neither list.
+  const selectableModes = antigravityEnabled ? BROWSE_MODES : CLAUDE_ONLY_MODES;
+  const effectiveMode = selectableModes.some((m) => m.id === browseMode) ? browseMode : "claude";
+  const showAntigravity = effectiveMode !== "claude" && antigravityEnabled;
+  const showClaude = effectiveMode !== "antigravity";
   const listRef = useRef<HTMLDivElement>(null);
   const selectedRef = useScrollToSelected(selectedIndex);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -128,6 +162,10 @@ export function SessionPicker({
   });
 
   const dateGroups = groupByDate(sessions);
+  // Antigravity cards sit below the Claude list in the same scroll container,
+  // so their indices continue past the last Claude card — one keyboard
+  // selection spans both lists.
+  const claudeCount = dateGroups.reduce((n, g) => n + g.items.length, 0);
 
   const { totalTokens, totalCost } = useMemo(() => {
     let tokens = 0;
@@ -158,248 +196,301 @@ export function SessionPicker({
             </span>
           )}
         </div>
+        {selectableModes.length > 1 && (
+          <div className="picker__mode" role="group" aria-label="Browse mode">
+            {selectableModes.map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                className={`picker__mode-btn${effectiveMode === m.id ? " picker__mode-btn--active" : ""}`}
+                aria-pressed={effectiveMode === m.id}
+                title={m.title}
+                onClick={() => onBrowseModeChange?.(m.id)}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+        )}
         <input
           ref={searchRef}
           className="picker__search"
           type="text"
-          placeholder="Search sessions..."
+          placeholder={
+            effectiveMode === "antigravity" ? "Search conversations..." : "Search sessions..."
+          }
           value={searchQuery}
           onChange={(e) => onSearchChange(e.target.value)}
         />
       </div>
 
       <div className="picker__list" ref={listRef}>
-        {loading && (
+        {loading && showClaude && (
           <div className="picker__loading">
             <span className="braille-spinner" />
             Discovering sessions...
           </div>
         )}
 
-        {!loading && sessions.length === 0 && index.done && (
+        {showClaude && !loading && sessions.length === 0 && index.done && (
           <div className="picker__empty">
             {searchQuery ? "No matching sessions" : "No sessions found"}
           </div>
         )}
 
-        {dateGroups.map((group) => (
-          <div key={group.category}>
-            <div className="picker__group-header">{group.category}</div>
-            {group.items.map((session) => {
-              const idx = flatIndex++;
-              const isSelected = idx === selectedIndex;
-              const model = shortModel(session.model);
-              const modelClr = getModelColor(session.model);
-              const sessionCost = session.cost_usd;
-              const showRecap = recapPreview && !!session.recap;
-              const efficiencyJob = efficiencyJobs.get(session.path);
-              const efficiencySummary = efficiencySummaries.get(session.path);
-              const analysisRunning =
-                efficiencyJob &&
-                !["completed", "failed", "cancelled"].includes(efficiencyJob.status);
-              const analysisProgress = efficiencyJob?.progress ?? 0;
-              const efficiencyTone = efficiencySummary
-                ? efficiencySummary.score >= 87
-                  ? "ok"
-                  : efficiencySummary.score >= 65
-                    ? "accent"
-                    : efficiencySummary.score >= 40
-                      ? "warn"
-                      : "critical"
-                : null;
+        {/* Antigravity-only mode hides the Claude list; an empty state still
+            needs to say something when that list is the one on screen. */}
+        {!showClaude && !showAntigravity && (
+          <div className="picker__empty">
+            {antigravityEnabled
+              ? "No conversations found"
+              : "Enable Antigravity in Settings to browse its conversations"}
+          </div>
+        )}
 
-              return (
-                <div
-                  key={session.path}
-                  ref={mergeRefs(isSelected ? selectedRef : null, registerVisible(session.path))}
-                  className={`picker__session${isSelected ? " picker__session--selected" : ""}${session.is_ongoing ? " picker__session--ongoing" : ""}`}
-                  onMouseEnter={() => onSelectIndex?.(idx)}
-                  onClick={() => onSelect(session)}
-                >
-                  <div className="picker__session-top">
-                    <span className="picker__session-icon">
-                      <BsClaude />
-                    </span>
-                    <span
-                      className={`picker__session-preview${session.name ? " picker__session-preview--named" : ""}`}
-                    >
-                      {truncate(session.name || session.first_message || session.session_id, 80)}
-                    </span>
-                    {session.is_ongoing && (
-                      <span className="picker__session-ongoing">
-                        <OngoingDots count={1} />
-                        ACTIVE
+        {showClaude &&
+          dateGroups.map((group) => (
+            <div key={group.category}>
+              <div className="picker__group-header">{group.category}</div>
+              {group.items.map((session) => {
+                const idx = flatIndex++;
+                const isSelected = idx === selectedIndex;
+                const model = shortModel(session.model);
+                const modelClr = getModelColor(session.model);
+                const sessionCost = session.cost_usd;
+                const showRecap = recapPreview && !!session.recap;
+                const efficiencyJob = efficiencyJobs.get(session.path);
+                const efficiencySummary = efficiencySummaries.get(session.path);
+                const analysisRunning =
+                  efficiencyJob &&
+                  !["completed", "failed", "cancelled"].includes(efficiencyJob.status);
+                const analysisProgress = efficiencyJob?.progress ?? 0;
+                const efficiencyTone = efficiencySummary
+                  ? efficiencySummary.score >= 87
+                    ? "ok"
+                    : efficiencySummary.score >= 65
+                      ? "accent"
+                      : efficiencySummary.score >= 40
+                        ? "warn"
+                        : "critical"
+                  : null;
+
+                return (
+                  <div
+                    key={session.path}
+                    ref={mergeRefs(isSelected ? selectedRef : null, registerVisible(session.path))}
+                    className={`picker__session${isSelected ? " picker__session--selected" : ""}${session.is_ongoing ? " picker__session--ongoing" : ""}`}
+                    onMouseEnter={() => onSelectIndex?.(idx)}
+                    onClick={() => onSelect(session)}
+                  >
+                    <div className="picker__session-top">
+                      <span className="picker__session-icon">
+                        <BsClaude />
                       </span>
-                    )}
-                    {efficiencySummary && (
-                      <>
-                        <button
-                          type="button"
-                          className={`picker__efficiency-score picker__efficiency-score--${efficiencyTone}`}
-                          title={`Open efficiency dashboard with score ${efficiencySummary.score}`}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            onOpenEfficiencyDashboard?.(session);
-                          }}
-                        >
-                          Dashboard · {efficiencySummary.score}
-                          {efficiencySummary.stale ? " · stale" : ""}
-                        </button>
-                        {analysisRunning ? (
-                          <SessionAnalysisProgress progress={analysisProgress} />
-                        ) : onAnalyse ? (
+                      <span
+                        className={`picker__session-preview${session.name ? " picker__session-preview--named" : ""}`}
+                      >
+                        {truncate(session.name || session.first_message || session.session_id, 80)}
+                      </span>
+                      {session.is_ongoing && (
+                        <span className="picker__session-ongoing">
+                          <OngoingDots count={1} />
+                          ACTIVE
+                        </span>
+                      )}
+                      {efficiencySummary && (
+                        <>
                           <button
                             type="button"
-                            className="picker__analyse"
+                            className={`picker__efficiency-score picker__efficiency-score--${efficiencyTone}`}
+                            title={`Open efficiency dashboard with score ${efficiencySummary.score}`}
                             onClick={(event) => {
                               event.stopPropagation();
-                              onAnalyse(session.path);
+                              onOpenEfficiencyDashboard?.(session);
                             }}
                           >
-                            Re-analyse <BetaBadge />
+                            Dashboard · {efficiencySummary.score}
+                            {efficiencySummary.stale ? " · stale" : ""}
                           </button>
-                        ) : null}
-                      </>
-                    )}
-                    {!efficiencySummary && analysisRunning && (
-                      <SessionAnalysisProgress progress={analysisProgress} />
-                    )}
-                    {!efficiencySummary && !analysisRunning && onAnalyse && (
+                          {analysisRunning ? (
+                            <SessionAnalysisProgress progress={analysisProgress} />
+                          ) : onAnalyse ? (
+                            <button
+                              type="button"
+                              className="picker__analyse"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                onAnalyse(session.path);
+                              }}
+                            >
+                              Re-analyse <BetaBadge />
+                            </button>
+                          ) : null}
+                        </>
+                      )}
+                      {!efficiencySummary && analysisRunning && (
+                        <SessionAnalysisProgress progress={analysisProgress} />
+                      )}
+                      {!efficiencySummary && !analysisRunning && onAnalyse && (
+                        <button
+                          type="button"
+                          className="picker__analyse"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onAnalyse(session.path);
+                          }}
+                        >
+                          {efficiencyJob?.status === "failed" ? "Retry analysis" : "Analyse"}{" "}
+                          <BetaBadge />
+                        </button>
+                      )}
+                      {efficiencyJob?.status === "failed" && (
+                        <span
+                          className="picker__analysis-error"
+                          role="status"
+                          title={efficiencyJob.error || efficiencyJob.message}
+                        >
+                          {efficiencyJob.error || efficiencyJob.message}
+                        </span>
+                      )}
                       <button
-                        type="button"
-                        className="picker__analyse"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          onAnalyse(session.path);
+                        className="message__detail-btn"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onSelect(session);
                         }}
                       >
-                        {efficiencyJob?.status === "failed" ? "Retry analysis" : "Analyse"}{" "}
-                        <BetaBadge />
+                        Detail <ForwardIcon />
                       </button>
+                    </div>
+                    {showRecap ? (
+                      <div className="picker__session-subtitle picker__session-subtitle--recap">
+                        <span className="picker__recap-label">Recap:</span> {session.recap}
+                      </div>
+                    ) : session.name && session.first_message ? (
+                      <div className="picker__session-subtitle">
+                        {truncate(session.first_message, 80)}
+                      </div>
+                    ) : null}
+                    {session.dirs && session.dirs.length > 1 && (
+                      <div className="picker__session-dirs">
+                        <span className="picker__session-dirs-label">CWDs:</span>{" "}
+                        {session.dirs.map(shortPath).join(", ")}
+                      </div>
                     )}
-                    {efficiencyJob?.status === "failed" && (
-                      <span
-                        className="picker__analysis-error"
-                        role="status"
-                        title={efficiencyJob.error || efficiencyJob.message}
-                      >
-                        {efficiencyJob.error || efficiencyJob.message}
+                    {session.integrity_warning && (
+                      <div className="picker__session-warning" title={session.integrity_warning}>
+                        <span className="picker__session-warning-label">⚠ Possibly spliced:</span>{" "}
+                        this transcript may combine two unrelated sessions
+                      </div>
+                    )}
+                    <div className="picker__session-meta">
+                      <span className="picker__session-model" style={{ color: modelClr }}>
+                        {model}
                       </span>
-                    )}
-                    <button
-                      className="message__detail-btn"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onSelect(session);
-                      }}
-                    >
-                      Detail <ForwardIcon />
-                    </button>
+                      <span className="picker__session-stat">{session.turn_count} turns</span>
+                      {session.total_tokens > 0 && (
+                        <span className="picker__session-stat">
+                          {formatTokens(session.total_tokens)} tok
+                        </span>
+                      )}
+                      {sessionCost > 0 && (
+                        <span className="picker__session-stat picker__session-stat--cost">
+                          <CostIcon /> {formatCost(sessionCost)}
+                        </span>
+                      )}
+                      {session.duration_ms > 0 && (
+                        <span className="picker__session-stat">
+                          {formatDuration(session.duration_ms)}
+                        </span>
+                      )}
+                      {session.mod_time && (
+                        <span className="picker__session-time">
+                          {formatExactTime(session.mod_time)}
+                        </span>
+                      )}
+                    </div>
                   </div>
-                  {showRecap ? (
-                    <div className="picker__session-subtitle picker__session-subtitle--recap">
-                      <span className="picker__recap-label">Recap:</span> {session.recap}
-                    </div>
-                  ) : session.name && session.first_message ? (
-                    <div className="picker__session-subtitle">
-                      {truncate(session.first_message, 80)}
-                    </div>
-                  ) : null}
-                  {session.dirs && session.dirs.length > 1 && (
-                    <div className="picker__session-dirs">
-                      <span className="picker__session-dirs-label">CWDs:</span>{" "}
-                      {session.dirs.map(shortPath).join(", ")}
-                    </div>
-                  )}
-                  {session.integrity_warning && (
-                    <div className="picker__session-warning" title={session.integrity_warning}>
-                      <span className="picker__session-warning-label">⚠ Possibly spliced:</span>{" "}
-                      this transcript may combine two unrelated sessions
-                    </div>
-                  )}
-                  <div className="picker__session-meta">
-                    <span className="picker__session-model" style={{ color: modelClr }}>
-                      {model}
-                    </span>
-                    <span className="picker__session-stat">{session.turn_count} turns</span>
-                    {session.total_tokens > 0 && (
-                      <span className="picker__session-stat">
-                        {formatTokens(session.total_tokens)} tok
-                      </span>
-                    )}
-                    {sessionCost > 0 && (
-                      <span className="picker__session-stat picker__session-stat--cost">
-                        <CostIcon /> {formatCost(sessionCost)}
-                      </span>
-                    )}
-                    {session.duration_ms > 0 && (
-                      <span className="picker__session-stat">
-                        {formatDuration(session.duration_ms)}
-                      </span>
-                    )}
-                    {session.mod_time && (
-                      <span className="picker__session-time">
-                        {formatExactTime(session.mod_time)}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        ))}
+                );
+              })}
+            </div>
+          ))}
 
-        {antigravityList.length > 0 && (
+        {showAntigravity && antigravityList.length === 0 && (
+          <div className="picker__empty">
+            {searchQuery ? "No matching conversations" : "No conversations found"}
+          </div>
+        )}
+
+        {showAntigravity && antigravityList.length > 0 && (
           <div className="picker__provider picker__provider--antigravity">
             <div className="picker__group-header picker__group-header--antigravity">
               <span className="picker__provider-badge picker__provider-badge--antigravity">
                 Antigravity
               </span>
               <span className="picker__provider-count">{antigravityList.length}</span>
-              <span className="picker__provider-hint">read-only · folder names</span>
+              <span className="picker__provider-hint">read-only</span>
             </div>
-            {antigravityList.map((folder) => (
-              <div
-                key={folder.path}
-                className="picker__session picker__session--antigravity"
-                role="button"
-                tabIndex={0}
-                aria-label={`Open Antigravity folder ${folder.title ?? folder.uuid}`}
-                onClick={() => onSelectAntigravity?.(folder)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    onSelectAntigravity?.(folder);
-                  }
-                }}
-              >
-                <div className="picker__session-top">
-                  <span className="picker__session-icon picker__session-icon--antigravity">AG</span>
-                  <span className="picker__session-preview">
-                    {truncate(folder.title ?? folder.uuid, 80)}
-                  </span>
-                  <span
-                    className="picker__provider-badge picker__provider-badge--antigravity picker__provider-badge--small"
-                    title={folder.path}
-                  >
-                    Antigravity
-                  </span>
-                </div>
-                <div className="picker__session-meta">
-                  <span
-                    className="picker__session-stat picker__session-stat--uuid"
-                    title={folder.uuid}
-                  >
-                    {truncate(folder.uuid, 36)}
-                  </span>
-                  {folder.mod_time_ms > 0 && (
-                    <span className="picker__session-time">
-                      {formatExactTime(String(folder.mod_time_ms))}
+            {antigravityList.map((folder, agIndex) => {
+              const idx = claudeCount + agIndex;
+              const isSelected = idx === selectedIndex;
+              return (
+                <div
+                  key={folder.path}
+                  ref={isSelected ? selectedRef : undefined}
+                  className={`picker__session picker__session--antigravity${isSelected ? " picker__session--selected" : ""}${folder.has_transcript ? "" : " picker__session--no-transcript"}`}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Open Antigravity conversation ${folder.title ?? folder.uuid}`}
+                  onMouseEnter={() => onSelectIndex?.(idx)}
+                  onClick={() => onSelectAntigravity?.(folder)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      onSelectAntigravity?.(folder);
+                    }
+                  }}
+                >
+                  <div className="picker__session-top">
+                    <span className="picker__session-icon picker__session-icon--antigravity">
+                      AG
                     </span>
-                  )}
+                    <span className="picker__session-preview">
+                      {truncate(folder.title ?? folder.uuid, 80)}
+                    </span>
+                    {/* Most folders in a brain root are artifact-only — mark
+                        them rather than opening an empty transcript. */}
+                    {!folder.has_transcript && (
+                      <span
+                        className="picker__session-stat--uuid"
+                        title="This folder holds artifacts (screenshots, reports) but no conversation transcript."
+                      >
+                        artifacts only
+                      </span>
+                    )}
+                    <span
+                      className="picker__provider-badge picker__provider-badge--antigravity picker__provider-badge--small"
+                      title={folder.path}
+                    >
+                      {folder.flavor === "antigravity-ide" ? "ide" : folder.flavor}
+                    </span>
+                  </div>
+                  <div className="picker__session-meta">
+                    <span
+                      className="picker__session-stat picker__session-stat--uuid"
+                      title={folder.uuid}
+                    >
+                      {truncate(folder.uuid, 36)}
+                    </span>
+                    {folder.mod_time_ms > 0 && (
+                      <span className="picker__session-time">
+                        {formatMsTimestamp(folder.mod_time_ms)}
+                      </span>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

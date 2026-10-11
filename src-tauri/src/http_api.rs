@@ -233,6 +233,7 @@ fn build_router(state: Arc<HttpState>, static_dir: Option<String>) -> Router {
             get(api_list_antigravity_brain_folders),
         )
         .route("/api/antigravity/root", get(api_get_antigravity_brain_root))
+        .route("/api/antigravity/root", post(api_set_antigravity_root))
         .route(
             "/api/antigravity/enabled",
             post(api_set_antigravity_enabled),
@@ -793,6 +794,56 @@ async fn api_load_antigravity_session(Json(body): Json<LoadAntigravitySessionBod
     }
     ok_json(&crate::commands::antigravity::load_antigravity_transcript(
         &path,
+    ))
+}
+
+#[derive(Deserialize)]
+struct SetAntigravityRootBody {
+    /// `null` or an empty string clears the override and restores flavor
+    /// auto-detection. Anything else must name an existing directory.
+    path: Option<String>,
+}
+
+/// Points the Antigravity reader at an explicit brain root. The HTTP twin of
+/// `commands::settings::set_antigravity_root`; validation is identical so web
+/// mode and the desktop app accept the same inputs.
+async fn api_set_antigravity_root(
+    State(state): State<Arc<HttpState>>,
+    Json(body): Json<SetAntigravityRootBody>,
+) -> Response {
+    if let Some(p) = body
+        .path
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        if !std::path::PathBuf::from(p).is_dir() {
+            return err_response(
+                axum::http::StatusCode::BAD_REQUEST,
+                format!("path does not exist or is not a directory: {p}"),
+            );
+        }
+    }
+    let app_state = app_state(&state);
+    let mut guard = match app_state.settings.lock() {
+        Ok(g) => g,
+        Err(e) => {
+            return err_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+        }
+    };
+    guard.antigravity_root = body
+        .path
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned);
+    if let Err(e) = crate::settings::save_settings(&guard) {
+        return err_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e);
+    }
+    ok_json(&crate::commands::settings::build_response_pub(
+        &guard,
+        &app_state.auth_snapshot(),
+        app_state.clients_snapshot(),
     ))
 }
 

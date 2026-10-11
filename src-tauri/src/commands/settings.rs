@@ -50,6 +50,16 @@ pub struct SettingsResponse {
     /// means the picker will surface "no folders" until the user installs
     /// Antigravity.
     pub antigravity_brain_root_exists: bool,
+    /// The user's explicit brain-root override, verbatim. `None` when flavor
+    /// auto-detection is in force. Distinct from `antigravity_brain_root`
+    /// above, which is the *resolved* root — this is what the Settings field
+    /// is seeded with and edited to.
+    pub antigravity_root: Option<String>,
+    /// Every flavor root the resolver probed, newest first, with whether it
+    /// exists. `antigravity_brain_root` above is simply the first entry — the
+    /// rest let the Settings UI say "also found" instead of silently ignoring
+    /// an install the user knows about.
+    pub antigravity_brain_roots: Vec<crate::commands::antigravity::BrainRoot>,
 }
 
 pub fn platform_default_dir() -> String {
@@ -74,23 +84,14 @@ pub fn build_response_pub(
     // The Antigravity root is read-only metadata — letting the toggle be
     // turned on even when the root does not exist (Antigravity not installed
     // yet) is intentional, so we never gate on `exists` here.
-    let antigravity_root = crate::commands::antigravity::antigravity_brain_root(
-        settings.antigravity_root.as_deref(),
-        std::env::var(crate::commands::antigravity::ENV_GEMINI_HOME)
-            .ok()
-            .as_deref(),
-        dirs::home_dir()
-            .map(|h| h.to_string_lossy().into_owned())
-            .as_deref(),
-    );
-    let (antigravity_brain_root, antigravity_brain_root_exists) = match antigravity_root {
-        Some(p) => {
-            let s = p.to_string_lossy().into_owned();
-            let exists = p.exists();
-            (s, exists)
-        }
-        None => (String::new(), false),
-    };
+    //
+    // Resolution lives in `commands::antigravity` so the picker, the HTTP API
+    // and this response can never disagree about which directory is read.
+    let antigravity_roots = crate::commands::antigravity::resolve_roots(settings);
+    let (antigravity_brain_root, antigravity_brain_root_exists) = antigravity_roots
+        .first()
+        .map(|r| (r.path.clone(), r.exists))
+        .unwrap_or_default();
     SettingsResponse {
         projects_dir: settings.projects_dir.clone(),
         default_dir: platform_default_dir(),
@@ -105,6 +106,8 @@ pub fn build_response_pub(
         enable_antigravity: settings.enable_antigravity,
         antigravity_brain_root,
         antigravity_brain_root_exists,
+        antigravity_root: settings.antigravity_root.clone(),
+        antigravity_brain_roots: antigravity_roots,
     }
 }
 
@@ -137,6 +140,44 @@ pub async fn set_projects_dir(
 
     let mut guard = state.settings.lock().map_err(|e| e.to_string())?;
     guard.projects_dir = path;
+    crate::settings::save_settings(&guard)?;
+    Ok(build_response_pub(
+        &guard,
+        &state.auth_snapshot(),
+        state.clients_snapshot(),
+    ))
+}
+
+/// Points the Antigravity brain reader at an explicit directory, or clears
+/// the override so flavor auto-detection resumes. Mirrors `set_projects_dir`
+/// — the override is a brain root, not a `.gemini` base, and it replaces
+/// flavor probing entirely.
+///
+/// Rejects a path that does not exist so a typo surfaces as an error instead
+/// of silently emptying the picker. Pass `None` (or an empty string) to go
+/// back to auto-detection.
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn set_antigravity_root(
+    path: Option<String>,
+    state: State<'_, Arc<AppState>>,
+) -> Result<SettingsResponse, String> {
+    if let Some(ref p) = path.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        let pb = std::path::PathBuf::from(p);
+        if !pb.exists() {
+            return Err(format!("path does not exist: {p}"));
+        }
+        if !pb.is_dir() {
+            return Err(format!("path is not a directory: {p}"));
+        }
+    }
+
+    let mut guard = state.settings.lock().map_err(|e| e.to_string())?;
+    guard.antigravity_root = path
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned);
     crate::settings::save_settings(&guard)?;
     Ok(build_response_pub(
         &guard,
@@ -195,9 +236,11 @@ mod tests {
         );
         assert!(!response.enable_antigravity);
         if let Some(home) = dirs::home_dir() {
+            // The first candidate is always the newest flavor, which is what
+            // the response reports as the active root.
             let expected = home
                 .join(".gemini")
-                .join(crate::commands::antigravity::ANTIGRAVITY_FLAVOR)
+                .join(crate::commands::antigravity::ANTIGRAVITY_FLAVORS[0])
                 .join("brain");
             assert_eq!(
                 response.antigravity_brain_root,

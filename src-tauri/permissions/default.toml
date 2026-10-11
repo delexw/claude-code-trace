@@ -24,6 +24,12 @@ permissions = [
   "allow-analytics",
   "allow-switch-to-browser",
   "allow-focus-session-window",
+  "allow-list-antigravity-brain-folders",
+  "allow-get-antigravity-brain-root",
+  "allow-set-antigravity-enabled",
+  "allow-set-antigravity-root",
+  "allow-open-antigravity-folder",
+  "allow-load-antigravity-session",
 ]
 
 [[permission]]
@@ -156,3 +162,46 @@ commands.allow = ["switch_to_browser"]
 identifier = "allow-focus-session-window"
 description = "Allow focusing a live session's terminal window"
 commands.allow = ["focus_session_window"]
+
+# Antigravity (Gemini IDE) brain folders — read-only conversation envelopes.
+# Granted as a set: the feature is inert in the desktop app unless all six are
+# present, because the picker lists folders, resolves the root, toggles the
+# source, lets the user point it elsewhere, reveals a folder, and loads a
+# transcript.
+#
+# Note on `set_antigravity_root` / `open_antigravity_folder`: the backend
+# validates that the path exists (root) or is a directory (open), but it does
+# not confine either to the discovered brain root. The ACL entry is therefore a
+# capability grant to this app's own webview, not a sandbox — anything running
+# in the webview can already do both. If that boundary ever needs to hold, it
+# has to be enforced in the command, not here.
+
+[[permission]]
+identifier = "allow-list-antigravity-brain-folders"
+description = "Allow listing read-only Antigravity conversation folders"
+commands.allow = ["list_antigravity_brain_folders"]
+
+[[permission]]
+identifier = "allow-get-antigravity-brain-root"
+description = "Allow resolving which Antigravity brain directory is being read"
+commands.allow = ["get_antigravity_brain_root"]
+
+[[permission]]
+identifier = "allow-set-antigravity-enabled"
+description = "Allow turning Antigravity conversation discovery on or off"
+commands.allow = ["set_antigravity_enabled"]
+
+[[permission]]
+identifier = "allow-set-antigravity-root"
+description = "Allow pointing the Antigravity reader at a specific brain directory"
+commands.allow = ["set_antigravity_root"]
+
+[[permission]]
+identifier = "allow-open-antigravity-folder"
+description = "Allow revealing an Antigravity conversation folder in the file manager"
+commands.allow = ["open_antigravity_folder"]
+
+[[permission]]
+identifier = "allow-load-antigravity-session"
+description = "Allow reading an Antigravity conversation transcript (read-only)"
+commands.allow = ["load_antigravity_session"]

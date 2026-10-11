@@ -9,6 +9,8 @@ const SESSION: AntigravitySession = {
     path: "/home/u/.gemini/antigravity-ide/brain/11111111",
     mod_time_ms: 1790776853673,
     title: "ضيف سكشن لاختيار ملف من المسار",
+    flavor: "antigravity-ide",
+    has_transcript: true,
     provider_id: "antigravity",
   },
   messages: [

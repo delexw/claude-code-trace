@@ -1,4 +1,13 @@
-import { lazy, Suspense, useState, useEffect, useLayoutEffect, useCallback, useRef } from "react";
+import {
+  lazy,
+  Suspense,
+  useState,
+  useEffect,
+  useLayoutEffect,
+  useCallback,
+  useMemo,
+  useRef,
+} from "react";
 import { invoke, ApiAuthError } from "./lib/invoke";
 import { onApiTokenChange } from "./lib/apiToken";
 import type {
@@ -13,7 +22,9 @@ import type {
   AntigravityBrainFolder,
   AntigravityMessage,
   AntigravitySession,
+  BrowseMode,
 } from "./types";
+import { loadBrowseMode, saveBrowseMode } from "./lib/browseMode";
 import { useSession } from "./hooks/useSession";
 import { usePicker } from "./hooks/usePicker";
 import { useToggleSet } from "./hooks/useToggleSet";
@@ -58,10 +69,23 @@ const EfficiencyDashboardModal = lazy(() =>
   })),
 );
 
+/** Stable empty list so the Antigravity memo does not re-run every render. */
+const EMPTY_ANTIGRAVITY: AntigravityBrainFolder[] = [];
+
 export function App() {
   const [view, setView] = useState<ViewState>("picker");
   const [storedSelectedMessage, setSelectedMessage] = useState(0);
   const [pickerSelectedIndex, setPickerSelectedIndex] = useState(0);
+  // Which list the picker browses. Persisted so the choice survives a reload;
+  // see lib/browseMode.ts.
+  const [browseMode, setBrowseMode] = useState<BrowseMode>(loadBrowseMode);
+  const changeBrowseMode = useCallback((mode: BrowseMode) => {
+    setBrowseMode(mode);
+    saveBrowseMode(mode);
+    // The two lists are different lengths; a selection index that pointed into
+    // one may not exist in the other.
+    setPickerSelectedIndex(0);
+  }, []);
   const [showKeybinds, setShowKeybinds] = useState(true);
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState(180);
@@ -129,6 +153,10 @@ export function App() {
   // Read-only Antigravity (Gemini IDE) brain folders. Empty unless the user
   // opted in via Settings — the backend filters at the source.
   const [antigravityFolders, setAntigravityFolders] = useState<AntigravityBrainFolder[]>([]);
+  // Whether the user has opted in. Needed separately from the folder list:
+  // an empty list means either "off" or "on but nothing found", and the mode
+  // selector must not offer a source that is switched off.
+  const [antigravityEnabled, setAntigravityEnabled] = useState(false);
   const loadAntigravityFolders = useCallback(async () => {
     try {
       const folders = await invoke<AntigravityBrainFolder[]>("list_antigravity_brain_folders");
@@ -144,6 +172,25 @@ export function App() {
   // invoke promise — the transcript reads in a few hundred ms even via
   // /mnt/c/ from WSL, so we don't show a separate spinner.
   const [antigravitySession, setAntigravitySession] = useState<AntigravitySession | null>(null);
+  // The picker's single source of truth for what the Antigravity list
+  // contains: hidden by mode, then matched against the search query. The
+  // picker receives this rather than the raw list, so the keyboard selection
+  // range (built here) and the rendered cards (built there) can't drift apart.
+  const visibleAntigravity = useMemo(() => {
+    if (browseMode === "claude" || !antigravityEnabled) return EMPTY_ANTIGRAVITY;
+    const q = (picker.searchQuery || "").trim().toLowerCase();
+    if (!q) return antigravityFolders;
+    return antigravityFolders.filter(
+      (f) =>
+        (f.title?.toLowerCase().includes(q) ?? false) ||
+        f.uuid.toLowerCase().includes(q) ||
+        f.flavor.toLowerCase().includes(q),
+    );
+  }, [antigravityFolders, browseMode, antigravityEnabled, picker.searchQuery]);
+  // How many items `j`/`k` walk: Claude cards first, then Antigravity ones.
+  const pickerItemCount =
+    (browseMode === "antigravity" ? 0 : picker.sessions.length) + visibleAntigravity.length;
+
   const openAntigravityFolder = useCallback(async (folder: AntigravityBrainFolder) => {
     try {
       const messages = await invoke<AntigravityMessage[]>("load_antigravity_session", {
@@ -213,9 +260,11 @@ export function App() {
         projects_dir: string | null;
         effective_dir_exists: boolean;
         can_focus: boolean;
+        enable_antigravity?: boolean;
       }>("get_settings");
       dirExists = settings.effective_dir_exists;
       setCanFocus(settings.can_focus);
+      setAntigravityEnabled(settings.enable_antigravity ?? false);
     } catch (err) {
       if (err instanceof ApiAuthError) {
         setAuthError(err.message);
@@ -516,11 +565,17 @@ export function App() {
 
   const goToSessions = useCallback(() => {
     setView("picker");
+    // An open Antigravity conversation takes over the picker view, so
+    // returning to "picker" must close it — otherwise the Sessions button
+    // lands back in the reader with no way out but its own back button.
+    setAntigravitySession(null);
+    setPickerSelectedIndex(0);
   }, []);
 
   const backToList = useCallback(() => {
     if (!sessionPath) return;
     setView("list");
+    setAntigravitySession(null);
     // Leaving Detail — release the full (heavy-body) message it held so it
     // doesn't linger in memory until the next Detail open overwrites it.
     setDetailMessage(null);
@@ -600,16 +655,28 @@ export function App() {
         keyMap["?"] = toggleKeybinds;
         break;
       case "picker": {
+        // One selection index spans both lists: Claude sessions occupy
+        // 0..sessions.length-1, Antigravity conversations the rest. Before
+        // this, Enter always resolved against the Claude list — so pressing
+        // it while reading an Antigravity transcript opened an unrelated
+        // Claude session (and could trigger a full webview reload).
+        const showClaudeList = browseMode !== "antigravity";
+        const claudeCount = showClaudeList ? picker.sessions.length : 0;
         const pickerDown = () =>
-          setPickerSelectedIndex((i) => Math.min(i + 1, picker.sessions.length - 1));
+          setPickerSelectedIndex((i) => Math.min(i + 1, pickerItemCount - 1));
         const pickerUp = () => setPickerSelectedIndex((i) => Math.max(i - 1, 0));
         keyMap["j"] = pickerDown;
         keyMap["ArrowDown"] = pickerDown;
         keyMap["k"] = pickerUp;
         keyMap["ArrowUp"] = pickerUp;
         keyMap["Enter"] = () => {
-          if (picker.sessions[pickerSelectedIndex])
-            handleSelectSession(picker.sessions[pickerSelectedIndex]);
+          if (pickerSelectedIndex < claudeCount) {
+            const s = picker.sessions[pickerSelectedIndex];
+            if (s) handleSelectSession(s);
+            return;
+          }
+          const folder = visibleAntigravity[pickerSelectedIndex - claudeCount];
+          if (folder) void openAntigravityFolder(folder);
         };
         keyMap["q"] = backToList;
         keyMap["Escape"] = backToList;
@@ -686,8 +753,11 @@ export function App() {
               efficiencySummaries={efficiencyJobs.summariesBySession}
               onAnalyse={(path) => void requestEfficiencyAnalysis(path, true)}
               onOpenEfficiencyDashboard={(sessionInfo) => void openEfficiencyDashboard(sessionInfo)}
-              antigravityFolders={antigravityFolders}
+              antigravityFolders={visibleAntigravity}
               onSelectAntigravity={(folder) => void openAntigravityFolder(folder)}
+              browseMode={browseMode}
+              onBrowseModeChange={changeBrowseMode}
+              antigravityEnabled={antigravityEnabled}
             />
           </div>
         );
@@ -876,8 +946,10 @@ export function App() {
         <SettingsModal
           onClose={() => setShowSettings(false)}
           onSaved={() => {
-            void loadProjectDirs();
-            void loadAntigravityFolders();
+            // loadProjectDirs re-reads get_settings, which is where
+            // `enable_antigravity` comes from; refetch the folders after it
+            // so a just-changed root or toggle is reflected.
+            void loadProjectDirs().then(() => loadAntigravityFolders());
           }}
           fontScale={fontScale}
           onFontScaleChange={setFontScale}

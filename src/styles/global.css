@@ -1232,6 +1232,53 @@ body {
   font-size: 13px;
 }
 
+/* Browse-mode selector — Claude / Antigravity / All. A segmented control so
+   the three modes read as one choice rather than a dropdown. */
+.picker__mode {
+  display: inline-flex;
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  overflow: hidden;
+  flex: 0 0 auto;
+}
+
+.picker__mode-btn {
+  background: transparent;
+  border: none;
+  border-right: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  padding: 4px 10px;
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.picker__mode-btn:last-child {
+  border-right: none;
+}
+
+.picker__mode-btn:hover {
+  background: var(--bg-elevated);
+  color: var(--text-default);
+}
+
+.picker__mode-btn--active {
+  background: var(--bg-elevated);
+  color: var(--text-default);
+  font-weight: 600;
+}
+
+/* A brain folder holding artifacts but no conversation. Most folders in a
+   real install look like this, so it reads as a normal-but-quiet card rather
+   than an error the user has to open to discover. */
+.picker__session--no-transcript {
+  opacity: 0.62;
+}
+
+.picker__session--no-transcript .picker__session-preview {
+  font-style: italic;
+}
+
 /* Antigravity (Gemini IDE) brain folder section. Renders below the Claude
    sessions as a read-only envelope — same shape as a session card but with
    distinct colors so it never blends with the Claude list. */

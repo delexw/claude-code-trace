@@ -18,8 +18,10 @@ export type {
   ViewState,
   IndexProgress,
   AntigravityBrainFolder,
+  AntigravityBrainRoot,
   AntigravityMessage,
   AntigravitySession,
+  BrowseMode,
 } from "../../shared/types";
 
 export type {

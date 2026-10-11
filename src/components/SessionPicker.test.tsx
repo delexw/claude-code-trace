@@ -685,6 +685,8 @@ describe("SessionPicker Antigravity section", () => {
     path: "/home/user/.gemini/antigravity-ide/brain/00000000-0000-0000-0000-000000000001",
     mod_time_ms: Date.parse("2026-09-30T12:00:00Z"),
     title: "Build a Rust trading bot",
+    flavor: "antigravity-ide",
+    has_transcript: true,
     provider_id: "antigravity" as const,
   };
 
@@ -734,6 +736,7 @@ describe("SessionPicker Antigravity section", () => {
         onSearchChange={vi.fn()}
         antigravityFolders={[folder]}
         onSelectAntigravity={vi.fn()}
+        antigravityEnabled
       />,
     );
     expect(screen.getAllByText(/Antigravity/i).length).toBeGreaterThan(0);
@@ -754,6 +757,7 @@ describe("SessionPicker Antigravity section", () => {
         onSearchChange={vi.fn()}
         antigravityFolders={[folder]}
         onSelectAntigravity={onSelectAntigravity}
+        antigravityEnabled
       />,
     );
     fireEvent.click(screen.getAllByRole("button", { name: new RegExp(folder.title!) })[0]);
@@ -777,9 +781,184 @@ describe("SessionPicker Antigravity section", () => {
         onSearchChange={vi.fn()}
         antigravityFolders={[folder]}
         onSelectAntigravity={onSelectAntigravity}
+        antigravityEnabled
       />,
     );
     fireEvent.click(screen.getAllByRole("button", { name: new RegExp(folder.title!) })[0]);
     expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("shows the short flavor label on each card", () => {
+    render(
+      <SessionPicker
+        index={indexed}
+        sessions={[]}
+        loading={false}
+        searchQuery=""
+        selectedIndex={0}
+        onSelect={vi.fn()}
+        onSearchChange={vi.fn()}
+        antigravityFolders={[folder]}
+        onSelectAntigravity={vi.fn()}
+        antigravityEnabled
+      />,
+    );
+    expect(screen.getAllByText(/^ide$/).length).toBeGreaterThan(0);
+  });
+
+  it("marks artifact-only folders instead of showing them as openable conversations", () => {
+    const artifactsOnly = {
+      ...folder,
+      uuid: "00000000-0000-0000-0000-000000000009",
+      path: "/home/user/.gemini/antigravity-ide/brain/00000000-0000-0000-0000-000000000009",
+      has_transcript: false,
+      flavor: "antigravity",
+    };
+    render(
+      <SessionPicker
+        index={indexed}
+        sessions={[]}
+        loading={false}
+        searchQuery=""
+        selectedIndex={0}
+        onSelect={vi.fn()}
+        onSearchChange={vi.fn()}
+        antigravityFolders={[artifactsOnly]}
+        onSelectAntigravity={vi.fn()}
+        antigravityEnabled
+      />,
+    );
+    expect(screen.getByText(/artifacts only/i)).toBeInTheDocument();
+    expect(screen.getByText(/^antigravity$/)).toBeInTheDocument();
+  });
+
+  it("renders the folder's modification time", () => {
+    // Regression guard: passing epoch milliseconds through formatExactTime
+    // yields an Invalid Date and silently renders nothing.
+    render(
+      <SessionPicker
+        index={indexed}
+        sessions={[]}
+        loading={false}
+        searchQuery=""
+        selectedIndex={0}
+        onSelect={vi.fn()}
+        onSearchChange={vi.fn()}
+        antigravityFolders={[folder]}
+        onSelectAntigravity={vi.fn()}
+        antigravityEnabled
+      />,
+    );
+    const stamp = document.querySelector(".picker__session-time");
+    expect(stamp?.textContent?.trim()).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+  });
+});
+
+const session = (over: Partial<SessionInfo> = {}): SessionInfo =>
+  ({
+    path: "/home/u/.claude/projects/a/s1.jsonl",
+    name: "Claude session one",
+    first_message: "hello",
+    session_id: "s1",
+    model: "claude-opus-5",
+    cwd: "/home/u",
+    total_tokens: 100,
+    cost_usd: 0,
+    turn_count: 2,
+    duration_ms: 1000,
+    mod_time: "2026-09-30T10:00:00Z",
+    ...over,
+  }) as SessionInfo;
+
+describe("SessionPicker browse mode", () => {
+  const folder = {
+    uuid: "00000000-0000-0000-0000-000000000001",
+    path: "/home/user/.gemini/antigravity-ide/brain/00000000-0000-0000-0000-000000000001",
+    mod_time_ms: Date.parse("2026-09-30T12:00:00Z"),
+    title: "An Antigravity conversation",
+    flavor: "antigravity-ide",
+    has_transcript: true,
+    provider_id: "antigravity" as const,
+  };
+
+  const renderPicker = (props: Partial<React.ComponentProps<typeof SessionPicker>> = {}) =>
+    render(
+      <SessionPicker
+        index={indexed}
+        sessions={[session()]}
+        loading={false}
+        searchQuery=""
+        selectedIndex={0}
+        onSelect={vi.fn()}
+        onSearchChange={vi.fn()}
+        antigravityFolders={[folder]}
+        onSelectAntigravity={vi.fn()}
+        antigravityEnabled
+        browseMode="all"
+        {...props}
+      />,
+    );
+
+  it("hides the mode selector entirely while Antigravity is disabled", () => {
+    renderPicker({ antigravityEnabled: false });
+    expect(screen.queryByRole("group", { name: /browse mode/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Antigravity" })).not.toBeInTheDocument();
+  });
+
+  it("offers all three modes once Antigravity is enabled", () => {
+    renderPicker();
+    const group = screen.getByRole("group", { name: /browse mode/i });
+    expect(group).toBeInTheDocument();
+    for (const label of ["Claude", "Antigravity", "All"]) {
+      expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
+    }
+  });
+
+  it("reports a mode change", () => {
+    const onBrowseModeChange = vi.fn();
+    renderPicker({ onBrowseModeChange });
+    fireEvent.click(screen.getByRole("button", { name: "Antigravity" }));
+    expect(onBrowseModeChange).toHaveBeenCalledWith("antigravity");
+  });
+
+  it("browseMode=antigravity hides the Claude list and keeps the conversations", () => {
+    renderPicker({ browseMode: "antigravity" });
+    expect(screen.queryByText("Claude session one")).not.toBeInTheDocument();
+    expect(screen.getAllByText(/An Antigravity conversation/).length).toBeGreaterThan(0);
+  });
+
+  it("browseMode=claude hides the Antigravity section", () => {
+    renderPicker({ browseMode: "claude" });
+    expect(screen.getByText("Claude session one")).toBeInTheDocument();
+    expect(screen.queryByText("An Antigravity conversation")).not.toBeInTheDocument();
+    // The selector stays visible — the user needs a way back.
+    expect(screen.getByRole("group", { name: /browse mode/i })).toBeInTheDocument();
+  });
+
+  it("clamps a persisted mode that is no longer selectable back to Claude", () => {
+    // Antigravity was turned off in Settings while the mode was still
+    // "antigravity" in localStorage — the picker must not render the
+    // (unavailable) Antigravity view.
+    renderPicker({ browseMode: "antigravity", antigravityEnabled: false });
+    expect(screen.getByText("Claude session one")).toBeInTheDocument();
+  });
+
+  it("gives Antigravity cards indices that continue past the Claude list", () => {
+    // Two Claude sessions, so the first Antigravity card is index 2 and the
+    // second is index 3 — one keyboard selection spans both lists.
+    const onSelectIndex = vi.fn();
+    renderPicker({
+      sessions: [session(), session({ path: "/p/s2.jsonl", session_id: "s2", name: "Claude two" })],
+      onSelectIndex,
+    });
+    const cards = document.querySelectorAll(".picker__session--antigravity");
+    expect(cards).toHaveLength(1);
+    fireEvent.mouseEnter(cards[0]);
+    expect(onSelectIndex).toHaveBeenCalledWith(2);
+  });
+
+  it("shows an explanation when no conversations are found", () => {
+    renderPicker({ antigravityFolders: [] });
+    expect(screen.getAllByText(/No conversations found/i).length).toBeGreaterThan(0);
   });
 });

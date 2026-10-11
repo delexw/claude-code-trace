@@ -223,18 +223,47 @@ export interface IndexProgress {
 }
 
 /**
+ * One resolved Antigravity brain root: a flavor directory name and the
+ * directory it maps to. Mirrors
+ * `crate::commands::antigravity::BrainRoot`.
+ */
+export interface AntigravityBrainRoot {
+  /** `"antigravity-ide"` (current installs), `"antigravity"` (older), or
+   *  `"custom"` when the user has pointed the reader at their own directory. */
+  flavor: string;
+  path: string;
+  exists: boolean;
+}
+
+/**
  * One Antigravity (Gemini IDE) conversation folder under
- * `~/.gemini/<flavor>/brain/<uuid>/`. Read-only envelope in the picker —
- * no transcript parsing yet. Mirrors
- * `crate::commands::antigravity::AntigravityBrainFolder`.
+ * `~/.gemini/<flavor>/brain/<uuid>/`. Read-only envelope in the picker.
+ * Mirrors `crate::commands::antigravity::AntigravityBrainFolder`.
  */
 export interface AntigravityBrainFolder {
   uuid: string;
   path: string;
   mod_time_ms: number;
   title: string | null;
+  /** Which flavor root this conversation was found under. A migration copies
+   *  old conversations into the new root, so the same conversation can exist
+   *  under both flavors; the list de-duplicates by `uuid` and keeps this
+   *  label from the copy it picked. */
+  flavor: string;
+  /** Whether this folder holds an actual transcript. Brain roots also hold
+   *  artifact folders (screenshots, reports, scratch dirs) with no
+   *  conversation in them — on a real install most folders are of this kind,
+   *  so the picker marks them rather than offering to open them. */
+  has_transcript: boolean;
   provider_id: "antigravity";
 }
+
+/**
+ * Which list the picker is browsing. `claude` and `antigravity` show one
+ * source each; `all` shows both in one scroll. Selecting `antigravity` or
+ * `all` requires Antigravity to be enabled in Settings.
+ */
+export type BrowseMode = "claude" | "antigravity" | "all";
 
 /**
  * One normalized transcript step for an Antigravity conversation.
@@ -243,16 +272,20 @@ export interface AntigravityBrainFolder {
  * draw both Claude and Antigravity sessions.
  *
  * `role` is one of:
- *  - `"user"` — first USER_INPUT message from the user
+ *  - `"user"` — a USER_INPUT turn from the user
  *  - `"assistant"` — PLANNER_RESPONSE (model output)
  *  - `"tool"` — MCP_TOOL call (payload shown raw in `content`)
  *  - `"file"` — VIEW_FILE result
  *  - `"search"` — GREP_SEARCH result
  *  - `"error"` — ERROR_MESSAGE
  *  - `"checkpoint"` — compaction marker (CHECKPOINT)
- *  - `"system"` — anything else; system-context rows that the reader
- *    doesn't want to see (CONVERSATION_HISTORY, KNOWLEDGE_ARTIFACTS)
- *    are filtered server-side and never reach the UI.
+ *  - `"context"` — CONVERSATION_HISTORY, Antigravity's roll-up of recent
+ *    conversations (carries `<conversation_summaries>` with ids and titles)
+ *  - `"system"` — anything else; real transcripts also carry LIST_DIRECTORY,
+ *    CODE_ACTION, RUN_COMMAND, INVOKE_SUBAGENT, SYSTEM_MESSAGE and GENERIC
+ *
+ * `KNOWLEDGE_ARTIFACTS` is the one type dropped server-side: it is pure
+ * engine state with no reader value.
  *
  * `content` is the raw JSONL `content` string with no embellishment —
  * `<USER_REQUEST>` markers stay visible so the reader sees the exact
@@ -272,6 +305,8 @@ export interface AntigravityMessage {
     | "system";
   content: string;
   created_at: string | null;
+  /** Always `null` today. Tool calls arrive in a row's `tool_calls` array
+   *  (`{name, args}`), not in a dedicated row type. */
   tool_name: string | null;
 }
 

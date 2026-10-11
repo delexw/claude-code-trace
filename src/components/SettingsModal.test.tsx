@@ -726,4 +726,128 @@ describe("SettingsModal Antigravity toggle", () => {
     // The picker refresh hook is fired on toggle so the new folders show up.
     expect(onSaved).toHaveBeenCalledTimes(1);
   });
+
+  it("shows an editable Brain Directory field seeded empty when auto-detecting", async () => {
+    render(
+      <SettingsModal
+        onClose={onClose}
+        onSaved={onSaved}
+        fontScale={1}
+        onFontScaleChange={onFontScaleChange}
+        recapPreview={false}
+        onRecapPreviewChange={onRecapPreviewChange}
+      />,
+    );
+    const input = (await screen.findByLabelText(/Brain Directory/i)) as HTMLInputElement;
+    // Empty means "auto-detect"; the resolved path is shown as a hint, not
+    // baked into the field.
+    expect(input.value).toBe("");
+    expect(input.placeholder).toContain(ANTIGRAVITY_BRAIN);
+    expect(input.placeholder).toMatch(/auto-detected/i);
+  });
+
+  it("seeds the field with the user's existing override", async () => {
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "get_settings") {
+        return Promise.resolve({
+          projects_dir: null,
+          default_dir: DEFAULT_DIR,
+          effective_dir: DEFAULT_DIR,
+          effective_dir_exists: true,
+          wsl_distros: [],
+          allowed_origins: [],
+          enable_antigravity: true,
+          antigravity_root: "/custom/brain",
+          antigravity_brain_root: "/custom/brain",
+          antigravity_brain_root_exists: true,
+          antigravity_brain_roots: [{ flavor: "custom", path: "/custom/brain", exists: true }],
+        });
+      }
+      if (cmd === "list_wsl_distros") return Promise.resolve([]);
+      return Promise.resolve();
+    });
+
+    render(
+      <SettingsModal
+        onClose={onClose}
+        onSaved={onSaved}
+        fontScale={1}
+        onFontScaleChange={onFontScaleChange}
+        recapPreview={false}
+        onRecapPreviewChange={onRecapPreviewChange}
+      />,
+    );
+    const input = (await screen.findByLabelText(/Brain Directory/i)) as HTMLInputElement;
+    expect(input.value).toBe("/custom/brain");
+  });
+
+  it("saves the typed brain root, and clears it when emptied", async () => {
+    render(
+      <SettingsModal
+        onClose={onClose}
+        onSaved={onSaved}
+        fontScale={1}
+        onFontScaleChange={onFontScaleChange}
+        recapPreview={false}
+        onRecapPreviewChange={onRecapPreviewChange}
+      />,
+    );
+    const input = await screen.findByLabelText(/Brain Directory/i);
+    fireEvent.change(input, { target: { value: "/mnt/c/Users/me/.gemini/antigravity/brain" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("set_antigravity_root", {
+        path: "/mnt/c/Users/me/.gemini/antigravity/brain",
+      });
+    });
+
+    // Emptying the field means "go back to auto-detection", not "read /".
+    mockInvoke.mockClear();
+    fireEvent.change(input, { target: { value: "  " } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => {
+      expect(mockInvoke).toHaveBeenCalledWith("set_antigravity_root", { path: null });
+    });
+  });
+
+  it("names the other installs it found when more than one exists", async () => {
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === "get_settings") {
+        return Promise.resolve({
+          projects_dir: null,
+          default_dir: DEFAULT_DIR,
+          effective_dir: DEFAULT_DIR,
+          effective_dir_exists: true,
+          wsl_distros: [],
+          allowed_origins: [],
+          enable_antigravity: true,
+          antigravity_brain_root: ANTIGRAVITY_BRAIN,
+          antigravity_brain_root_exists: true,
+          antigravity_brain_roots: [
+            { flavor: "antigravity-ide", path: ANTIGRAVITY_BRAIN, exists: true },
+            { flavor: "antigravity", path: "/Users/x/.gemini/antigravity/brain", exists: true },
+            { flavor: "antigravity-backup", path: "/nope", exists: false },
+          ],
+        });
+      }
+      if (cmd === "list_wsl_distros") return Promise.resolve([]);
+      return Promise.resolve();
+    });
+
+    render(
+      <SettingsModal
+        onClose={onClose}
+        onSaved={onSaved}
+        fontScale={1}
+        onFontScaleChange={onFontScaleChange}
+        recapPreview={false}
+        onRecapPreviewChange={onRecapPreviewChange}
+      />,
+    );
+    const alsoFound = await screen.findByText(/Also found:/);
+    expect(alsoFound).toBeInTheDocument();
+    // Only roots that exist are named — a missing one is not an install.
+    expect(alsoFound.textContent).toContain("antigravity →");
+    expect(alsoFound.textContent).not.toContain("backup");
+  });
 });

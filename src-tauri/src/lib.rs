@@ -117,6 +117,7 @@ fn run_desktop(args: &[String]) {
             commands::settings::get_settings,
             commands::settings::set_projects_dir,
             commands::settings::set_antigravity_enabled,
+            commands::settings::set_antigravity_root,
             commands::antigravity::list_antigravity_brain_folders,
             commands::antigravity::get_antigravity_brain_root,
             commands::antigravity::open_antigravity_folder,
