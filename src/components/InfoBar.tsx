@@ -35,6 +35,10 @@ interface InfoBarProps {
   sessionInfo?: SessionInfo | null;
   /** Whether this backend can focus a session's terminal window. */
   canFocus: boolean;
+  /** Replaces the project slot when the transcript is not a Claude session
+   *  (Antigravity brain folders have no cwd). Omitted → `shortPath(meta.cwd)`
+   *  as before, so the Claude path is unchanged. */
+  titleOverride?: string;
 }
 
 export function InfoBar({
@@ -46,8 +50,9 @@ export function InfoBar({
   ongoing,
   sessionInfo,
   canFocus,
+  titleOverride,
 }: InfoBarProps) {
-  const projectName = shortPath(meta.cwd);
+  const projectName = titleOverride ?? shortPath(meta.cwd);
   const sessionId = sessionPath.split("/").pop()?.replace(".jsonl", "") || "";
   const branch = gitInfo?.branch || meta.git_branch;
   const dirty = gitInfo?.dirty ?? false;

@@ -779,11 +779,18 @@ async fn api_set_antigravity_enabled(
 #[derive(Deserialize)]
 struct LoadAntigravitySessionBody {
     path: String,
+    /// Index of the first step wanted. Omitting it reads from the start.
+    #[serde(default)]
+    start: usize,
+    /// How many steps to return. Omitted reads the whole conversation in one
+    /// pass; `0` returns the role index with no bodies.
+    #[serde(default)]
+    limit: Option<usize>,
 }
 
-/// Loads the conversation transcript for a brain folder and returns it as
-/// a list of normalized messages. Always returns 200 with `[]` when the
-/// folder has no local transcript (e.g. reference-only folders).
+/// Loads one page of a brain folder's conversation, alongside the role index
+/// and total step count for the whole transcript. Always 200 — a folder with no
+/// local transcript yields an empty window rather than an error.
 async fn api_load_antigravity_session(Json(body): Json<LoadAntigravitySessionBody>) -> Response {
     let path = std::path::PathBuf::from(&body.path);
     if !path.is_dir() {
@@ -792,8 +799,10 @@ async fn api_load_antigravity_session(Json(body): Json<LoadAntigravitySessionBod
             format!("path is not a directory: {}", body.path),
         );
     }
-    ok_json(&crate::commands::antigravity::load_antigravity_transcript(
+    ok_json(&crate::commands::antigravity::load_antigravity_window(
         &path,
+        body.start,
+        body.limit.unwrap_or(usize::MAX),
     ))
 }
 

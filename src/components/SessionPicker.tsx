@@ -24,6 +24,8 @@ import {
 } from "../lib/format";
 import { getModelColor } from "../lib/theme";
 import { mergeRefs } from "../lib/mergeRefs";
+import antigravityIcon from "../assets/antigravity.png";
+import { selectableModes } from "../lib/browseMode";
 import { BsClaude } from "react-icons/bs";
 import { TokensIcon, CostIcon, ForwardIcon } from "./Icons";
 import { BetaBadge } from "./BetaBadge";
@@ -31,17 +33,6 @@ import { BetaBadge } from "./BetaBadge";
 const NO_EFFICIENCY_JOBS = new Map<string, EfficiencyAnalysisJob>();
 const NO_EFFICIENCY_SUMMARIES = new Map<string, EfficiencySummary>();
 const NO_ANTIGRAVITY_FOLDERS: AntigravityBrainFolder[] = [];
-
-/** The three ways the picker can be read. Module scope so the list identity is
- *  stable across renders. */
-const BROWSE_MODES: { id: BrowseMode; label: string; title: string }[] = [
-  { id: "claude", label: "Claude", title: "Claude Code sessions only" },
-  { id: "antigravity", label: "Antigravity", title: "Antigravity conversations only" },
-  { id: "all", label: "All", title: "Both sources in one list" },
-];
-
-/** Offered while Antigravity is switched off — no empty promises. */
-const CLAUDE_ONLY_MODES = BROWSE_MODES.slice(0, 1);
 
 function SessionAnalysisProgress({ progress }: { progress: number }) {
   return (
@@ -106,11 +97,10 @@ interface SessionPickerProps {
    * section; `claude` hides it and shows only sessions.
    */
   browseMode?: BrowseMode;
-  /** Fired when the user picks a different browse mode. */
-  onBrowseModeChange?: (mode: BrowseMode) => void;
-  /** Whether Antigravity is enabled at all — the mode selector hides the
-   *  Antigravity and All options when it is off, so the control never
-   *  offers a mode that would show an empty list. */
+  /** Whether Antigravity is enabled at all — decides which modes are legal,
+   *  since a stored "antigravity" must not survive the setting being turned
+   *  off. The selector itself is drawn by `ViewToolbar`, which is also where a
+   *  mode change is reported from. */
   antigravityEnabled?: boolean;
 }
 
@@ -133,18 +123,27 @@ export function SessionPicker({
   antigravityFolders = NO_ANTIGRAVITY_FOLDERS,
   onSelectAntigravity,
   browseMode = "all",
-  onBrowseModeChange,
   antigravityEnabled = false,
 }: SessionPickerProps) {
   // Defensive: existing call sites (and tests) may pass `null` when they
   // haven't loaded the list yet. Treat it as empty rather than throwing.
   const antigravityList = antigravityFolders ?? NO_ANTIGRAVITY_FOLDERS;
+  // A brain folder with no `transcript.jsonl` is not a conversation — it is a
+  // scratch / artifacts directory that happens to live beside the ones that
+  // are. The conversation *is* that file, so a folder without it has nothing to
+  // open and no business in a conversation list. This hides 106 of 183 folders
+  // on a real install; the "no transcript found" panel stays as the fallback
+  // for a folder that loses its transcript between listing and opening.
+  const conversationFolders = useMemo(
+    () => antigravityList.filter((folder) => folder.has_transcript),
+    [antigravityList],
+  );
   // A mode persisted in localStorage can outlive the setting that made it
   // selectable (Antigravity turned off in Settings). Everything that decides
   // what to render must read the *clamped* mode, not the raw prop, or the
   // picker ends up showing neither list.
-  const selectableModes = antigravityEnabled ? BROWSE_MODES : CLAUDE_ONLY_MODES;
-  const effectiveMode = selectableModes.some((m) => m.id === browseMode) ? browseMode : "claude";
+  const modes = selectableModes(antigravityEnabled);
+  const effectiveMode = modes.some((m) => m.id === browseMode) ? browseMode : "claude";
   const showAntigravity = effectiveMode !== "claude" && antigravityEnabled;
   const showClaude = effectiveMode !== "antigravity";
   const listRef = useRef<HTMLDivElement>(null);
@@ -196,22 +195,9 @@ export function SessionPicker({
             </span>
           )}
         </div>
-        {selectableModes.length > 1 && (
-          <div className="picker__mode" role="group" aria-label="Browse mode">
-            {selectableModes.map((m) => (
-              <button
-                key={m.id}
-                type="button"
-                className={`picker__mode-btn${effectiveMode === m.id ? " picker__mode-btn--active" : ""}`}
-                aria-pressed={effectiveMode === m.id}
-                title={m.title}
-                onClick={() => onBrowseModeChange?.(m.id)}
-              >
-                {m.label}
-              </button>
-            ))}
-          </div>
-        )}
+        {/* The browse-mode selector (Claude / Antigravity / All) is not here —
+            it lives in the view toolbar, which is where a view-level choice
+            belongs. This list just obeys the mode it is given. */}
         <input
           ref={searchRef}
           className="picker__search"
@@ -416,29 +402,29 @@ export function SessionPicker({
             </div>
           ))}
 
-        {showAntigravity && antigravityList.length === 0 && (
+        {showAntigravity && conversationFolders.length === 0 && (
           <div className="picker__empty">
             {searchQuery ? "No matching conversations" : "No conversations found"}
           </div>
         )}
 
-        {showAntigravity && antigravityList.length > 0 && (
+        {showAntigravity && conversationFolders.length > 0 && (
           <div className="picker__provider picker__provider--antigravity">
             <div className="picker__group-header picker__group-header--antigravity">
               <span className="picker__provider-badge picker__provider-badge--antigravity">
                 Antigravity
               </span>
-              <span className="picker__provider-count">{antigravityList.length}</span>
+              <span className="picker__provider-count">{conversationFolders.length}</span>
               <span className="picker__provider-hint">read-only</span>
             </div>
-            {antigravityList.map((folder, agIndex) => {
+            {conversationFolders.map((folder, agIndex) => {
               const idx = claudeCount + agIndex;
               const isSelected = idx === selectedIndex;
               return (
                 <div
                   key={folder.path}
                   ref={isSelected ? selectedRef : undefined}
-                  className={`picker__session picker__session--antigravity${isSelected ? " picker__session--selected" : ""}${folder.has_transcript ? "" : " picker__session--no-transcript"}`}
+                  className={`picker__session picker__session--antigravity${isSelected ? " picker__session--selected" : ""}`}
                   role="button"
                   tabIndex={0}
                   aria-label={`Open Antigravity conversation ${folder.title ?? folder.uuid}`}
@@ -453,35 +439,33 @@ export function SessionPicker({
                 >
                   <div className="picker__session-top">
                     <span className="picker__session-icon picker__session-icon--antigravity">
-                      AG
+                      <img src={antigravityIcon} alt="" className="picker__session-icon-img" />
                     </span>
                     <span className="picker__session-preview">
-                      {truncate(folder.title ?? folder.uuid, 80)}
+                      {folder.title ? truncate(folder.title, 80) : "Untitled conversation"}
                     </span>
-                    {/* Most folders in a brain root are artifact-only — mark
-                        them rather than opening an empty transcript. */}
-                    {!folder.has_transcript && (
-                      <span
-                        className="picker__session-stat--uuid"
-                        title="This folder holds artifacts (screenshots, reports) but no conversation transcript."
-                      >
-                        artifacts only
-                      </span>
-                    )}
-                    <span
-                      className="picker__provider-badge picker__provider-badge--antigravity picker__provider-badge--small"
-                      title={folder.path}
+                    {/* The same affordance a Claude card carries. `Analyse` is
+                        deliberately absent: efficiency scoring parses a Claude
+                        transcript for usage/tool records a brain one does not
+                        record, so the button could only ever error. */}
+                    <button
+                      className="message__detail-btn"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onSelectAntigravity?.(folder);
+                      }}
                     >
-                      {folder.flavor === "antigravity-ide" ? "ide" : folder.flavor}
-                    </span>
+                      Detail <ForwardIcon />
+                    </button>
                   </div>
+                  {/* Shaped like a Claude card: the icon and preview on top,
+                      the facts underneath and hard right. A brain transcript
+                      records no model, turn count, tokens or cost — only when
+                      the conversation was last touched — and the flavour badge
+                      a Claude card carries for its provider would be the only
+                      mark on a card whose source is fixed. The root is still
+                      one hover away, on the card's tooltip. */}
                   <div className="picker__session-meta">
-                    <span
-                      className="picker__session-stat picker__session-stat--uuid"
-                      title={folder.uuid}
-                    >
-                      {truncate(folder.uuid, 36)}
-                    </span>
                     {folder.mod_time_ms > 0 && (
                       <span className="picker__session-time">
                         {formatMsTimestamp(folder.mod_time_ms)}

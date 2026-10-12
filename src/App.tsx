@@ -20,9 +20,11 @@ import type {
   PreparedEfficiencyPayload,
   SessionEfficiencyAnalysis,
   AntigravityBrainFolder,
-  AntigravityMessage,
+  AntigravityWindow,
   AntigravitySession,
   BrowseMode,
+  SessionMeta,
+  SessionTotals,
 } from "./types";
 import { loadBrowseMode, saveBrowseMode } from "./lib/browseMode";
 import { useSession } from "./hooks/useSession";
@@ -71,6 +73,22 @@ const EfficiencyDashboardModal = lazy(() =>
 
 /** Stable empty list so the Antigravity memo does not re-run every render. */
 const EMPTY_ANTIGRAVITY: AntigravityBrainFolder[] = [];
+
+/** Info-bar props for a brain folder. A brain transcript has no cwd, git
+ *  branch, context window, cost or liveness — and InfoBar hides every field
+ *  whose value is falsy (`contextPercentFromTokens(0)` returns -1), so zeroes
+ *  read as "nothing to show" rather than as invented numbers. Module scope so
+ *  the objects keep a stable identity across renders. */
+const EMPTY_SESSION_META: SessionMeta = { cwd: "", git_branch: "", permission_mode: "" };
+const EMPTY_SESSION_TOTALS: SessionTotals = {
+  total_tokens: 0,
+  input_tokens: 0,
+  output_tokens: 0,
+  cache_read_tokens: 0,
+  cache_creation_tokens: 0,
+  cost_usd: 0,
+  model: "",
+};
 
 export function App() {
   const [view, setView] = useState<ViewState>("picker");
@@ -193,24 +211,30 @@ export function App() {
 
   const openAntigravityFolder = useCallback(async (folder: AntigravityBrainFolder) => {
     try {
-      const messages = await invoke<AntigravityMessage[]>("load_antigravity_session", {
+      // One call, the whole conversation. Paging it by offset was measurably
+      // correct against a whole-file read — 23,217 rows byte-for-byte across
+      // all 73 conversations — but it did not work reliably in the running app,
+      // and a brain transcript is small enough to hand over in one piece. The
+      // backend reads it as one contiguous range and skips the steps that
+      // recorded nothing, so this is a single pass with no paging to go wrong.
+      const whole = await invoke<AntigravityWindow>("load_antigravity_session", {
         path: folder.path,
       });
-      setAntigravitySession({ folder, messages });
+      setAntigravitySession({
+        folder,
+        messages: whole.messages,
+        count: whole.count,
+        total_steps: whole.total_rows,
+      });
+      setView("antigravity");
     } catch (err) {
-      console.warn("Failed to load Antigravity session:", err);
+      console.warn("Failed to open Antigravity session:", err);
       setAntigravitySession(null);
     }
   }, []);
-  // Reveal an Antigravity folder in the host file manager. Used by the
-  // session viewer's "Open folder" button while a transcript is on screen.
-  const revealAntigravityFolder = useCallback(async (path: string) => {
-    try {
-      await invoke("open_antigravity_folder", { path });
-    } catch (err) {
-      console.warn("Failed to open Antigravity folder:", err);
-    }
-  }, []);
+  // How many steps the open conversation holds. From the index the open request
+  // returned — the same fact a Claude card shows as its turn count.
+  const antigravitySteps = antigravitySession?.count ?? null;
   // The open session's full SessionInfo (liveness, session_id), looked up from
   // the picker's list by path — useSession's meta only carries cwd/branch/mode.
   const selectedSessionInfo =
@@ -695,6 +719,12 @@ export function App() {
         keyMap["Escape"] = () => setView("list");
         keyMap["?"] = toggleKeybinds;
         break;
+      // Read-only: no selection, no detail panel. Only the way out.
+      case "antigravity":
+        keyMap["q"] = goToSessions;
+        keyMap["Escape"] = goToSessions;
+        keyMap["?"] = toggleKeybinds;
+        break;
     }
   }
   useKeyboard(keyMap);
@@ -715,26 +745,31 @@ export function App() {
     keybindActions["back"] = () => setView("list");
   } else if (view === "debug") {
     keybindActions["back"] = () => setView("list");
+  } else if (view === "antigravity") {
+    keybindActions["back"] = goToSessions;
   }
 
   // Render the active view
   const renderView = () => {
     switch (view) {
-      case "picker":
-        // When an Antigravity session is open, swap the picker for the
-        // read-only viewer. Same dashboard container so the toolbar
-        // (font scale, etc.) still applies.
+      // The read-only brain viewer. Its own case rather than a branch inside
+      // "picker": while it is on screen the toolbar, keymap and keybind bar
+      // must see a real state instead of a picker that is no longer there.
+      case "antigravity":
         if (antigravitySession) {
           return (
             <div className="picker-dashboard">
               <AntigravitySessionView
                 session={antigravitySession}
-                onBack={() => setAntigravitySession(null)}
-                onOpenFolder={() => void revealAntigravityFolder(antigravitySession.folder.path)}
+                viewActionsRef={viewActionsRef}
+                fontScale={fontScale}
               />
             </div>
           );
         }
+        return null;
+
+      case "picker":
         return (
           <div className="picker-dashboard">
             <SessionPicker
@@ -756,7 +791,6 @@ export function App() {
               antigravityFolders={visibleAntigravity}
               onSelectAntigravity={(folder) => void openAntigravityFolder(folder)}
               browseMode={browseMode}
-              onBrowseModeChange={changeBrowseMode}
               antigravityEnabled={antigravityEnabled}
             />
           </div>
@@ -879,17 +913,24 @@ export function App() {
           <span className="app-auth-banner__detail">{authError}</span>
         </div>
       )}
-      {/* Info bar — only show when we have a loaded session */}
-      {session.sessionPath && view !== "picker" && (
+      {/* Info bar — a loaded Claude session, or an open brain conversation */}
+      {(session.sessionPath || antigravitySession) && view !== "picker" && (
         <InfoBar
-          meta={session.meta}
-          gitInfo={session.gitInfo}
-          contextTokens={session.contextTokens}
-          sessionTotals={session.sessionTotals}
-          sessionPath={session.sessionPath}
-          ongoing={session.ongoing}
-          sessionInfo={selectedSessionInfo}
-          canFocus={canFocus}
+          meta={antigravitySession ? EMPTY_SESSION_META : session.meta}
+          gitInfo={antigravitySession ? null : session.gitInfo}
+          contextTokens={antigravitySession ? 0 : session.contextTokens}
+          sessionTotals={antigravitySession ? EMPTY_SESSION_TOTALS : session.sessionTotals}
+          sessionPath={antigravitySession ? antigravitySession.folder.path : session.sessionPath}
+          ongoing={antigravitySession ? false : session.ongoing}
+          sessionInfo={antigravitySession ? null : selectedSessionInfo}
+          canFocus={antigravitySession ? false : canFocus}
+          // A brain folder has no cwd, so the project slot takes the
+          // conversation's own title rather than a mislabelled path.
+          titleOverride={
+            antigravitySession
+              ? (antigravitySession.folder.title ?? antigravitySession.folder.uuid)
+              : undefined
+          }
         />
       )}
 
@@ -906,6 +947,10 @@ export function App() {
         onOpenTeams={openTeams}
         onOpenDebug={openDebug}
         onBackToList={backToList}
+        browseMode={browseMode}
+        onBrowseModeChange={changeBrowseMode}
+        antigravityEnabled={antigravityEnabled}
+        stepsLabel={antigravitySteps === null ? undefined : `${antigravitySteps} steps`}
         onOpenSettings={() => {
           setSettingsInitialTab("general");
           setShowSettings(true);

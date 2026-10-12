@@ -841,6 +841,16 @@ body {
   flex: 1;
 }
 
+/* A count about the content on screen. Not a button — it sits with the content
+   actions, so it reads as information rather than as something to press. */
+.view-toolbar__stat {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  align-self: center;
+  margin-right: 8px;
+}
+
 .view-toolbar__separator {
   width: 1px;
   height: 16px;
@@ -1206,6 +1216,14 @@ body {
   min-width: 0;
 }
 
+/* A Claude card's facts run left, but its row is crowded enough that the
+   timestamp lands hard right by accident. A brain card has exactly one fact,
+   which would sit alone in the left corner — so pin the row right, where a
+   Claude card's timestamp actually reads. */
+.picker__session--antigravity .picker__session-meta {
+  justify-content: flex-end;
+}
+
 .picker__session-model {
   font-weight: 600;
 }
@@ -1266,17 +1284,6 @@ body {
   background: var(--bg-elevated);
   color: var(--text-default);
   font-weight: 600;
-}
-
-/* A brain folder holding artifacts but no conversation. Most folders in a
-   real install look like this, so it reads as a normal-but-quiet card rather
-   than an error the user has to open to discover. */
-.picker__session--no-transcript {
-  opacity: 0.62;
-}
-
-.picker__session--no-transcript .picker__session-preview {
-  font-style: italic;
 }
 
 /* Antigravity (Gemini IDE) brain folder section. Renders below the Claude
@@ -1343,12 +1350,19 @@ body {
   background: rgba(26, 115, 232, 0.06);
 }
 
+/* The IDE's own mark, so a brain card carries the same identity a Claude card
+   carries from `BsClaude`. The gradient chip that used to sit behind the "AG"
+   text is gone — the logo is already the colour. */
 .picker__session-icon--antigravity {
-  background: linear-gradient(135deg, #1a73e8 0%, #34a853 100%);
-  color: #ffffff;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.3px;
+  line-height: 0;
+}
+
+/* The IDE's own mark, so a brain card carries the same identity a Claude card
+   carries from `BsClaude` — sized to match it rather than the 14px text. */
+.picker__session-icon-img {
+  width: 15px;
+  height: 15px;
+  display: block;
 }
 
 .picker__session-stat--uuid {
@@ -1901,6 +1915,15 @@ body {
   line-height: 1.6;
   word-break: break-word;
   margin-bottom: 16px;
+}
+
+/* A step that recorded nothing — said plainly, so the panel does not read as a
+   failed render. Quiet on purpose: it is a fact, not an event. */
+.message-detail__empty {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-style: italic;
+  padding: 8px 0;
 }
 
 /* Markdown rendering */

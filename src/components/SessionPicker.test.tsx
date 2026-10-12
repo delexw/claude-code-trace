@@ -788,7 +788,7 @@ describe("SessionPicker Antigravity section", () => {
     expect(onSelect).not.toHaveBeenCalled();
   });
 
-  it("shows the short flavor label on each card", () => {
+  it("carries no badge — a brain card is shaped exactly like a Claude card", () => {
     render(
       <SessionPicker
         index={indexed}
@@ -803,10 +803,65 @@ describe("SessionPicker Antigravity section", () => {
         antigravityEnabled
       />,
     );
-    expect(screen.getAllByText(/^ide$/).length).toBeGreaterThan(0);
+    // A Claude card's provider badge would be the only mark on a card whose
+    // source is fixed; the root stays on the card's tooltip instead.
+    expect(screen.queryByText(/^ide$/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^custom root$/)).not.toBeInTheDocument();
+    expect(
+      document.querySelector(".picker__session--antigravity .picker__session-meta"),
+    ).toBeTruthy();
   });
 
-  it("marks artifact-only folders instead of showing them as openable conversations", () => {
+  it("carries the Detail affordance a Claude card has, and no Analyse", () => {
+    const onSelectAntigravity = vi.fn();
+    render(
+      <SessionPicker
+        index={indexed}
+        sessions={[]}
+        loading={false}
+        searchQuery=""
+        selectedIndex={0}
+        onSelect={vi.fn()}
+        onSearchChange={vi.fn()}
+        antigravityFolders={[folder]}
+        onSelectAntigravity={onSelectAntigravity}
+        antigravityEnabled
+      />,
+    );
+    // Efficiency scoring parses a Claude transcript for usage/tool records a
+    // brain one does not record, so `Analyse` could only ever error here.
+    expect(screen.queryByText(/Analyse/i)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /detail/i }));
+    expect(onSelectAntigravity).toHaveBeenCalledWith(folder);
+  });
+
+  it("marks a brain card with the IDE's own logo, not an AG chip", () => {
+    render(
+      <SessionPicker
+        index={indexed}
+        sessions={[]}
+        loading={false}
+        searchQuery=""
+        selectedIndex={0}
+        onSelect={vi.fn()}
+        onSearchChange={vi.fn()}
+        antigravityFolders={[folder]}
+        onSelectAntigravity={vi.fn()}
+        antigravityEnabled
+      />,
+    );
+    const icon = document.querySelector(".picker__session-icon--antigravity img");
+    expect(icon).toBeTruthy();
+    expect(icon!.getAttribute("src")).toBeTruthy();
+    // Decorative: the card already names the conversation.
+    expect(icon!.getAttribute("alt")).toBe("");
+    expect(screen.queryByText("AG")).not.toBeInTheDocument();
+  });
+
+  it("hides artifact-only folders from the conversation list", () => {
+    // The conversation *is* transcript.jsonl. A brain folder without one is a
+    // scratch/artifacts directory that happens to sit beside the real ones, so
+    // it is not a conversation to open — 106 of 183 folders on a real install.
     const artifactsOnly = {
       ...folder,
       uuid: "00000000-0000-0000-0000-000000000009",
@@ -823,13 +878,15 @@ describe("SessionPicker Antigravity section", () => {
         selectedIndex={0}
         onSelect={vi.fn()}
         onSearchChange={vi.fn()}
-        antigravityFolders={[artifactsOnly]}
+        antigravityFolders={[artifactsOnly, folder]}
         onSelectAntigravity={vi.fn()}
         antigravityEnabled
       />,
     );
-    expect(screen.getByText(/artifacts only/i)).toBeInTheDocument();
-    expect(screen.getByText(/^antigravity$/)).toBeInTheDocument();
+    expect(screen.queryByText(/artifacts only/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(artifactsOnly.uuid)).not.toBeInTheDocument();
+    // The conversation that does have a transcript is still listed.
+    expect(screen.getByText(folder.title!)).toBeInTheDocument();
   });
 
   it("renders the folder's modification time", () => {
@@ -899,26 +956,19 @@ describe("SessionPicker browse mode", () => {
       />,
     );
 
-  it("hides the mode selector entirely while Antigravity is disabled", () => {
-    renderPicker({ antigravityEnabled: false });
-    expect(screen.queryByRole("group", { name: /browse mode/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Antigravity" })).not.toBeInTheDocument();
+  it("does not spend a meta slot on the raw uuid", () => {
+    // A brain card carries only what the transcript has: the title and when it
+    // was last touched. The uuid is a filesystem name, not a fact.
+    renderPicker({ antigravityFolders: [{ ...folder, title: null }] });
+    expect(screen.queryByText(folder.uuid)).not.toBeInTheDocument();
+    expect(screen.getByText(/^Untitled conversation$/)).toBeInTheDocument();
   });
 
-  it("offers all three modes once Antigravity is enabled", () => {
+  it("renders no mode selector of its own — the toolbar owns it", () => {
+    // The selector moved to `ViewToolbar`: it is a view-level choice, and
+    // inside the list header it was buried above the fold.
     renderPicker();
-    const group = screen.getByRole("group", { name: /browse mode/i });
-    expect(group).toBeInTheDocument();
-    for (const label of ["Claude", "Antigravity", "All"]) {
-      expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
-    }
-  });
-
-  it("reports a mode change", () => {
-    const onBrowseModeChange = vi.fn();
-    renderPicker({ onBrowseModeChange });
-    fireEvent.click(screen.getByRole("button", { name: "Antigravity" }));
-    expect(onBrowseModeChange).toHaveBeenCalledWith("antigravity");
+    expect(screen.queryByRole("group", { name: /browse mode/i })).not.toBeInTheDocument();
   });
 
   it("browseMode=antigravity hides the Claude list and keeps the conversations", () => {
@@ -931,8 +981,6 @@ describe("SessionPicker browse mode", () => {
     renderPicker({ browseMode: "claude" });
     expect(screen.getByText("Claude session one")).toBeInTheDocument();
     expect(screen.queryByText("An Antigravity conversation")).not.toBeInTheDocument();
-    // The selector stays visible — the user needs a way back.
-    expect(screen.getByRole("group", { name: /browse mode/i })).toBeInTheDocument();
   });
 
   it("clamps a persisted mode that is no longer selectable back to Claude", () => {

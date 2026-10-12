@@ -28,6 +28,27 @@ function defaultProps(overrides: Partial<Parameters<typeof ViewToolbar>[0]> = {}
 }
 
 describe("ViewToolbar", () => {
+  describe("antigravity conversation view", () => {
+    const agProps = { view: "antigravity" as const, stepsLabel: "512 steps" };
+
+    it("carries the controls the viewer's own header used to hold", () => {
+      render(<ViewToolbar {...defaultProps(agProps)} />);
+      // Back, the step count, Expand/Collapse, Top/Bottom and Settings all sit
+      // on one row now, the way the Claude list view does.
+      expect(buttonOrder()).toEqual(["Sessions", "Expand All", "Collapse All", "Top", "Bottom"]);
+      expect(screen.getByText("512 steps")).toBeInTheDocument();
+      // Navigation left, count and actions right — after the spacer.
+      const stat = screen.getByText("512 steps");
+      expect(stat.compareDocumentPosition(document.querySelector(".view-toolbar__spacer")!)).toBe(
+        Node.DOCUMENT_POSITION_PRECEDING,
+      );
+    });
+
+    it("omits the step count when there is none", () => {
+      render(<ViewToolbar {...defaultProps({ view: "antigravity" })} />);
+      expect(document.querySelector(".view-toolbar__stat")).toBeNull();
+    });
+  });
   describe("common buttons on views with collapsible content", () => {
     // The picker has no collapsible entries, so it is handled separately below.
     for (const view of ["list", "detail", "team", "debug"] as const) {
@@ -154,6 +175,47 @@ describe("ViewToolbar", () => {
         "Top",
         "Bottom",
       ]);
+    });
+  });
+
+  describe("browse-mode selector", () => {
+    const modeProps = {
+      view: "picker" as const,
+      browseMode: "all" as const,
+      antigravityEnabled: true,
+    };
+
+    it("renders in the toolbar on the picker view", () => {
+      render(<ViewToolbar {...defaultProps(modeProps)} />);
+      const group = screen.getByRole("group", { name: /browse mode/i });
+      expect(group).toBeInTheDocument();
+      for (const label of ["Claude", "Antigravity", "All"]) {
+        expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
+      }
+      // It sits ahead of the content actions, at the top of the page.
+      expect(group.compareDocumentPosition(screen.getByRole("button", { name: "Top" }))).toBe(
+        Node.DOCUMENT_POSITION_FOLLOWING,
+      );
+    });
+
+    it("marks the active mode and reports a change", () => {
+      const onBrowseModeChange = vi.fn();
+      render(<ViewToolbar {...defaultProps({ ...modeProps, onBrowseModeChange })} />);
+      expect(screen.getByRole("button", { name: "All" })).toHaveAttribute("aria-pressed", "true");
+      fireEvent.click(screen.getByRole("button", { name: "Antigravity" }));
+      expect(onBrowseModeChange).toHaveBeenCalledWith("antigravity");
+    });
+
+    it("offers only Claude while Antigravity is switched off", () => {
+      render(<ViewToolbar {...defaultProps({ ...modeProps, antigravityEnabled: false })} />);
+      expect(screen.queryByRole("group", { name: /browse mode/i })).not.toBeInTheDocument();
+    });
+
+    it("is absent on views where it would change nothing", () => {
+      // A browse mode only decides what the list shows; inside a transcript it
+      // would be a control with no visible effect.
+      render(<ViewToolbar {...defaultProps({ ...modeProps, view: "list" })} />);
+      expect(screen.queryByRole("group", { name: /browse mode/i })).not.toBeInTheDocument();
     });
   });
 });

@@ -208,7 +208,7 @@ export interface DebugEntry {
   count: number;
 }
 
-export type ViewState = "picker" | "list" | "detail" | "team" | "debug";
+export type ViewState = "picker" | "list" | "detail" | "team" | "debug" | "antigravity";
 
 /**
  * How far the background walk has got through the project directories.
@@ -291,6 +291,15 @@ export type BrowseMode = "claude" | "antigravity" | "all";
  * `<USER_REQUEST>` markers stay visible so the reader sees the exact
  * wire shape Antigravity produces.
  */
+/** One entry of a row's `tool_calls` array. `summary` is the reader-facing
+ *  label Antigravity writes in `args.toolSummary`; `input` is the whole `args`
+ *  object pretty-printed — the step's real payload when `content` is empty. */
+export interface AntigravityToolCall {
+  name: string;
+  summary: string;
+  input: string;
+}
+
 export interface AntigravityMessage {
   step_index: number;
   role:
@@ -303,11 +312,23 @@ export interface AntigravityMessage {
     | "checkpoint"
     | "context"
     | "system";
+  /** The row's raw text. Empty for ~41% of real rows — a planner turn that
+   *  only thought or only called a tool writes into the fields below instead.
+   *  See `body()` in `lib/antigravityToDisplay.ts`, which composes a body from
+   *  whichever of the four the row actually has. */
   content: string;
   created_at: string | null;
-  /** Always `null` today. Tool calls arrive in a row's `tool_calls` array
-   *  (`{name, args}`), not in a dedicated row type. */
-  tool_name: string | null;
+  /** Tool calls this row issued. Real transcripts carry them on
+   *  `PLANNER_RESPONSE` and `MCP_TOOL` rows alike. */
+  tool_calls: AntigravityToolCall[];
+  /** The row's `thinking` block, when it has one (2,931 rows of 25,064).
+   *  Null for the majority, which is the normal case. */
+  thinking_text: string | null;
+  /** The row's `error` text (463 rows). Only `ERROR_MESSAGE` rows carry it. */
+  error_text: string | null;
+  /** Wall-clock gap to the next row, in ms. 0 when unknown; the stats bar
+   *  hides a zero duration. */
+  duration_ms: number;
 }
 
 /**
@@ -317,5 +338,33 @@ export interface AntigravityMessage {
  */
 export interface AntigravitySession {
   folder: AntigravityBrainFolder;
+  /** The whole conversation, one read. */
   messages: AntigravityMessage[];
+  /** Reader-visible steps — what `messages` holds. */
+  count: number;
+  /** Every step the transcript holds, including ones that recorded nothing.
+   *  Distinguishes "no transcript" from "a transcript of empty steps". */
+  total_steps: number;
+}
+
+/**
+ * One page of a conversation, plus the index describing all of it — the same
+ * shape the Claude reader gets from `load_session`.
+ *
+ * `limit: 0` asks for the index alone: every role and the total count, with no
+ * message body built. That is the opening request, so opening a 2.7 MB
+ * transcript costs one pass and nothing else.
+ */
+export interface AntigravityWindow {
+  /** Bodies for `[start, start + messages.length)`. Empty when `limit` is 0. */
+  messages: AntigravityMessage[];
+  /** Total reader-visible steps in this conversation. */
+  count: number;
+  /** Index of the first returned message. */
+  start: number;
+  /** Role of every visible step, so the list can draw placeholders before
+   *  bodies land. Steps that recorded nothing are left out server-side. */
+  roles: string[];
+  /** Every step the transcript holds, including the ones left out. */
+  total_rows: number;
 }

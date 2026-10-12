@@ -1,8 +1,9 @@
-import type { ViewState } from "../types";
+import type { BrowseMode, ViewState } from "../types";
 import { BackIcon } from "./Icons";
 import { IoMdSettings } from "react-icons/io";
 import { isTauri } from "../lib/isTauri";
 import { invoke } from "../lib/invoke";
+import { selectableModes } from "../lib/browseMode";
 
 interface ViewToolbarProps {
   view: ViewState;
@@ -17,6 +18,50 @@ interface ViewToolbarProps {
   onOpenDebug: () => void;
   onBackToList: () => void;
   onOpenSettings: () => void;
+  /** The Claude / Antigravity / All selector. Omitted → not rendered. It only
+   *  applies to the picker, so it is drawn on that view alone: in a transcript
+   *  it would change something the reader cannot see. */
+  browseMode?: BrowseMode;
+  onBrowseModeChange?: (mode: BrowseMode) => void;
+  /** Whether Antigravity is switched on at all — with it off, only "Claude" is
+   *  offered rather than two modes that would show nothing. */
+  antigravityEnabled?: boolean;
+  /** How many steps the open conversation has. Drawn on the Antigravity view,
+   *  whose viewer used to carry its own header with this and the title — the
+   *  toolbar is where the Claude list puts the same controls. */
+  stepsLabel?: string;
+}
+
+/** The browse-mode selector. Lives in the toolbar rather than inside the list
+ *  header: it decides what the whole list *is*, so it belongs with the view,
+ *  and it stays reachable without scrolling the list back to the top. */
+function BrowseModeControl({
+  antigravityEnabled,
+  browseMode,
+  onBrowseModeChange,
+}: {
+  antigravityEnabled: boolean;
+  browseMode: BrowseMode;
+  onBrowseModeChange?: (mode: BrowseMode) => void;
+}) {
+  const modes = selectableModes(antigravityEnabled);
+  if (modes.length < 2) return null;
+  return (
+    <div className="picker__mode" role="group" aria-label="Browse mode">
+      {modes.map((mode) => (
+        <button
+          key={mode.id}
+          type="button"
+          className={`picker__mode-btn${browseMode === mode.id ? " picker__mode-btn--active" : ""}`}
+          aria-pressed={browseMode === mode.id}
+          title={mode.title}
+          onClick={() => onBrowseModeChange?.(mode.id)}
+        >
+          {mode.label}
+        </button>
+      ))}
+    </div>
+  );
 }
 
 /**
@@ -65,6 +110,7 @@ function ContentActions({
  * then the app-level Open-in-Browser / Settings. */
 function RightCluster({
   collapsible,
+  stat,
   onExpandAll,
   onCollapseAll,
   onScrollToTop,
@@ -72,6 +118,8 @@ function RightCluster({
   onOpenSettings,
 }: {
   collapsible: boolean;
+  /** A count about the content on screen, drawn ahead of the actions. */
+  stat?: string;
   onExpandAll: () => void;
   onCollapseAll: () => void;
   onScrollToTop: () => void;
@@ -81,6 +129,7 @@ function RightCluster({
   return (
     <>
       <span className="view-toolbar__spacer" />
+      {stat && <span className="view-toolbar__stat">{stat}</span>}
       <ContentActions
         collapsible={collapsible}
         onExpandAll={onExpandAll}
@@ -122,10 +171,15 @@ export function ViewToolbar({
   onOpenDebug,
   onBackToList,
   onOpenSettings,
+  browseMode,
+  onBrowseModeChange,
+  antigravityEnabled = false,
+  stepsLabel,
 }: ViewToolbarProps) {
-  const right = (collapsible: boolean) => (
+  const right = (collapsible: boolean, stat?: string) => (
     <RightCluster
       collapsible={collapsible}
+      stat={stat}
       onExpandAll={onExpandAll}
       onCollapseAll={onCollapseAll}
       onScrollToTop={onScrollToTop}
@@ -156,6 +210,13 @@ export function ViewToolbar({
   if (view === "picker") {
     return (
       <div className="view-toolbar">
+        {browseMode && (
+          <BrowseModeControl
+            antigravityEnabled={antigravityEnabled}
+            browseMode={browseMode}
+            onBrowseModeChange={onBrowseModeChange}
+          />
+        )}
         {hasSession && (
           <button className="view-toolbar__btn" onClick={onBackToList}>
             <BackIcon /> Back to Messages
@@ -163,6 +224,22 @@ export function ViewToolbar({
         )}
         {/* Picker has no collapsible entries — only scroll actions apply. */}
         {right(false)}
+      </div>
+    );
+  }
+
+  // The Antigravity viewer is read-only and has no selection to expand — it
+  // needs its way out, and `backToList` is a no-op without a Claude session
+  // path, so send it through `onGoToSessions` like the list view does.
+  if (view === "antigravity") {
+    return (
+      <div className="view-toolbar">
+        <button className="view-toolbar__btn" onClick={onGoToSessions}>
+          <BackIcon /> Sessions
+        </button>
+        {/* Navigation on the left, counts and actions on the right — the same
+            split the Claude list view uses. */}
+        {right(true, stepsLabel)}
       </div>
     );
   }

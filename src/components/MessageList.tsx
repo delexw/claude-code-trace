@@ -33,6 +33,9 @@ interface MessageRowContext {
   onClick: (index: number) => void;
   onOpenDetail: (index: number) => void;
   findings: EfficiencyFinding[];
+  rowRoleRender?: (
+    index: number,
+  ) => { className: string; label: string; modifier: string } | undefined;
 }
 
 /** Placeholder for a row whose body hasn't been fetched yet. Uses the role from
@@ -60,6 +63,7 @@ function renderMessageRow(index: number, _data: unknown, ctx: MessageRowContext)
     );
   }
   const findings = ctx.findings.filter((finding) => finding.startMessageIndex === index);
+  const render = ctx.rowRoleRender?.(index);
   return (
     <>
       {findings.map((finding) => (
@@ -79,6 +83,9 @@ function renderMessageRow(index: number, _data: unknown, ctx: MessageRowContext)
         onClick={ctx.onClick}
         onOpenDetail={ctx.onOpenDetail}
         isOngoing={index === ctx.lastIndex && ctx.ongoing}
+        roleClassOverride={render?.className}
+        roleLabelOverride={render?.label}
+        roleModifierOverride={render?.modifier}
       />
     </>
   );
@@ -103,6 +110,13 @@ interface MessageListProps {
   onExpandAll: () => void;
   onCollapseAll: () => void;
   findings?: EfficiencyFinding[];
+  /** Non-Claude transcripts pass their own step vocabulary through here — a
+   *  tool call stays purple and reads "MCP Tool" rather than collapsing into a
+   *  grey "System". Omitted → every row derives its look from `role`, exactly
+   *  as before. */
+  rowRoleRender?: (
+    index: number,
+  ) => { className: string; label: string; modifier: string } | undefined;
 }
 
 export function MessageList({
@@ -120,6 +134,7 @@ export function MessageList({
   onExpandAll,
   onCollapseAll,
   findings = NO_FINDINGS,
+  rowRoleRender,
 }: MessageListProps) {
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const mergedFindings = useMemo(() => mergeOverlappingEfficiencyFindings(findings), [findings]);
@@ -217,6 +232,7 @@ export function MessageList({
         onClick: handleClick,
         onOpenDetail,
         findings: mergedFindings,
+        rowRoleRender,
       }}
       // Stick to the bottom on new/streamed content, but only while the user is
       // already at the bottom (replaces the old near-bottom auto-scroll hook).

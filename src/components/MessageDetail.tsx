@@ -61,6 +61,10 @@ interface MessageDetailProps {
   ongoing?: boolean;
   onBack: () => void;
   viewActionsRef: ViewActionsRef;
+  /** Overrides the header's role title for transcripts that are not Claude
+   *  sessions. Omitted → derived from `role`, which would otherwise title an
+   *  Antigravity assistant step "Claude". */
+  roleLabel?: string;
 }
 
 // Defined at module scope (not inside MarkdownRenderer's render) so the component
@@ -94,6 +98,7 @@ export function MessageDetail({
   ongoing,
   onBack,
   viewActionsRef,
+  roleLabel,
 }: MessageDetailProps) {
   const {
     set: expandedItems,
@@ -198,7 +203,14 @@ export function MessageDetail({
     (i) => i.item_type === "ToolCall" || i.item_type === "Subagent",
   );
   const hasHookEvents = msg.items.some((i) => i.item_type === "HookEvent");
-  const showDebugHint = hasToolCalls && !hasHookEvents;
+  // `roleLabel` is how a caller says "this is not a Claude transcript". A brain
+  // folder has no Claude hooks at all, so the `claude --debug` hint would point
+  // at a flag that cannot show anything about it.
+  const showDebugHint = hasToolCalls && !hasHookEvents && roleLabel === undefined;
+  // Some real steps carry no payload at all — 1,847 of 25,064 brain rows have
+  // no content, no thinking, no tool call and no error. Saying so is better
+  // than an empty panel, which reads as a broken render.
+  const hasNothingToShow = !hasItems && !msg.content.trim();
 
   // Stack manipulation
   const openSubagentFromMain = useCallback(
@@ -377,7 +389,8 @@ export function MessageDetail({
         <div className="message-detail__header">
           <BackButton onClick={onBack} />
           <span className="message-detail__title">
-            {msg.role === "user" ? "User" : msg.role === "claude" ? "Claude" : "System"}
+            {roleLabel ??
+              (msg.role === "user" ? "User" : msg.role === "claude" ? "Claude" : "System")}
           </span>
           {model && (
             <span style={{ color: modelColor, fontWeight: 600, fontSize: 12 }}>{model}</span>
@@ -404,6 +417,11 @@ export function MessageDetail({
 
         <div className="message-detail__body" ref={bodyRef}>
           <div className="message-detail__content">
+            {hasNothingToShow && (
+              <div className="message-detail__empty">
+                This step records no text, tool call or result.
+              </div>
+            )}
             {msg.content && !hasInlineProse && (
               <div className="message-detail__text">
                 <MarkdownRenderer content={msg.content} />

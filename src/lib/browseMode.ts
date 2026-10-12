@@ -6,6 +6,23 @@ import type { BrowseMode } from "../types";
 export const BROWSE_MODE_KEY = "cct.browseMode";
 const DEFAULT_BROWSE_MODE: BrowseMode = "all";
 
+/** The three ways the list can be read. Rendered by `ViewToolbar`, which owns
+ *  it because a browse mode is a view-level choice, not a list-level one. */
+export const BROWSE_MODES: { id: BrowseMode; label: string; title: string }[] = [
+  { id: "claude", label: "Claude", title: "Claude Code sessions only" },
+  { id: "antigravity", label: "Antigravity", title: "Antigravity conversations only" },
+  { id: "all", label: "All", title: "Both sources in one list" },
+];
+
+/** Offered while Antigravity is switched off — no empty promises. */
+export const CLAUDE_ONLY_MODES = BROWSE_MODES.slice(0, 1);
+
+/** A stored mode can outlive the setting that allowed it (Antigravity turned
+ *  off while "antigravity" was selected), so clamp before it reaches the UI. */
+export function selectableModes(antigravityEnabled: boolean) {
+  return antigravityEnabled ? BROWSE_MODES : CLAUDE_ONLY_MODES;
+}
+
 const VALID = new Set<BrowseMode>(["claude", "antigravity", "all"]);
 
 export function loadBrowseMode(): BrowseMode {

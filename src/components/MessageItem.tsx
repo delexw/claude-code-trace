@@ -15,6 +15,12 @@ interface MessageItemProps {
   /** Whether this message is currently being processed */
   isOngoing?: boolean;
   ref?: React.Ref<HTMLDivElement>;
+  /** Non-Claude transcripts keep their own step vocabulary (a tool call is
+   *  purple and reads "MCP Tool", not a grey "System"). Omitted → derived
+   *  from `role` exactly as before, so the Claude path is untouched. */
+  roleClassOverride?: string;
+  roleLabelOverride?: string;
+  roleModifierOverride?: string;
 }
 
 function roleClass(msg: DisplayMessage): string {
@@ -48,8 +54,11 @@ export function MessageItem({
   onClick,
   onOpenDetail,
   isOngoing,
+  roleClassOverride,
+  roleLabelOverride,
+  roleModifierOverride,
 }: MessageItemProps) {
-  const rc = roleClass(msg);
+  const rc = roleClassOverride ?? roleClass(msg);
   const model = msg.model ? shortModel(msg.model) : "";
   const modelColor = msg.model ? getModelColor(msg.model) : undefined;
   const time = formatExactTime(msg.timestamp);
@@ -75,8 +84,10 @@ export function MessageItem({
             <SystemIcon />
           )}
         </span>
-        <span className={`message__role message__role--${roleCssModifier(msg)}`}>
-          {roleLabel(msg)}
+        <span
+          className={`message__role message__role--${roleModifierOverride ?? roleCssModifier(msg)}`}
+        >
+          {roleLabelOverride ?? roleLabel(msg)}
         </span>
         {model && (
           <span className="message__model" style={{ color: modelColor }}>

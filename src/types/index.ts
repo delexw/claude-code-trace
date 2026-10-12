@@ -20,7 +20,9 @@ export type {
   AntigravityBrainFolder,
   AntigravityBrainRoot,
   AntigravityMessage,
+  AntigravityToolCall,
   AntigravitySession,
+  AntigravityWindow,
   BrowseMode,
 } from "../../shared/types";
 

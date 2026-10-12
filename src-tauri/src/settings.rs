@@ -16,9 +16,9 @@ pub struct Settings {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allowed_origins: Vec<String>,
     /// Whether the picker also lists Antigravity (Gemini IDE) brain folders
-    /// as read-only envelopes. Off by default — it requires the user to opt
-    /// in via Settings. Read-only listing is intentional: full transcript
-    /// parsing for Antigravity is not yet implemented.
+    /// as read-only envelopes. Off by default: this reads another tool's
+    /// conversations, so it is opt-in rather than something a user gets by
+    /// opening the app.
     #[serde(default)]
     pub enable_antigravity: bool,
     /// Optional override for the Antigravity brain root. When unset the
@@ -137,8 +137,20 @@ mod tests {
     }
 
     #[test]
-    fn enable_antigravity_default_is_false() {
+    fn enable_antigravity_is_opt_in() {
+        // Reading another tool's conversations is something a user opts into,
+        // not something that starts happening when they open the app.
         assert!(!Settings::default().enable_antigravity);
+        let settings: Settings = serde_json::from_str("{}").unwrap();
+        assert!(!settings.enable_antigravity);
+        // Turning it on persists, and turns off persists too.
+        for raw in [
+            r#"{"enable_antigravity":true}"#,
+            r#"{"enable_antigravity":false}"#,
+        ] {
+            let parsed: Settings = serde_json::from_str(raw).unwrap();
+            assert_eq!(parsed.enable_antigravity, raw.contains("true"));
+        }
     }
 
     #[test]

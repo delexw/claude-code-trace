@@ -53,6 +53,10 @@ const debugKeys: KeyHint[] = [{ key: "q/Esc", label: "back" }];
 
 const teamKeys: KeyHint[] = [{ key: "q/Esc", label: "back" }];
 
+/** Read-only viewer — no selection, no detail panel, nothing to open. Only the
+ *  way out. */
+const antigravityKeys: KeyHint[] = [{ key: "q/Esc", label: "back" }];
+
 function getKeys(view: ViewState, hasTeams: boolean): KeyHint[] {
   switch (view) {
     case "list":
@@ -65,6 +69,8 @@ function getKeys(view: ViewState, hasTeams: boolean): KeyHint[] {
       return debugKeys;
     case "team":
       return teamKeys;
+    case "antigravity":
+      return antigravityKeys;
   }
 }
 
