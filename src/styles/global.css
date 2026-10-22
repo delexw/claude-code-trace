@@ -1656,6 +1656,10 @@ body {
   margin-bottom: 16px;
 }
 
+.message-detail__text--user {
+  white-space: pre-wrap;
+}
+
 /* Markdown rendering */
 .message-detail__text h1,
 .message-detail__text h2,
