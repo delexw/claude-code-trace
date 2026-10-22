@@ -271,6 +271,8 @@ describe("shortMode", () => {
     expect(shortMode("default")).toBe("default");
     expect(shortMode("manual")).toBe("manual");
     expect(shortMode("acceptEdits")).toBe("auto-edit");
+    expect(shortMode("auto")).toBe("auto");
+    expect(shortMode("dontAsk")).toBe("don't ask");
     expect(shortMode("bypassPermissions")).toBe("yolo");
     expect(shortMode("plan")).toBe("plan");
   });
@@ -292,6 +294,8 @@ describe("isDefaultMode", () => {
 
   it("returns false for special modes", () => {
     expect(isDefaultMode("acceptEdits")).toBe(false);
+    expect(isDefaultMode("auto")).toBe(false);
+    expect(isDefaultMode("dontAsk")).toBe(false);
     expect(isDefaultMode("bypassPermissions")).toBe(false);
     expect(isDefaultMode("plan")).toBe(false);
     expect(isDefaultMode("")).toBe(false);

@@ -320,6 +320,18 @@ Supports text search and project filtering (via `ProjectTree` selection).
 Top bar showing: project · session_id (8 chars) · git branch · permission mode ·
 context % · tokens · cost · ongoing spinner.
 
+Permission mode pills use explicit labels and colours:
+
+| Mode                | Label       | Background |
+| ------------------- | ----------- | ---------- |
+| `default`, `manual` | hidden      | —          |
+| `acceptEdits`       | `auto-edit` | purple     |
+| `bypassPermissions` | `yolo`      | red        |
+| `plan`              | `plan`      | green      |
+| `auto`              | `auto`      | blue       |
+| `dontAsk`           | `don't ask` | orange     |
+| unknown mode        | raw value   | muted grey |
+
 Context % uses a colour gradient:
 
 - `< 50%` → green

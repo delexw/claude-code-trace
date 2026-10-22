@@ -592,6 +592,16 @@ body {
   background: var(--pill-plan);
 }
 
+.info-bar__pill--auto {
+  background: var(--accent);
+  color: var(--bg);
+}
+
+.info-bar__pill--dontAsk {
+  background: var(--context-warn);
+  color: var(--bg);
+}
+
 .info-bar__pill--default {
   background: var(--text-muted);
 }
