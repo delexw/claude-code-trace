@@ -4,8 +4,9 @@ set -euo pipefail
 # Install the pre-built Claude Code Trace desktop app on macOS without cloning
 # the repo and without the usual `xattr -cr` dance.
 #
-# The app is unsigned, so anything downloaded through a browser gets tagged with
-# com.apple.quarantine and Gatekeeper refuses to open it. Quarantine is applied
+# The app is ad-hoc signed but not notarized, so anything downloaded through a
+# browser gets tagged with com.apple.quarantine and Gatekeeper refuses to open it
+# until the user clicks "Open Anyway". Quarantine is applied
 # by the downloading app, not by the artifact — curl does not set it, so
 # fetching the release tarball here and unpacking it into /Applications
 # produces a bundle macOS launches normally.

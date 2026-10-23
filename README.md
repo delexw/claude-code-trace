@@ -88,9 +88,8 @@ Claude Code Trace is especially useful when building personal AI harnesses and l
 > This downloads the latest release and installs **Claude Code Trace.app** into
 > `/Applications`, ready to open from Spotlight.
 >
-> macOS blocks unsigned apps that were flagged as downloaded, and `curl` never
-> sets that flag — so the app just opens, with no quarantine workaround. That is
-> why macOS releases ship a `.app.tar.gz` and no `.dmg`. Apple Silicon only.
+> The app is ad-hoc signed but not notarized by Apple. `curl` never marks a file
+> as downloaded, so the app installed this way just opens. Apple Silicon only.
 
 Pin a specific version, or install somewhere else, with:
 
@@ -99,18 +98,27 @@ curl -fsSL https://raw.githubusercontent.com/delexw/claude-code-trace/main/scrip
   | CCTRACE_VERSION=v0.15.1 CCTRACE_INSTALL_DIR=~/Applications bash
 ```
 
-### Download pre-built app — Linux and Windows
+### Download pre-built app
 
 Grab the latest release from [Releases](https://github.com/delexw/claude-code-trace/releases):
 
-| Platform | File                        |
-| -------- | --------------------------- |
-| Linux    | `.deb`, `.rpm`, `.AppImage` |
-| Windows  | `.msi`, `.exe`              |
+| Platform              | File                        |
+| --------------------- | --------------------------- |
+| macOS (Apple Silicon) | `.dmg`                      |
+| Linux                 | `.deb`, `.rpm`, `.AppImage` |
+| Windows               | `.msi`, `.exe`              |
 
-On macOS, use the [one-line install](#macos--one-line-install) above. Downloading the
-macOS build by hand is not supported — the app is unsigned, so anything a browser
-downloads is quarantined and refuses to open until you clear the flag yourself.
+The macOS app is ad-hoc signed but not notarized by Apple, so the first time you open a
+downloaded copy macOS refuses it. To open it:
+
+1. Open the `.dmg`, drag **Claude Code Trace.app** to Applications, and open it once.
+   macOS says it can't verify the app — click **Done**.
+2. Open **System Settings → Privacy & Security**, scroll to **Security**, and click
+   **Open Anyway** next to Claude Code Trace.
+3. Confirm with your password. After this the app opens normally.
+
+On macOS 14 and earlier you can instead right-click the app, choose **Open**, then
+**Open** again.
 
 ### Build from source
 
