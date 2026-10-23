@@ -124,7 +124,7 @@ describe("InfoBar", () => {
         canFocus={false}
       />,
     );
-    expect(screen.getByText("yolo")).toBeInTheDocument();
+    expect(screen.getByText("yolo")).toHaveClass("info-bar__pill--bypass");
   });
 
   it("shows permission mode pill for acceptEdits", () => {
@@ -139,7 +139,7 @@ describe("InfoBar", () => {
         canFocus={false}
       />,
     );
-    expect(screen.getByText("auto-edit")).toBeInTheDocument();
+    expect(screen.getByText("auto-edit")).toHaveClass("info-bar__pill--acceptEdits");
   });
 
   it("shows permission mode pill for plan", () => {
@@ -154,7 +154,26 @@ describe("InfoBar", () => {
         canFocus={false}
       />,
     );
-    expect(screen.getByText("plan")).toBeInTheDocument();
+    expect(screen.getByText("plan")).toHaveClass("info-bar__pill--plan");
+  });
+
+  it.each([
+    ["auto", "auto", "info-bar__pill--auto"],
+    ["dontAsk", "don't ask", "info-bar__pill--dontAsk"],
+    ["customMode", "customMode", "info-bar__pill--default"],
+  ])("shows the label and pill class for %s", (mode, label, pillClass) => {
+    render(
+      <InfoBar
+        meta={makeMeta({ permission_mode: mode })}
+        gitInfo={null}
+        contextTokens={0}
+        sessionTotals={makeTotals()}
+        sessionPath=""
+        ongoing={false}
+        canFocus={false}
+      />,
+    );
+    expect(screen.getByText(label)).toHaveClass("info-bar__pill", pillClass);
   });
 
   it("does not show permission mode pill for default", () => {
