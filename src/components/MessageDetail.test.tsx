@@ -119,6 +119,76 @@ function makeRootMessage(nestedItems: DisplayItem[]): DisplayMessage {
 }
 
 describe("MessageDetail", () => {
+  // Vivado log excerpt from #328: indented hashes must not become Markdown headings.
+  const userLog = `Vivado% report_route_status
+Design Route Status
+                                               :      # nets :
+   ------------------------------------------- : ----------- :
+   # of logical nets.......................... :      101449 :
+       # of nets not needing routing.......... :       33313 :
+           # of internally routed nets........ :       30577 :
+   ------------------------------------------- : ----------- :
+
+Vivado% report_timing_summary -file r6_eco_timing.rpt`;
+
+  it("preserves user log text and whitespace without interpreting Markdown", () => {
+    const { container } = render(
+      <MessageDetail
+        message={makeMessage({ role: "user", content: userLog })}
+        onBack={vi.fn()}
+        viewActionsRef={makeViewActionsRef()}
+      />,
+    );
+
+    const text = container.querySelector(".message-detail__text");
+    expect(text?.querySelector("h1, h2, h3, pre, code, hr")).toBeNull();
+    expect(text?.textContent).toBe(userLog);
+    expect(text).toHaveClass("message-detail__text--user");
+  });
+
+  it("preserves user log text in a subagent detail panel", () => {
+    const subagent = makeSubagent("agent-1", "Explore");
+    subagent.subagent_messages = [makeMessage({ role: "user", content: userLog })];
+    const { container } = render(
+      <MessageDetail
+        message={makeMessage({ items: [subagent] })}
+        onBack={vi.fn()}
+        viewActionsRef={makeViewActionsRef()}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("Explore"));
+    fireEvent.doubleClick(screen.getByText(/Vivado% report_route_status/));
+
+    const text = container.querySelector(".agent-panel .message-detail__text");
+    expect(text?.querySelector("h1, h2, h3, pre, code, hr")).toBeNull();
+    expect(text?.textContent).toBe(userLog);
+    expect(text).toHaveClass("message-detail__text--user");
+  });
+
+  it.each(["main", "subagent"])("keeps assistant Markdown in the %s detail panel", (panel) => {
+    const message = makeMessage({ content: "# Result\n\n```js\nconst nets = 101449;\n```" });
+    const subagent = makeSubagent("agent-1", "Explore");
+    subagent.subagent_messages = [message];
+    const { container } = render(
+      <MessageDetail
+        message={panel === "main" ? message : makeMessage({ items: [subagent] })}
+        onBack={vi.fn()}
+        viewActionsRef={makeViewActionsRef()}
+      />,
+    );
+
+    if (panel === "subagent") {
+      fireEvent.click(screen.getByText("Explore"));
+      fireEvent.doubleClick(screen.getByText(/# Result/));
+    }
+
+    expect(screen.getByRole("heading", { level: 1, name: "Result" })).toBeInTheDocument();
+    const text = container.querySelector(".message-detail__text");
+    expect(text?.querySelector("pre")).toHaveTextContent("const nets = 101449;");
+    expect(text).not.toHaveClass("message-detail__text--user");
+  });
+
   it("refreshes an open subagent panel when an existing subagent message gains a tool item", () => {
     const firstTool = makeItem({ id: "nested-1", tool_name: "Read", tool_summary: "first.ts" });
     const secondTool = makeItem({ id: "nested-2", tool_name: "Bash", tool_summary: "npm test" });

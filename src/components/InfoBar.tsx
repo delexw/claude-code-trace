@@ -68,7 +68,11 @@ export function InfoBar({
         ? "info-bar__pill--acceptEdits"
         : mode === "plan"
           ? "info-bar__pill--plan"
-          : "info-bar__pill--default";
+          : mode === "auto"
+            ? "info-bar__pill--auto"
+            : mode === "dontAsk"
+              ? "info-bar__pill--dontAsk"
+              : "info-bar__pill--default";
 
   return (
     <div className="info-bar">
