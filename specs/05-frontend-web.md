@@ -254,6 +254,12 @@ real pointer move.
 The most complex component. Shows items from a selected message and supports recursive subagent
 drill-down.
 
+In both the main and subagent detail panels, user message content renders as literal text with
+`white-space: pre-wrap`, preserving line breaks and spacing without interpreting Markdown (e.g.
+hashes in pasted logs). Other roles retain Markdown rendering and syntax highlighting. When
+`Output` items already render the prose inline, the flattened message content is hidden to avoid
+duplication.
+
 ```mermaid
 flowchart LR
     subgraph Panel_Stack
