@@ -542,7 +542,7 @@ rather than 401.
   the "Not an accepted client" banner clears itself once `web-ui` is (re)issued.
 - **Docker / same-origin** (`CCTRACE_STATIC_DIR` set): `auth::attach_credential_cookie` wraps the
   static fallback and adds `Set-Cookie: cctrace_token=<web-ui credential>; Path=/; HttpOnly;
-SameSite=Strict` to the HTML shell. The shell is a `text/html` response — or a `304 Not Modified`
+  SameSite=Strict` to the HTML shell. The shell is a `text/html` response — or a `304 Not Modified`
   for a shell path (`/`, any directory, `*.html`), which is headers-only and so has no
   `Content-Type` to recognise it by. It also goes out `Cache-Control: no-cache`, because the
   credential rides on it: a browser reusing a cached shell never asks the server anything, so it
