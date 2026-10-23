@@ -119,6 +119,10 @@ export function shortMode(mode: string): string {
       return "manual";
     case "acceptEdits":
       return "auto-edit";
+    case "auto":
+      return "auto";
+    case "dontAsk":
+      return "don't ask";
     case "bypassPermissions":
       return "yolo";
     case "plan":

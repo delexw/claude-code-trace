@@ -254,6 +254,12 @@ real pointer move.
 The most complex component. Shows items from a selected message and supports recursive subagent
 drill-down.
 
+In both the main and subagent detail panels, user message content renders as literal text with
+`white-space: pre-wrap`, preserving line breaks and spacing without interpreting Markdown (e.g.
+hashes in pasted logs). Other roles retain Markdown rendering and syntax highlighting. When
+`Output` items already render the prose inline, the flattened message content is hidden to avoid
+duplication.
+
 ```mermaid
 flowchart LR
     subgraph Panel_Stack
@@ -319,6 +325,18 @@ Supports text search and project filtering (via `ProjectTree` selection).
 
 Top bar showing: project · session_id (8 chars) · git branch · permission mode ·
 context % · tokens · cost · ongoing spinner.
+
+Permission mode pills use explicit labels and colours:
+
+| Mode                | Label       | Background |
+| ------------------- | ----------- | ---------- |
+| `default`, `manual` | hidden      | —          |
+| `acceptEdits`       | `auto-edit` | purple     |
+| `bypassPermissions` | `yolo`      | red        |
+| `plan`              | `plan`      | green      |
+| `auto`              | `auto`      | blue       |
+| `dontAsk`           | `don't ask` | orange     |
+| unknown mode        | raw value   | muted grey |
 
 Context % uses a colour gradient:
 

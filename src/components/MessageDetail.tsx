@@ -405,8 +405,10 @@ export function MessageDetail({
         <div className="message-detail__body" ref={bodyRef}>
           <div className="message-detail__content">
             {msg.content && !hasInlineProse && (
-              <div className="message-detail__text">
-                <MarkdownRenderer content={msg.content} />
+              <div
+                className={`message-detail__text${msg.role === "user" ? " message-detail__text--user" : ""}`}
+              >
+                {msg.role === "user" ? msg.content : <MarkdownRenderer content={msg.content} />}
               </div>
             )}
             {hasItems && (
@@ -787,8 +789,10 @@ function AgentDetailColumn({
         <div className="message-detail__body" ref={detailBodyRef}>
           <div className="message-detail__content">
             {msg.content && !hasInlineProse && (
-              <div className="message-detail__text">
-                <MarkdownRenderer content={msg.content} />
+              <div
+                className={`message-detail__text${msg.role === "user" ? " message-detail__text--user" : ""}`}
+              >
+                {msg.role === "user" ? msg.content : <MarkdownRenderer content={msg.content} />}
               </div>
             )}
             {hasItems && (
