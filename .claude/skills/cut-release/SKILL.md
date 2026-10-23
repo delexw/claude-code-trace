@@ -52,7 +52,7 @@ The skill aborts (loudly) only on hard preconditions that would corrupt the rele
 
 - **Duplicate version** — the proposed `vX.Y.Z` tag already exists on `origin`. Abort
   with `Error: vX.Y.Z already exists on origin (commit <sha>). Refusing to release the
-same version twice.` The user must delete the remote tag intentionally if they want a
+  same version twice.` The user must delete the remote tag intentionally if they want a
   re-release, or bump again.
 - **Dirty working tree** — uncommitted changes the skill didn't create. Abort with a
   list of dirty files.

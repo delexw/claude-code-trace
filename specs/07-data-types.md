@@ -146,7 +146,12 @@ type MessageRole = "user" | "claude" | "system" | "compact" | "recap";
 
 ```typescript
 type DisplayItemType =
-  "Thinking" | "Output" | "ToolCall" | "Subagent" | "TeammateMessage" | "HookEvent";
+  | "Thinking"
+  | "Output"
+  | "ToolCall"
+  | "Subagent"
+  | "TeammateMessage"
+  | "HookEvent";
 ```
 
 | Value             | Description                       |

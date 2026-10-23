@@ -9,7 +9,7 @@ Goal: confirm the release is published on the repo's releases page. Mostly autom
    if one does it fails the entire workflow, preventing duplicate releases (see
    `release.yml` for the exact check).
 3. Three build jobs (macOS / Linux / Windows) each pass `releaseBody:
-${{ needs.notes.outputs.body }}` to `tauri-apps/tauri-action`, creating / updating
+   ${{ needs.notes.outputs.body }}` to `tauri-apps/tauri-action`, creating / updating
    the GitHub release as a draft with the CHANGELOG section as the body and the built
    artifacts attached.
 4. A final `publish` job depends on all three builds and runs:
