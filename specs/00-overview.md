@@ -48,6 +48,7 @@ graph TB
 | Shared             | `shared/`                   | Types, project tree builder, format helpers      |
 | Efficiency (Jev)   | `src-tauri/src/efficiency/` | Optional external session-efficiency analysis    |
 | CLI Launcher       | `bin/cctrace.mjs`           | Mode selector (desktop / web / tui / headless)   |
+| Source Plugins     | `*/plugins/<id>/`           | Each session source (Claude, ...) on every layer |
 
 ---
 
@@ -85,19 +86,20 @@ flowchart LR
 
 ## All Specs
 
-| #   | File                                               | Topic                                                                |
-| --- | -------------------------------------------------- | -------------------------------------------------------------------- |
-| 01  | [01-parser-pipeline.md](01-parser-pipeline.md)     | JSONL parsing: entry → classify → chunk → subagent → team → convert  |
-| 02  | [02-file-watcher.md](02-file-watcher.md)           | File watching, debounce, session watcher vs picker watcher           |
-| 03  | [03-state-management.md](03-state-management.md)   | AppState, session cache, SSE broadcast                               |
-| 04  | [04-http-api.md](04-http-api.md)                   | REST endpoints, SSE contract, Tauri IPC mirror                       |
-| 05  | [05-frontend-web.md](05-frontend-web.md)           | React hooks and components (web/desktop)                             |
-| 06  | [06-tui.md](06-tui.md)                             | Terminal UI (Python / Textual), shared list base, async populate     |
-| 07  | [07-data-types.md](07-data-types.md)               | Shared TypeScript types, Rust serialisation                          |
-| 08  | [08-session-lifecycle.md](08-session-lifecycle.md) | End-to-end session loading, live update, truncation                  |
-| 09  | [09-subagent-linking.md](09-subagent-linking.md)   | Four-phase subagent linking algorithm                                |
-| 10  | [10-tool-taxonomy.md](10-tool-taxonomy.md)         | Tool categorisation and summary generation                           |
-| 11  | [11-project-tree.md](11-project-tree.md)           | Project key parsing and tree construction                            |
-| 12  | [12-cli-launcher.md](12-cli-launcher.md)           | CLI mode selection, service installer, health check                  |
-| 13  | [13-item-rendering.md](13-item-rendering.md)       | Per-type item rendering, expansion, selection, auto-scroll           |
-| 14  | [14-jev-integration.md](14-jev-integration.md)     | Optional Jev efficiency analysis: payload, redaction, scoring, cache |
+| #   | File                                                         | Topic                                                                |
+| --- | ------------------------------------------------------------ | -------------------------------------------------------------------- |
+| 01  | [01-parser-pipeline.md](01-parser-pipeline.md)               | JSONL parsing: entry → classify → chunk → subagent → team → convert  |
+| 02  | [02-file-watcher.md](02-file-watcher.md)                     | File watching, debounce, session watcher vs picker watcher           |
+| 03  | [03-state-management.md](03-state-management.md)             | AppState, session cache, SSE broadcast                               |
+| 04  | [04-http-api.md](04-http-api.md)                             | REST endpoints, SSE contract, Tauri IPC mirror                       |
+| 05  | [05-frontend-web.md](05-frontend-web.md)                     | React hooks and components (web/desktop)                             |
+| 06  | [06-tui.md](06-tui.md)                                       | Terminal UI (Python / Textual), shared list base, async populate     |
+| 07  | [07-data-types.md](07-data-types.md)                         | Shared TypeScript types, Rust serialisation                          |
+| 08  | [08-session-lifecycle.md](08-session-lifecycle.md)           | End-to-end session loading, live update, truncation                  |
+| 09  | [09-subagent-linking.md](09-subagent-linking.md)             | Four-phase subagent linking algorithm                                |
+| 10  | [10-tool-taxonomy.md](10-tool-taxonomy.md)                   | Tool categorisation and summary generation                           |
+| 11  | [11-project-tree.md](11-project-tree.md)                     | Project key parsing and tree construction                            |
+| 12  | [12-cli-launcher.md](12-cli-launcher.md)                     | CLI mode selection, service installer, health check                  |
+| 13  | [13-item-rendering.md](13-item-rendering.md)                 | Per-type item rendering, expansion, selection, auto-scroll           |
+| 14  | [14-jev-integration.md](14-jev-integration.md)               | Optional Jev efficiency analysis: payload, redaction, scoring, cache |
+| 15  | [15-session-source-plugins.md](15-session-source-plugins.md) | Session-source plugins: folder per plugin, registries, contracts     |

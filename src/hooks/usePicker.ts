@@ -8,7 +8,6 @@ import { resolveForkRoot } from "../../shared/projectTree";
 interface PickerState {
   sessions: SessionInfo[];
   loading: boolean;
-  searchQuery: string;
   /** How far the backend has got through the project directories. */
   index: IndexProgress;
 }
@@ -37,11 +36,10 @@ function sameProgress(a: IndexProgress, b: IndexProgress): boolean {
   );
 }
 
-export function usePicker(selectedProject: string | null = null) {
+export function usePicker(selectedProject: string | null = null, searchQuery = "") {
   const [state, setState] = useState<PickerState>({
     sessions: [],
     loading: false,
-    searchQuery: "",
     index: indexNotStarted,
   });
 
@@ -91,10 +89,6 @@ export function usePicker(selectedProject: string | null = null) {
     });
   }, [fetchSessions]);
 
-  const setSearchQuery = useCallback((query: string) => {
-    setState((prev) => ({ ...prev, searchQuery: query }));
-  }, []);
-
   /** Sync a session's ongoing status from the session watcher (more accurate). */
   const updateSessionOngoing = useCallback((path: string, ongoing: boolean) => {
     setState((prev) => {
@@ -136,13 +130,13 @@ export function usePicker(selectedProject: string | null = null) {
   }, []);
 
   // Filter sessions by search query
-  let filteredSessions = state.searchQuery
+  let filteredSessions = searchQuery
     ? state.sessions.filter(
         (s) =>
-          (s.name?.toLowerCase().includes(state.searchQuery.toLowerCase()) ?? false) ||
-          s.first_message.toLowerCase().includes(state.searchQuery.toLowerCase()) ||
-          s.session_id.toLowerCase().includes(state.searchQuery.toLowerCase()) ||
-          s.model.toLowerCase().includes(state.searchQuery.toLowerCase()),
+          (s.name?.toLowerCase().includes(searchQuery.toLowerCase()) ?? false) ||
+          s.first_message.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          s.session_id.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          s.model.toLowerCase().includes(searchQuery.toLowerCase()),
       )
     : state.sessions;
 
@@ -162,8 +156,6 @@ export function usePicker(selectedProject: string | null = null) {
     allSessions: state.sessions,
     index: state.index,
     loading: state.loading,
-    searchQuery: state.searchQuery,
-    setSearchQuery,
     discoverSessions,
     refresh,
     updateSessionOngoing,

@@ -1,8 +1,8 @@
-"""Tests for CCTraceApp._on_session_update — the session-update SSE handler.
+"""Tests for the Claude plugin's session-update SSE handler.
 
 The backend's `session-update` event was changed to a lightweight refresh
 signal (message count + roles only, never message bodies) — see
-`SessionUpdatePayload` in src-tauri/src/watcher.rs. `_on_session_update` must
+`SessionUpdatePayload` in src-tauri/src/watcher.rs. `on_session_update` must
 re-fetch the full session via `load_session` rather than trusting a
 `messages` key that no longer exists in the payload, or every live update
 while a session is running silently empties `self.messages`.
@@ -68,7 +68,7 @@ async def test_on_session_update_refetches_full_session(monkeypatch):
 
         # The real payload only carries count/roles, never message bodies —
         # the handler must ignore that and re-fetch instead of trusting it.
-        await app._on_session_update({"count": 1, "roles": ["claude"]})
+        await app.plugins.get("claude").on_session_update({"count": 1, "roles": ["claude"]})
 
         assert app.messages == fake_messages
         assert app.ongoing is True
@@ -86,7 +86,7 @@ async def test_on_session_update_is_noop_without_a_session_path(monkeypatch):
         app = pilot.app
         app.session_path = ""
 
-        await app._on_session_update({})
+        await app.plugins.get("claude").on_session_update({})
 
 
 @pytest.mark.asyncio
@@ -103,6 +103,6 @@ async def test_on_session_update_keeps_prior_messages_when_refetch_fails(monkeyp
         app.session_path = "/proj/session.jsonl"
         app.messages = prior_messages
 
-        await app._on_session_update({})
+        await app.plugins.get("claude").on_session_update({})
 
         assert app.messages == prior_messages

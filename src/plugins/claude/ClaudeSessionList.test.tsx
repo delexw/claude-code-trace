@@ -1,8 +1,38 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
-import { SessionPicker } from "./SessionPicker";
-import type { SessionInfo } from "../types";
-import type { ViewActions } from "../hooks/useViewActions";
+import { SessionPicker as PickerFrame } from "../../components/SessionPicker";
+import {
+  ClaudeHeaderStats,
+  ClaudeSessionList,
+  type ClaudeSessionListProps,
+} from "./ClaudeSessionList";
+import type { SessionInfo } from "../../types";
+import type { ViewActions, ViewActionsRef } from "../../hooks/useViewActions";
+
+/** The shared picker frame with Claude's list as its only section, as the app renders it. */
+function SessionPicker({
+  onSearchChange,
+  onSelectIndex,
+  viewActionsRef,
+  selectedIndex,
+  ...listProps
+}: Omit<ClaudeSessionListProps, "selectedIndex" | "onHover"> & {
+  selectedIndex: number;
+  onSearchChange: (query: string) => void;
+  onSelectIndex?: (index: number) => void;
+  viewActionsRef?: ViewActionsRef;
+}) {
+  return (
+    <PickerFrame
+      searchQuery={listProps.searchQuery}
+      onSearchChange={onSearchChange}
+      headerStats={<ClaudeHeaderStats sessions={listProps.sessions} />}
+      viewActionsRef={viewActionsRef}
+    >
+      <ClaudeSessionList {...listProps} selectedIndex={selectedIndex} onHover={onSelectIndex} />
+    </PickerFrame>
+  );
+}
 
 type IOCallback = (entries: IntersectionObserverEntry[], observer: IntersectionObserver) => void;
 

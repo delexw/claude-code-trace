@@ -10,6 +10,7 @@ mod http_api;
 mod indexer;
 mod jwt;
 mod parser;
+mod plugins;
 mod process;
 mod session_load;
 mod settings;
@@ -101,17 +102,20 @@ fn run_desktop(args: &[String]) {
         .plugin(tauri_plugin_opener::init())
         .manage(app_state)
         .invoke_handler(tauri::generate_handler![
-            commands::session::load_session,
-            commands::session::load_message,
-            commands::session::get_session_meta,
-            commands::session::watch_session,
-            commands::session::unwatch_session,
-            commands::session::get_project_dirs,
-            commands::picker::discover_sessions,
-            commands::picker::watch_picker,
-            commands::picker::unwatch_picker,
-            commands::git::get_git_info,
-            commands::debug::get_debug_log,
+            // Claude source plugin
+            plugins::claude::commands::session::load_session,
+            plugins::claude::commands::session::load_message,
+            plugins::claude::commands::session::get_session_meta,
+            plugins::claude::commands::session::watch_session,
+            plugins::claude::commands::session::unwatch_session,
+            plugins::claude::commands::session::get_project_dirs,
+            plugins::claude::commands::picker::discover_sessions,
+            plugins::claude::commands::picker::watch_picker,
+            plugins::claude::commands::picker::unwatch_picker,
+            plugins::claude::commands::git::get_git_info,
+            plugins::claude::commands::debug::get_debug_log,
+            plugins::claude::commands::terminal::focus_session_window,
+            // Core
             commands::settings::get_settings,
             commands::settings::set_projects_dir,
             commands::wsl::list_wsl_distros,
@@ -136,7 +140,6 @@ fn run_desktop(args: &[String]) {
             commands::efficiency::list_efficiency_summaries,
             commands::efficiency::delete_session_efficiency,
             commands::efficiency::cancel_efficiency_analysis,
-            commands::terminal::focus_session_window,
             switch_to_browser,
         ])
         .setup(move |app| {

@@ -1,6 +1,57 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import { ViewToolbar } from "./ViewToolbar";
+import { ViewToolbar as ViewToolbarFrame } from "./ViewToolbar";
+import { BackToMessagesButton } from "./BackToMessagesButton";
+import { ClaudeToolbar } from "../plugins/claude/ClaudeToolbar";
+import type { ClaudeView } from "../plugins/claude/keyHints";
+
+interface ToolbarProps {
+  view: "picker" | ClaudeView;
+  hasTeams: boolean;
+  hasSession: boolean;
+  onGoToSessions: () => void;
+  onExpandAll: () => void;
+  onCollapseAll: () => void;
+  onScrollToTop: () => void;
+  onScrollToBottom: () => void;
+  onOpenTeams: () => void;
+  onOpenDebug: () => void;
+  onBackToList: () => void;
+  onOpenSettings: () => void;
+}
+
+/** The shared toolbar as the app renders it: the picker's back button, or Claude's buttons. */
+function ViewToolbar({
+  view,
+  hasTeams,
+  hasSession,
+  onGoToSessions,
+  onOpenTeams,
+  onOpenDebug,
+  onBackToList,
+  ...cluster
+}: ToolbarProps) {
+  return (
+    <ViewToolbarFrame
+      left={
+        view === "picker" ? (
+          hasSession && <BackToMessagesButton onClick={onBackToList} />
+        ) : (
+          <ClaudeToolbar
+            view={view}
+            hasTeams={hasTeams}
+            onGoToSessions={onGoToSessions}
+            onOpenTeams={onOpenTeams}
+            onOpenDebug={onOpenDebug}
+            onBackToList={onBackToList}
+          />
+        )
+      }
+      collapsible={view !== "picker"}
+      {...cluster}
+    />
+  );
+}
 
 /** Rendered toolbar button labels, in DOM order (icons/settings have no text). */
 function buttonOrder() {
@@ -9,7 +60,7 @@ function buttonOrder() {
     .filter(Boolean);
 }
 
-function defaultProps(overrides: Partial<Parameters<typeof ViewToolbar>[0]> = {}) {
+function defaultProps(overrides: Partial<ToolbarProps> = {}): ToolbarProps {
   return {
     view: "list" as const,
     hasTeams: false,

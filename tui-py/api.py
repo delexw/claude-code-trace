@@ -106,6 +106,12 @@ async def _post(path: str, body: object = None) -> object:
         return None
 
 
+async def get_settings() -> dict:
+    """The backend's settings, including which source plugins are enabled."""
+    data = await _get("/api/settings")
+    return data if isinstance(data, dict) else {}
+
+
 async def get_project_dirs() -> list[str]:
     data = await _get("/api/project-dirs")
     return list(data)  # type: ignore[arg-type]

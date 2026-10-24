@@ -1,13 +1,13 @@
-"""SessionPicker widget — ListView of sessions grouped by date."""
+"""Claude's rows in the shared picker: sessions grouped by date."""
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
 from rich.console import Group
 from rich.rule import Rule
 from rich.text import Text
-from textual.widgets import ListItem, Static
 
 import theme
 from data_types import Liveness, SessionInfo
@@ -26,8 +26,11 @@ from format_utils import (
     short_path,
     time_ago,
 )
+from plugins.base import PickerRow, PickerSection
 from theme import get_model_color
-from widgets.highlight_list import HighlightListView
+
+# Session path -> (latest Jev job, latest Jev summary).
+AnalysisLookup = Callable[[str], tuple[EfficiencyJob | None, EfficiencySummary | None]]
 
 # Icons
 ICON_SELECTED = "▸"
@@ -184,144 +187,58 @@ def _render_session(
     return Group(content, sep)
 
 
-class SessionPicker(HighlightListView):
-    """Session list grouped by date.
+def _notice(markup: str) -> PickerRow:
+    return PickerRow(render=lambda _frame: markup)
 
-    Inherits the shared highlight CSS + auto-index from HighlightListView so
-    selection styling stays in sync with MessageList and the DetailView items.
+
+def _header(markup: str) -> PickerRow:
+    return PickerRow(render=lambda _frame: markup, header=True)
+
+
+def build_section(
+    sessions: list[SessionInfo],
+    loading: bool,
+    error: str,
+    analysis: AnalysisLookup,
+) -> PickerSection:
+    """The picker rows for ``sessions``: a totals header, then one header per
+    date group followed by its sessions, newest first.
+
+    Rows look their analysis state up through ``analysis`` each time they are
+    drawn, so re-rendering a row shows the latest job and score.
     """
+    if loading:
+        return PickerSection(loading=True)
+    if error:
+        return PickerSection(rows=[_notice(f"[{theme.ERROR}]{error}[/]")])
+    if not sessions:
+        return PickerSection(rows=[_notice(f"[{theme.TEXT_DIM}]No sessions found[/]")])
 
-    DEFAULT_CSS = """
-    SessionPicker {
-        height: 100%;
-    }
-    SessionPicker ListItem {
-        padding: 1 2;
-    }
-    """
+    total_tokens = sum(s.total_tokens for s in sessions)
+    total_cost = sum(s.cost_usd for s in sessions)
+    header_parts = [f"[bold]Sessions ({len(sessions)})[/]"]
+    if total_tokens > 0:
+        header_parts.append(f"  [{theme.TEXT_DIM}]{format_tokens(total_tokens)} tok[/]")
+    if total_cost > 0:
+        header_parts.append(f"  [{theme.TOKEN_HIGH}]{format_cost(total_cost)}[/]")
+    rows = [_header("".join(header_parts))]
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self._index_to_session: dict[int, SessionInfo] = {}
-        self._loading: bool = True
-        self._error: str = ""
-        self._anim_frame: int = 0
-        self._jobs: dict[str, EfficiencyJob] = {}
-        self._summaries: dict[str, EfficiencySummary] = {}
+    for cat, group_sessions in _group_by_date(sessions):
+        rows.append(_header(f"[bold {theme.TEXT_DIM}]{cat}[/]"))
+        for session in group_sessions:
+            rows.append(
+                PickerRow(
+                    render=_session_renderer(session, analysis),
+                    item=session,
+                    animated=session.is_ongoing,
+                )
+            )
+    return PickerSection(rows=rows)
 
-    def on_mount(self) -> None:
-        self.set_interval(0.5, self._spin)
 
-    def _spin(self) -> None:
-        """Advance spinner and re-render ongoing session rows."""
-        try:
-            if not any(s.is_ongoing for s in self._index_to_session.values()):
-                return
-            self._anim_frame = (self._anim_frame + 1) % len(theme.SPIN)
-            for raw_idx, session in self._index_to_session.items():
-                if session.is_ongoing:
-                    self._refresh_item(raw_idx, session)
-        except Exception:
-            pass
+def _session_renderer(session: SessionInfo, analysis: AnalysisLookup):
+    def render(anim_frame: int) -> object:
+        job, summary = analysis(session.path)
+        return _render_session(session, anim_frame, job=job, summary=summary)
 
-    def _refresh_item(self, raw_idx: int, session: SessionInfo) -> None:
-        try:
-            item = self._nodes[raw_idx]
-            static = item.query_one(Static)
-            static.update(self._render_row(session))
-        except Exception:
-            pass
-
-    def _render_row(self, session: SessionInfo) -> object:
-        return _render_session(
-            session,
-            self._anim_frame,
-            job=self._jobs.get(session.path),
-            summary=self._summaries.get(session.path),
-        )
-
-    # ----------------------------------------------------------------
-    # Public API
-    # ----------------------------------------------------------------
-
-    def populate(
-        self,
-        sessions: list[SessionInfo],
-        loading: bool,
-        error: str,
-        jobs: dict[str, EfficiencyJob] | None = None,
-        summaries: dict[str, EfficiencySummary] | None = None,
-    ) -> None:
-        """Rebuild the list contents."""
-        self._loading = loading
-        self._error = error
-        self._index_to_session = {}
-        self._jobs = jobs or {}
-        self._summaries = summaries or {}
-
-        # Eagerly clear so neither stale sessions nor the previous overlay
-        # sit under the new state.
-        self.clear()
-        self.loading = loading
-
-        if loading:
-            return
-
-        if error:
-            self.append(ListItem(Static(f"[{theme.ERROR}]{error}[/]")))
-            return
-
-        if not sessions:
-            self.append(ListItem(Static(f"[{theme.TEXT_DIM}]No sessions found[/]")))
-            return
-
-        raw_idx = 0
-
-        # Header (disabled)
-        total_tokens = sum(s.total_tokens for s in sessions)
-        total_cost = sum(s.cost_usd for s in sessions)
-        header_parts = [f"[bold]Sessions ({len(sessions)})[/]"]
-        if total_tokens > 0:
-            header_parts.append(f"  [{theme.TEXT_DIM}]{format_tokens(total_tokens)} tok[/]")
-        if total_cost > 0:
-            header_parts.append(f"  [{theme.TOKEN_HIGH}]{format_cost(total_cost)}[/]")
-        self.append(ListItem(Static("".join(header_parts)), disabled=True))
-        raw_idx += 1
-
-        date_groups = _group_by_date(sessions)
-
-        for cat, group_sessions in date_groups:
-            # Date group header (non-selectable)
-            self.append(ListItem(Static(f"[bold {theme.TEXT_DIM}]{cat}[/]"), disabled=True))
-            raw_idx += 1
-
-            for s in group_sessions:
-                self.append(ListItem(Static(self._render_row(s))))
-                self._index_to_session[raw_idx] = s
-                raw_idx += 1
-
-        # Pick the first selectable row (HighlightListView skips disabled headers).
-        self.ensure_highlight()
-
-    def update_analysis(
-        self,
-        jobs: dict[str, EfficiencyJob],
-        summaries: dict[str, EfficiencySummary],
-    ) -> None:
-        """Re-render only the rows with analysis state.
-
-        A full populate() would clear the list and drop the cursor, and job
-        progress arrives every second or so while an analysis runs.
-        """
-        self._jobs = jobs
-        self._summaries = summaries
-        for raw_idx, session in self._index_to_session.items():
-            if session.path in jobs or session.path in summaries:
-                self._refresh_item(raw_idx, session)
-
-    def session_at_raw_index(self, raw_idx: int) -> SessionInfo | None:
-        """Return the SessionInfo at the given raw ListView node index.
-
-        Header rows (session header, date group headers) are not in the map and return None.
-        """
-        return self._index_to_session.get(raw_idx)
+    return render

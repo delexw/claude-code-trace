@@ -35,3 +35,5 @@ export type {
   RecommendationProvider,
   SessionEfficiencyAnalysis,
 } from "./efficiency";
+
+export type { ApiAuthSource, ApiClient, PluginStatus, SettingsResponse } from "./settings";

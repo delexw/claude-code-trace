@@ -1,7 +1,10 @@
 """Main Textual application for Claude Code Trace TUI.
 
 Architecture:
-- App owns all state.
+- The app is a shell: it owns the shared views (picker, message list,
+  detail) and the session open in them. Everything about one source of
+  sessions — listing, loading, its own keys, views and live events — lives in
+  a plugin under ``plugins/<id>/`` (see ``plugins/base.py``).
 - BINDINGS + action methods handle view-switching and expand/collapse.
 - ListView.Selected / ListView.Highlighted / Tree.NodeSelected events
   route to handlers instead of on_key.
@@ -15,6 +18,7 @@ import contextlib
 import inspect
 
 from textual import events
+from textual.actions import parse as parse_action
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal
@@ -26,45 +30,30 @@ import api as api_client
 import auth
 from data_types import (
     DisplayMessage,
-    IndexProgress,
-    SessionInfo,
     SessionMeta,
     SessionTotals,
-    index_progress_from_dict,
 )
-from efficiency import (
-    EfficiencyJob,
-    EfficiencySummary,
-    job_from_dict,
-    latest_jobs_by_session,
+from plugins import REGISTRY
+from plugins.base import (
+    LIST_VIEW,
+    PICKER_VIEW,
+    OpenedSession,
+    PluginSet,
+    SourcePlugin,
+    SseHandler,
+    binding_for,
+    enabled_plugin_ids,
 )
-from format_utils import project_key as _project_key
-from project_tree import resolve_fork_root
-from resume_command import resume_command
 from sse import SSEClient
-from widgets.analytics_settings import AnalyticsSettingsScreen
-from widgets.debug_viewer import DebugViewer
 from widgets.detail_view import DetailView
-from widgets.efficiency_privacy import EfficiencyPrivacyScreen
-from widgets.index_progress import IndexProgressBar
 from widgets.message_list import MessageList
-from widgets.project_tree import ProjectTree
-from widgets.session_picker import SessionPicker
-from widgets.team_board import TeamBoard
-
-# A failed analysis is worth reading; the default 5s toast is not enough.
-FAILURE_NOTICE_SECONDS = 30
-
-JEV_KEY_REQUIRED = (
-    "Set JEV_API_KEY before starting the backend, or store the key with the desktop "
-    "app, then reopen the analytics settings to confirm it."
-)
+from widgets.source_picker import SourcePicker
 
 API_BASE = "http://127.0.0.1:11423"
 
 
 class SidebarResizer(Widget):
-    """1-column drag handle between the ProjectTree sidebar and the content pane."""
+    """1-column drag handle between the sidebar and the content pane."""
 
     DEFAULT_CSS = """
     SidebarResizer {
@@ -93,7 +82,8 @@ class SidebarResizer(Widget):
         if self._dragging:
             new_width = max(15, min(60, event.screen_x))
             with contextlib.suppress(Exception):
-                self.app.query_one("#project-tree", ProjectTree).styles.width = new_width
+                siblings = list(self.parent.children)
+                siblings[siblings.index(self) - 1].styles.width = new_width
 
     def on_mouse_up(self, event: events.MouseUp) -> None:
         if self._dragging:
@@ -129,43 +119,28 @@ class CCTraceApp(App):
         Binding("r", "refresh", "Refresh", show=True, priority=True),
         Binding("h", "focus_sidebar", "◀ Sidebar", show=True, priority=True),
         Binding("l", "focus_content", "Content ▶", show=False, priority=True),
-        # Per-view: only relevant (and shown) once a session is in context —
-        # see check_action. Deliberately NOT priority=True and NOT shown in
-        # the picker footer, which already overflows on narrow terminals.
-        Binding("y", "copy_resume", "Copy resume", show=True),
-        # Picker-only, for the same reason — see check_action.
-        Binding("a", "analyse_session", "Analyse", show=True),
-        Binding("comma", "analytics_settings", "Analytics", show=True),
+        # Each plugin's own keys, routed to it by action_plugin; whether they
+        # apply in the current view is the plugin's call (see check_action).
+        *(binding_for(plugin.id, key) for plugin in REGISTRY for key in plugin.KEYS),
     ]
+
+    # The sources this app shows. A subclass may swap in another registry (and
+    # add its plugins' keys to BINDINGS, which Textual merges with these).
+    PLUGIN_REGISTRY = REGISTRY
 
     # Derived from BINDINGS so a key added above cannot be forgotten here —
     # see check_action, which disarms exactly these while a modal is open.
-    OWN_ACTIONS = frozenset(binding.action for binding in BINDINGS)
+    OWN_ACTIONS = frozenset(parse_action(binding.action)[1] for binding in BINDINGS)
 
     # ---- State ----
     view: reactive[str] = reactive("picker")
 
-    # Picker
-    all_sessions: reactive[list[SessionInfo]] = reactive(list)
-    picker_loading: reactive[bool] = reactive(True)
-    picker_error: reactive[str] = reactive("")
-    selected_project: reactive[str | None] = reactive(None)
-    # How far the backend's walk of the project directories has got.
-    index_progress: reactive[IndexProgress | None] = reactive(None)
-
-    # Jev efficiency analysis, keyed by session path. Includes analyses
-    # started from the desktop app or a browser against the same backend.
-    efficiency_jobs: reactive[dict[str, EfficiencyJob]] = reactive(dict)
-    efficiency_summaries: reactive[dict[str, EfficiencySummary]] = reactive(dict)
-
     # Session
     session_path: reactive[str] = reactive("")
     messages: reactive[list] = reactive(list)
-    teams: reactive[list] = reactive(list)
     ongoing: reactive[bool] = reactive(False)
     meta: reactive[SessionMeta] = reactive(SessionMeta)
     totals: reactive[SessionTotals] = reactive(SessionTotals)
-    debug_entries: reactive[list] = reactive(list)
 
     # List view
     expanded_messages: reactive[set] = reactive(set)
@@ -183,14 +158,17 @@ class CCTraceApp(App):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self._project_dirs: list[str] = []
         self._sse: SSEClient | None = None
         self._subagent_expanded_msgs: set[int] = set()
         self._subagent_detail_item_idx: int = 0
-        # The SessionInfo backing the currently open session (list/detail
-        # views) — needed for copy_resume (cwd + session_id). None in the
-        # picker, where no session is selected yet.
-        self._current_session: SessionInfo | None = None
+        self.plugins = PluginSet(self.PLUGIN_REGISTRY, self)
+        # The plugin that opened the session shown in the list/detail views.
+        self._session_plugin: SourcePlugin | None = None
+        # Extra views by name, and the plugin each belongs to.
+        self._view_owners: dict[str, SourcePlugin] = {}
+        # Every widget a plugin added, so it can be hidden while it is off.
+        self._plugin_widgets: dict[str, list[Widget]] = {}
+        self._sidebar_widgets: list[Widget] = []
 
     # ----------------------------------------------------------------
     # Layout
@@ -199,16 +177,31 @@ class CCTraceApp(App):
     def compose(self) -> ComposeResult:
         yield Header()
         with Horizontal(id="main-area"):
-            yield ProjectTree(id="project-tree")
-            yield SidebarResizer(id="sidebar-resizer")
+            self._sidebar_widgets = self._take_widgets("compose_sidebar")
+            yield from self._sidebar_widgets
+            if self._sidebar_widgets:
+                yield SidebarResizer(id="sidebar-resizer")
             with ContentSwitcher(initial="picker", id="content-switcher"):
-                yield SessionPicker(id="picker")
+                yield SourcePicker(id="picker")
                 yield MessageList(id="list")
                 yield DetailView(id="detail")
-                yield TeamBoard(id="team")
-                yield DebugViewer(id="debug")
-        yield IndexProgressBar(id="index-progress")
+                for plugin in self.plugins.all():
+                    for view in self._take_widgets("compose_views", plugin):
+                        self._view_owners[view.id] = plugin
+                        yield view
+        yield from self._take_widgets("compose_status")
         yield Footer()
+
+    def _take_widgets(self, contribution: str, only: SourcePlugin | None = None) -> list[Widget]:
+        """Collect one kind of widget (a ``SourcePlugin.compose_*`` method) from
+        every plugin, or just ``only``; hidden for plugins that are off."""
+        widgets: list[Widget] = []
+        for plugin in [only] if only else self.plugins.all():
+            for widget in getattr(plugin, contribution)():
+                widget.display = self.plugins.is_enabled(plugin.id)
+                self._plugin_widgets.setdefault(plugin.id, []).append(widget)
+                widgets.append(widget)
+        return widgets
 
     # ----------------------------------------------------------------
     # Lifecycle
@@ -216,19 +209,48 @@ class CCTraceApp(App):
 
     def on_mount(self) -> None:
         self.title = "cctrace"
-        self.run_worker(self._init_sessions(), exclusive=False, name="init")
-        self.run_worker(self._load_efficiency_state(), exclusive=False, name="efficiency")
+        for plugin in self.plugins.enabled():
+            plugin.start()
+        self.run_worker(self._load_enabled_plugins(), exclusive=False, name="plugins")
         self._start_sse()
 
     def _start_sse(self) -> None:
         # `auth.auth_headers` is re-evaluated on every (re)connect so a credential
         # reissued from the Settings UI is picked up without restarting the TUI.
         self._sse = SSEClient(f"{API_BASE}/api/events", headers=auth.auth_headers)
-        self._sse.on("picker-refresh", self._on_picker_refresh)
-        self._sse.on("session-update", self._on_session_update)
-        self._sse.on("index-progress", self._on_index_progress)
-        self._sse.on("efficiency-analysis-update", self._on_efficiency_update)
+        for plugin in self.plugins.all():
+            for event, handler in plugin.sse_handlers().items():
+                self._sse.on(event, self._while_enabled(plugin, handler))
         self._sse.start()
+
+    def _while_enabled(self, plugin: SourcePlugin, handler: SseHandler) -> SseHandler:
+        async def handle(payload) -> None:
+            if self.plugins.is_enabled(plugin.id):
+                result = handler(payload)
+                if inspect.isawaitable(result):
+                    await result
+
+        return handle
+
+    async def _load_enabled_plugins(self) -> None:
+        """Ask the backend which sources are switched on."""
+        try:
+            settings = await api_client.get_settings()
+        except Exception:
+            settings = None
+        self._apply_enabled_plugins(enabled_plugin_ids(self.PLUGIN_REGISTRY, settings))
+
+    def _apply_enabled_plugins(self, ids: set[str]) -> None:
+        turned_on, turned_off = self.plugins.set_enabled(ids)
+        if not turned_on and not turned_off:
+            return
+        for plugin in [*turned_on, *turned_off]:
+            for widget in self._plugin_widgets.get(plugin.id, []):
+                widget.display = self.plugins.is_enabled(plugin.id)
+        for plugin in turned_on:
+            plugin.start()
+        if self.view == PICKER_VIEW:
+            self.sync_picker()
 
     async def on_unmount(self) -> None:
         if self._sse:
@@ -238,221 +260,71 @@ class CCTraceApp(App):
             await asyncio.wait_for(self._cleanup(), timeout=1.0)
 
     async def _cleanup(self) -> None:
-        await api_client.unwatch_session()
-        await api_client.unwatch_picker()
+        for plugin in self.plugins.enabled():
+            await plugin.stop()
 
     # ----------------------------------------------------------------
-    # Session initialisation
+    # Plugin host API (see plugins.base.PluginHost)
     # ----------------------------------------------------------------
 
-    async def _init_sessions(self) -> None:
-        for attempt in range(11):
-            try:
-                dirs = await api_client.get_project_dirs()
-                if not dirs:
-                    self.picker_error = (
-                        "No project directories found. Run the desktop app first to configure."
-                    )
-                    self.picker_loading = False
-                    return
-                sessions = await api_client.discover_sessions(dirs)
-                self._project_dirs = dirs
-                self.all_sessions = sessions
-                self.picker_loading = False
-                await api_client.watch_picker(dirs)
-                return
-            except Exception as e:
-                if attempt < 10:
-                    await asyncio.sleep(1)
-                else:
-                    self.picker_error = f"Cannot connect to backend. Is the app running?\n{e}"
-                    self.picker_loading = False
+    async def present_session(self, plugin: SourcePlugin, session: OpenedSession) -> None:
+        """Load ``session`` into the message list. Fully populates the list
+        (awaited) so the caller can flip the view only once it is ready."""
+        self._session_plugin = plugin
+        self.session_path = session.path
+        # Set everything except `messages` first — `messages` triggers
+        # watch_messages, but that watcher early-returns while view !=
+        # "list", so the SyncMessageList worker doesn't race us.
+        self.ongoing = session.ongoing
+        self.meta = session.meta
+        self.totals = session.totals
+        self.expanded_messages = set()
+        self._detail_full_message = None
+        self.messages = session.messages
+        with contextlib.suppress(Exception):
+            ml = self.query_one("#list", MessageList)
+            await ml.populate(
+                messages=session.messages,
+                expanded_set=self.expanded_messages,
+                ongoing=session.ongoing,
+            )
 
-    # ----------------------------------------------------------------
-    # SSE handlers
-    # ----------------------------------------------------------------
-
-    async def _on_picker_refresh(self, _payload) -> None:
-        try:
-            dirs = await api_client.get_project_dirs()
-            if dirs:
-                self._project_dirs = dirs
-        except Exception:
-            dirs = self._project_dirs
-        if dirs:
-            try:
-                sessions = await api_client.discover_sessions(dirs)
-                self.all_sessions = sessions
-            except Exception:
-                pass
-
-    async def _on_session_update(self, _payload) -> None:
-        """`session-update` is a lightweight refresh signal (message count +
-        roles only, no message bodies) — the client re-fetches the session on
-        receipt. Re-fetching here (instead of trusting the signal payload)
-        keeps `self.messages` authoritative; the backend's light cache makes
-        repeated fetches during an active stream cheap.
-        """
-        if not self.session_path:
-            return
-        try:
-            result = await api_client.load_session(self.session_path)
-        except Exception:
-            return
-        self.teams = result.teams
-        self.ongoing = result.ongoing
-        self.meta = result.meta
-        self.totals = result.session_totals
-        self.messages = result.messages
+    def apply_session_update(self, session: OpenedSession) -> None:
+        """A fresh copy of the open session arrived (a live update)."""
+        self.ongoing = session.ongoing
+        self.meta = session.meta
+        self.totals = session.totals
+        self.messages = session.messages
         self._sync_all_widgets()
 
-    def _on_index_progress(self, payload) -> None:
-        """`index-progress`: how much of the projects directory has been read.
-
-        Sent while the backend walks the session files — the picker fills in
-        newest-first as it goes, so this says how much is still to come.
-        """
-        self.index_progress = index_progress_from_dict(payload or {})
-
-    async def _on_efficiency_update(self, payload) -> None:
-        """`efficiency-analysis-update`: one job's progress, from any client."""
-        job = job_from_dict(payload or {})
-        if not job.session_path:
-            return
-        self.efficiency_jobs = {**self.efficiency_jobs, job.session_path: job}
-        if job.status == "completed":
-            # The score lands in the summaries, not in the job.
-            await self._refresh_efficiency_summaries()
-        elif job.status == "failed":
-            # Raised as well as written into the row: an analysis takes minutes,
-            # by which time the user is usually looking at something else.
-            name = job.session_name or job.session_id or job.session_path
-            self.notify(
-                f"{name}: {job.error or job.message}",
-                title="Jev analysis failed",
-                severity="error",
-                timeout=FAILURE_NOTICE_SECONDS,
-                markup=False,
-            )
-
-    # ----------------------------------------------------------------
-    # Jev efficiency analysis
-    # ----------------------------------------------------------------
-
-    async def _load_efficiency_state(self) -> None:
-        """Pick up analyses already run against this backend — from the
-        desktop app, a browser, or an earlier TUI run — so the picker shows
-        their scores and any analysis still in flight."""
-        try:
-            jobs = await api_client.list_efficiency_jobs()
-            summaries = await api_client.list_efficiency_summaries()
-        except Exception:
-            return
-        self.efficiency_jobs = latest_jobs_by_session(jobs)
-        self.efficiency_summaries = {s.session_path: s for s in summaries}
-
-    async def _refresh_efficiency_summaries(self) -> None:
-        try:
-            summaries = await api_client.list_efficiency_summaries()
-        except Exception:
-            return
-        self.efficiency_summaries = {s.session_path: s for s in summaries}
-
-    async def _analyse_session(self, session: SessionInfo) -> None:
-        """Prepare, confirm, then send one session to Jev.
-
-        The payload is built and redacted locally first; nothing leaves the
-        machine until the privacy notice is accepted, which is asked again
-        for every analysis and re-analysis.
-        """
-        try:
-            settings = await api_client.get_analytics_settings()
-        except Exception as error:
-            self.notify(
-                str(error), title="Analytics settings unavailable", severity="error", markup=False
-            )
-            return
-        if not settings.jev.configured:
-            self.notify(
-                JEV_KEY_REQUIRED, title="Jev API key required", severity="warning", markup=False
-            )
-            return
-        try:
-            payload = await api_client.prepare_efficiency_payload(
-                session.path, settings.default_payload_mode
-            )
-        except Exception as error:
-            self.notify(
-                str(error), title="Could not prepare the analysis", severity="error", markup=False
-            )
-            return
-
-        if not await self.push_screen_wait(EfficiencyPrivacyScreen(payload)):
-            return
-
-        try:
-            job = await api_client.start_efficiency_analysis(payload)
-        except Exception as error:
-            self.notify(
-                str(error), title="Could not start the analysis", severity="error", markup=False
-            )
-            return
-        self.efficiency_jobs = {**self.efficiency_jobs, job.session_path: job}
-
-    async def _open_analytics_settings(self) -> None:
-        try:
-            settings = await api_client.get_analytics_settings()
-        except Exception as error:
-            self.notify(
-                str(error), title="Analytics settings unavailable", severity="error", markup=False
-            )
-            return
-        self.push_screen(AnalyticsSettingsScreen(settings))
-
-    # ----------------------------------------------------------------
-    # Session loading
-    # ----------------------------------------------------------------
-
-    async def _load_session(self, path: str) -> None:
-        """Fetch session data, fully populate the MessageList, then switch
-        view. Keeps the LoadingIndicator on the *picker* until the list is
-        truly ready, so the user never lands on a half-built list pane
-        where j/k briefly does nothing.
-        """
-        picker = None
+    def set_picker_busy(self, busy: bool) -> None:
         with contextlib.suppress(Exception):
-            picker = self.query_one("#picker", SessionPicker)
-            picker.loading = True
+            self.query_one("#picker", SourcePicker).loading = busy
+
+    def sync_picker(self) -> None:
+        self._sync_session_picker()
+
+    def refresh_picker_rows(self, plugin_id: str, items) -> None:
+        with contextlib.suppress(Exception):
+            self.query_one("#picker", SourcePicker).refresh_rows(plugin_id, items)
+
+    def sync_view(self) -> None:
+        self._sync_content_view()
+
+    def focus_content(self) -> None:
+        self._focus_active_widget()
+
+    def highlighted_picker_item(self, plugin_id: str) -> object | None:
         try:
-            result = await api_client.load_session(path)
-            self.session_path = path
-            # Set everything except `messages` first — `messages` triggers
-            # watch_messages, but that watcher early-returns while view !=
-            # "list", so the SyncMessageList worker doesn't race us.
-            self.teams = result.teams
-            self.ongoing = result.ongoing
-            self.meta = result.meta
-            self.totals = result.session_totals
-            self.expanded_messages = set()
-            self._detail_full_message = None
-            self.messages = result.messages
-            # Pre-populate the MessageList synchronously (awaited) so it's
-            # fully built before we flip the view.
-            with contextlib.suppress(Exception):
-                ml = self.query_one("#list", MessageList)
-                await ml.populate(
-                    messages=result.messages,
-                    expanded_set=self.expanded_messages,
-                    ongoing=result.ongoing,
-                )
-            await api_client.watch_session(path)
-            self.view = "list"
+            picker = self.query_one("#picker", SourcePicker)
+            if picker.index is None:
+                return None
+            entry = picker.entry_at_raw_index(picker.index)
         except Exception:
-            pass
-        finally:
-            if picker is not None:
-                with contextlib.suppress(Exception):
-                    picker.loading = False
+            return None
+        if entry is None or entry[0] != plugin_id:
+            return None
+        return entry[1]
 
     # ----------------------------------------------------------------
     # Widget event handlers — ListView, Tree
@@ -464,23 +336,18 @@ class CCTraceApp(App):
 
         if lv_id == "picker":
             # event.index is the raw ListView node index (including disabled header rows)
-            picker = self.query_one("#picker", SessionPicker)
-            session = picker.session_at_raw_index(event.index)
-            if session is not None:
-                # _load_session shows a LoadingIndicator on the picker,
-                # fully populates the MessageList, *then* flips the view —
-                # so the user never lands on a half-built list pane.
+            picker = self.query_one("#picker", SourcePicker)
+            entry = picker.entry_at_raw_index(event.index)
+            plugin = self.plugins.get(entry[0]) if entry is not None else None
+            if entry is not None and plugin is not None:
+                # The plugin shows a LoadingIndicator on the picker, fully
+                # populates the MessageList, *then* flips the view — so the
+                # user never lands on a half-built list pane.
                 self._detail_item_idx = 0
                 self.expanded_items = set()
                 self.subagent_item = None
                 self.subagent_detail_msg = None
-                self._current_session = session
-                self.run_worker(
-                    self._load_session(session.path),
-                    exclusive=True,
-                    group="load_session",
-                    name="load_session",
-                )
+                plugin.open(entry[1])
 
         elif lv_id == "list":
             # event.index is the direct message index (MessageList has no header rows)
@@ -512,16 +379,6 @@ class CCTraceApp(App):
 
     def on_list_view_highlighted(self, _event: ListView.Highlighted) -> None:
         """No-op — widgets manage their own highlight; Footer renders keybinds."""
-
-    def on_project_tree_project_selected(self, event: ProjectTree.ProjectSelected) -> None:
-        """Handle project selection from the sidebar Tree."""
-        if event.project_key != self.selected_project:
-            # Different project chosen — update filter and switch to picker view.
-            self.selected_project = event.project_key
-            self.view = "picker"
-        else:
-            # Same project (e.g. l/right/Esc to dismiss sidebar) — just refocus content.
-            self._focus_active_widget()
 
     # ----------------------------------------------------------------
     # Action methods (from BINDINGS)
@@ -578,8 +435,8 @@ class CCTraceApp(App):
                     # full (heavy-body) message it held.
                     self._detail_full_message = None
                     self.view = "list"
-            case "team" | "debug":
-                self.view = "list"
+            case view if view in self._view_owners:
+                self.view = LIST_VIEW
 
     def action_toggle_expand(self) -> None:
         """Tab: in list view → open detail; in detail view → toggle expand current item."""
@@ -630,47 +487,20 @@ class CCTraceApp(App):
                 self.query_one("#detail", DetailView).collapse_all()
 
     def action_refresh(self) -> None:
-        """r: re-discover sessions and update the project tree."""
-        self.picker_loading = True
-        self.picker_error = ""
-        self.run_worker(self._init_sessions(), exclusive=True, name="refresh")
+        """r: re-read every enabled source."""
+        for plugin in self.plugins.enabled():
+            plugin.refresh()
 
-    def action_show_teams(self) -> None:
-        if self.view == "list" and self.teams:
-            self.view = "team"
-
-    def action_copy_resume(self) -> None:
-        """y: copy the `claude --resume` command for the current session."""
-        sel = self._current_session
-        if sel is None:
-            return
-        self.copy_to_clipboard(resume_command(sel.cwd, sel.session_id))
-
-    def action_analyse_session(self) -> None:
-        """a: analyse the highlighted session's efficiency with Jev."""
-        session = self._highlighted_picker_session()
-        if session is None:
-            return
-        self.run_worker(self._analyse_session(session), exclusive=True, group="analyse")
-
-    def action_analytics_settings(self) -> None:
-        """,: open the Jev and recommendation-provider settings."""
-        self.run_worker(self._open_analytics_settings(), exclusive=True, group="analytics-settings")
-
-    def _highlighted_picker_session(self) -> SessionInfo | None:
-        try:
-            picker = self.query_one("#picker", SessionPicker)
-            if picker.index is None:
-                return None
-            return picker.session_at_raw_index(picker.index)
-        except Exception:
-            return None
+    def action_plugin(self, plugin_id: str, action: str) -> None:
+        """Run one of a plugin's own key actions (see ``PluginKey``)."""
+        plugin = self.plugins.get(plugin_id)
+        if plugin is not None:
+            plugin.run_action(action)
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool | None:
-        """Per-view bindings. copy_resume is hidden outside the list/detail
-        views (no session in context in the picker), and the Jev keys are
-        shown only in the picker — both kept off the global footer, which
-        already overflows on narrow terminals.
+        """A plugin's keys apply only while it is enabled, and only in the
+        views the plugin says they do — keeping them off the global footer,
+        which already overflows on narrow terminals.
 
         While a modal screen (the privacy notice, the analytics settings) is
         open it owns the keyboard: without this the app's priority bindings
@@ -682,10 +512,12 @@ class CCTraceApp(App):
         """
         if len(self.screen_stack) > 1 and action in self.OWN_ACTIONS:
             return False
-        if action == "copy_resume":
-            return self.view in ("list", "detail") and self._current_session is not None
-        if action in ("analyse_session", "analytics_settings"):
-            return self.view == "picker"
+        if action == "plugin":
+            plugin_id, plugin_action = parameters
+            plugin = self.plugins.get(str(plugin_id))
+            if plugin is None:
+                return False
+            return plugin.check_action(str(plugin_action), self.view)
         return True
 
     def action_d_action(self) -> None:
@@ -693,7 +525,7 @@ class CCTraceApp(App):
         match self.view:
             case "picker":
                 with contextlib.suppress(Exception):
-                    self.query_one("#picker", SessionPicker).scroll_down(amount=5, animate=False)
+                    self.query_one("#picker", SourcePicker).scroll_down(amount=5, animate=False)
             case "list":
                 with contextlib.suppress(Exception):
                     self.query_one("#list", MessageList).scroll_down(amount=5, animate=False)
@@ -706,10 +538,10 @@ class CCTraceApp(App):
         """g: jump to first item."""
         if self.view == "picker":
             try:
-                lv = self.query_one("#picker", SessionPicker)
-                if lv._index_to_session:
-                    first_raw = min(lv._index_to_session.keys())
-                    lv.index = first_raw
+                lv = self.query_one("#picker", SourcePicker)
+                selectable = lv.selectable_indices()
+                if selectable:
+                    lv.index = selectable[0]
             except Exception:
                 pass
         elif self.view == "list":
@@ -726,10 +558,10 @@ class CCTraceApp(App):
         """G: jump to last item."""
         if self.view == "picker":
             try:
-                lv = self.query_one("#picker", SessionPicker)
-                if lv._index_to_session:
-                    last_raw = max(lv._index_to_session.keys())
-                    lv.index = last_raw
+                lv = self.query_one("#picker", SourcePicker)
+                selectable = lv.selectable_indices()
+                if selectable:
+                    lv.index = selectable[-1]
             except Exception:
                 pass
         elif self.view == "list":
@@ -758,7 +590,7 @@ class CCTraceApp(App):
         match self.view:
             case "picker":
                 with contextlib.suppress(Exception):
-                    self.query_one("#picker", SessionPicker).scroll_up(amount=5, animate=False)
+                    self.query_one("#picker", SourcePicker).scroll_up(amount=5, animate=False)
             case "list":
                 with contextlib.suppress(Exception):
                     self.query_one("#list", MessageList).scroll_up(amount=5, animate=False)
@@ -768,9 +600,12 @@ class CCTraceApp(App):
                     dv.query_one("#items-scroll").scroll_up(amount=5, animate=False)
 
     def action_focus_sidebar(self) -> None:
-        """h: focus the project tree sidebar."""
-        with contextlib.suppress(Exception):
-            self.query_one("#tree-inner").focus()
+        """h: focus the first focusable widget in the sidebar."""
+        for widget in self._sidebar_widgets:
+            for node in [widget, *widget.query("*")]:
+                if node.focusable:
+                    node.focus()
+                    return
 
     def action_focus_content(self) -> None:
         """l: focus the active content widget."""
@@ -791,14 +626,14 @@ class CCTraceApp(App):
         with contextlib.suppress(Exception):
             match self.view:
                 case "picker":
-                    self.query_one("#picker", SessionPicker).focus()
+                    self.query_one("#picker", SourcePicker).focus()
                 case "list":
                     self.query_one("#list", MessageList).focus()
                 case "detail":
                     with contextlib.suppress(Exception):
                         self.query_one("#detail", DetailView).query_one("#items-list").focus()
-                case "debug":
-                    self.query_one("#debug", DebugViewer).focus()
+                case view if view in self._view_owners:
+                    self._view_owners[view].focus_view(view)
 
     # ----------------------------------------------------------------
     # Detail-view Enter handling
@@ -888,30 +723,13 @@ class CCTraceApp(App):
         return getattr(self, "_detail_full_message", None)
 
     # ----------------------------------------------------------------
-    # Session filter
-    # ----------------------------------------------------------------
-
-    def _picker_sessions(self) -> list[SessionInfo]:
-        if self.selected_project is None:
-            return self.all_sessions
-        key = self.selected_project
-        # Resolve each session's fork chain against the full list so a forked session —
-        # grouped under its fork parent's project in the sidebar tree, see
-        # project_tree.build_project_nodes — is included too (#238).
-        sessions_by_id = {s.session_id: s for s in self.all_sessions}
-        return [
-            s
-            for s in self.all_sessions
-            if _project_key(resolve_fork_root(s, sessions_by_id).path) == key
-        ]
-
-    # ----------------------------------------------------------------
     # Sync methods — push state into widgets
     # ----------------------------------------------------------------
 
     def _sync_all_widgets(self) -> None:
         self._sync_info_bar()
-        self._sync_project_tree()
+        for plugin in self.plugins.enabled():
+            plugin.sync_sidebar()
         self._sync_content_view()
 
     def _sync_info_bar(self) -> None:
@@ -934,37 +752,10 @@ class CCTraceApp(App):
             parts.append(format_cost(self.totals.cost_usd))
         self.sub_title = "  ·  ".join(parts)
 
-    def _sync_project_tree(self) -> None:
-        try:
-            tree = self.query_one("#project-tree", ProjectTree)
-            collapsed: set[str] = set()  # collapse state tracked in Tree widget itself
-            tree.update_state(
-                sessions=self.all_sessions,
-                selected_project=self.selected_project,
-                collapsed_keys=collapsed,
-            )
-        except Exception:
-            pass
-
     def _sync_session_picker(self) -> None:
-        try:
-            picker = self.query_one("#picker", SessionPicker)
-            picker.populate(
-                sessions=self._picker_sessions(),
-                loading=self.picker_loading,
-                error=self.picker_error,
-                jobs=self.efficiency_jobs,
-                summaries=self.efficiency_summaries,
-            )
-        except Exception:
-            pass
-
-    def _sync_picker_analysis(self) -> None:
-        """Re-render only the analysed rows. A full populate() would clear the
-        list and drop the cursor, and a running job reports progress often."""
         with contextlib.suppress(Exception):
-            self.query_one("#picker", SessionPicker).update_analysis(
-                self.efficiency_jobs, self.efficiency_summaries
+            self.query_one("#picker", SourcePicker).populate(
+                [(plugin.id, plugin.picker_section()) for plugin in self.plugins.enabled()]
             )
 
     def _sync_message_list(self) -> None:
@@ -1043,8 +834,9 @@ class CCTraceApp(App):
             )
 
     async def _fetch_detail_message(self, path: str, msg_idx: int) -> None:
+        plugin = self._session_plugin
         try:
-            msg = await api_client.load_message(path, msg_idx)
+            msg = await plugin.load_full_message(path, msg_idx) if plugin else None
         except Exception:
             msg = None
         # Stale if the user moved on (closed detail, opened a different
@@ -1077,31 +869,12 @@ class CCTraceApp(App):
                 switcher.current = "detail"
                 self._sync_detail_view()
 
-            elif self.view == "team":
-                switcher.current = "team"
-                tb = self.query_one("#team", TeamBoard)
-                tb.teams = self.teams
-
-            elif self.view == "debug":
-                switcher.current = "debug"
-                dv = self.query_one("#debug", DebugViewer)
-                dv.populate(self.debug_entries)
+            elif self.view in self._view_owners:
+                switcher.current = self.view
+                self._view_owners[self.view].sync_view(self.view)
 
         except Exception:
             pass
-
-    # ----------------------------------------------------------------
-    # Async helpers
-    # ----------------------------------------------------------------
-
-    async def _fetch_debug_log(self) -> None:
-        if self.session_path:
-            try:
-                entries = await api_client.get_debug_log(self.session_path)
-                self.debug_entries = entries
-                self._sync_content_view()
-            except Exception:
-                pass
 
     # ----------------------------------------------------------------
     # Reactive watchers → sync widgets
@@ -1110,33 +883,6 @@ class CCTraceApp(App):
     def watch_view(self, _v: str) -> None:
         self._sync_all_widgets()
         self.call_after_refresh(self._focus_active_widget)
-
-    def watch_all_sessions(self, _s) -> None:
-        self._sync_project_tree()
-        if self.view == "picker":
-            self._sync_session_picker()
-
-    def watch_picker_loading(self, _l) -> None:
-        if self.view == "picker":
-            self._sync_session_picker()
-
-    def watch_picker_error(self, _e) -> None:
-        if self.view == "picker":
-            self._sync_session_picker()
-
-    def watch_index_progress(self, _p) -> None:
-        with contextlib.suppress(Exception):
-            self.query_one("#index-progress", IndexProgressBar).progress = self.index_progress
-
-    def watch_efficiency_jobs(self, _j) -> None:
-        self._sync_picker_analysis()
-
-    def watch_efficiency_summaries(self, _s) -> None:
-        self._sync_picker_analysis()
-
-    def watch_selected_project(self, _p) -> None:
-        if self.view == "picker":
-            self._sync_session_picker()
 
     def watch_messages(self, _m) -> None:
         if self.view == "list":
@@ -1157,10 +903,6 @@ class CCTraceApp(App):
     def watch_subagent_detail_msg(self, _m) -> None:
         if self.view == "detail":
             self._sync_detail_view()
-
-    def watch_teams(self, _t) -> None:
-        if self.view == "team":
-            self._sync_content_view()
 
     def watch_ongoing(self, _o) -> None:
         self._sync_info_bar()

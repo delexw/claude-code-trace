@@ -1,89 +1,36 @@
-import type { ViewState } from "../types";
-import type { IndexProgress } from "../types";
-import { IndexProgressBar } from "./IndexProgressBar";
+import type { ReactNode } from "react";
+import type { KeyHint } from "../plugins/types";
 
 interface KeybindBarProps {
-  /** How far the backend has got reading the project directories. */
-  index: IndexProgress;
-  view: ViewState;
-  hasTeams: boolean;
+  /** Plugin status shown at the left (e.g. Claude's indexing progress). */
+  status?: ReactNode;
+  hints: KeyHint[];
   showHints?: boolean;
   onToggle?: () => void;
+  /** Clickable hints, keyed by hint label. */
   actions?: Record<string, () => void>;
 }
 
-interface KeyHint {
-  key: string;
-  label: string;
-}
-
-const listKeys: KeyHint[] = [
-  { key: "j/k", label: "nav" },
-  { key: "\u2191/\u2193", label: "scroll" },
-  { key: "G/g", label: "jump" },
-  { key: "Tab", label: "toggle" },
-  { key: "Enter", label: "detail" },
-  { key: "d", label: "debug" },
-  { key: "e/c", label: "expand/collapse" },
-  { key: "q", label: "sessions" },
-];
-
-const listKeysWithTeams: KeyHint[] = [
-  ...listKeys.slice(0, 6),
-  { key: "t", label: "tasks" },
-  ...listKeys.slice(6),
-];
-
-const detailKeys: KeyHint[] = [
-  { key: "j/k", label: "items" },
-  { key: "Tab", label: "toggle" },
-  { key: "Enter", label: "open" },
-  { key: "h/l", label: "panels" },
-  { key: "q/Esc", label: "back" },
-];
-
-const pickerKeys: KeyHint[] = [
+export const PICKER_HINTS: KeyHint[] = [
   { key: "j/k", label: "nav" },
   { key: "Enter", label: "open" },
   { key: "/", label: "search" },
   { key: "q/Esc", label: "back" },
 ];
 
-const debugKeys: KeyHint[] = [{ key: "q/Esc", label: "back" }];
-
-const teamKeys: KeyHint[] = [{ key: "q/Esc", label: "back" }];
-
-function getKeys(view: ViewState, hasTeams: boolean): KeyHint[] {
-  switch (view) {
-    case "list":
-      return hasTeams ? listKeysWithTeams : listKeys;
-    case "detail":
-      return detailKeys;
-    case "picker":
-      return pickerKeys;
-    case "debug":
-      return debugKeys;
-    case "team":
-      return teamKeys;
-  }
-}
-
 export function KeybindBar({
-  index,
-  view,
-  hasTeams,
+  status,
+  hints,
   showHints = true,
   onToggle,
   actions,
 }: KeybindBarProps) {
-  const keys = getKeys(view, hasTeams);
-
   return (
     <div className="keybind-bar">
-      <IndexProgressBar progress={index} />
+      {status}
       <div className="keybind-bar__hints">
         {showHints &&
-          keys.map((hint) => {
+          hints.map((hint) => {
             const action = actions?.[hint.label];
             return (
               <span

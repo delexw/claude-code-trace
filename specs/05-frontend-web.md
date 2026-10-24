@@ -12,16 +12,23 @@ selected at runtime by `src/lib/isTauri.ts`.
 
 ## Component Hierarchy
 
+`App.tsx` is the shell: it renders the shared frame and asks each enabled session-source plugin
+(`src/plugins/<id>/`, see [15-session-source-plugins.md](15-session-source-plugins.md)) for its
+picker section, sidebar, views, toolbar buttons, key hints and settings panel. The Claude plugin
+(`src/plugins/claude/`) supplies the project-tree sidebar, the session list, and the list /
+detail / team / debug views below.
+
 ```mermaid
 graph TB
-    APP["App.tsx\n(root — router + state)"]
+    APP["App.tsx\n(shell — location + plugins)"]
+    CP["plugins/claude\n(useClaudeSource)"]
 
     subgraph LeftPanel["Left Panel"]
-        PT["ProjectTree\n(sidebar)"]
+        PT["ProjectTree\n(Claude sidebar)"]
     end
 
     subgraph RightPanel["Right Panel / Views"]
-        SP["SessionPicker"]
+        SP["SessionPicker\n(frame + plugin sections)"]
         ML["MessageList"]
         MD["MessageDetail\n(split panels)"]
         TB["TeamBoard"]
@@ -36,13 +43,14 @@ graph TB
         SM["SettingsModal"]
     end
 
-    APP --> PT
+    APP --> CP
+    CP --> PT
     APP --> SP
-    APP --> ML
-    APP --> MD
-    APP --> TB
-    APP --> DV
-    APP --> IB
+    CP --> ML
+    CP --> MD
+    CP --> TB
+    CP --> DV
+    CP --> IB
     APP --> VT
     APP --> KB
     APP --> PO
@@ -144,7 +152,7 @@ flowchart TD
     DIRS --> DISC["invoke/fetch\ndiscover_sessions()"]
     DISC --> SESSIONS["SessionInfo[]"]
     SESSIONS --> FILTER["filter by search text\n+ project key"]
-    FILTER --> DISPLAY["Picker UI"]
+    FILTER --> DISPLAY["Claude picker section"]
     LISTEN["listen / SSE\n'picker-refresh'"] --> DISC
 ```
 
@@ -316,8 +324,11 @@ Project key derivation is in `shared/projectTree.ts`:
 
 ### `SessionPicker` — Session List with Search
 
-Displays all sessions grouped by date with token/cost stats.
-Supports text search and project filtering (via `ProjectTree` selection).
+The shared frame: title, the enabled plugins' header totals, the search box, and one section
+per enabled plugin inside a single scroll container. Claude's section
+(`plugins/claude/ClaudeSessionList.tsx`) groups sessions by date with token/cost stats and
+filters by the search text and the `ProjectTree` selection. The shell owns the search text and
+one selection index across every section.
 
 ---
 
