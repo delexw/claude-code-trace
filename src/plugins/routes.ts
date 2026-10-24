@@ -1,4 +1,5 @@
 import type { RouteTable } from "../lib/routeTypes";
+import { antigravityRoutes } from "./antigravity/routes";
 import { claudeRoutes } from "./claude/routes";
 
 /**
@@ -7,4 +8,5 @@ import { claudeRoutes } from "./claude/routes";
  */
 export const PLUGIN_ROUTES: Record<string, RouteTable> = {
   claude: claudeRoutes,
+  antigravity: antigravityRoutes,
 };

@@ -114,6 +114,24 @@ pub async fn set_projects_dir(
     ))
 }
 
+/// Turn a source plugin on or off. See `plugins::set_enabled` for the rules.
+#[cfg(feature = "desktop")]
+#[tauri::command]
+pub async fn set_plugin_enabled(
+    id: String,
+    enabled: bool,
+    state: State<'_, Arc<AppState>>,
+) -> Result<SettingsResponse, String> {
+    let mut guard = state.settings.lock().map_err(|e| e.to_string())?;
+    crate::plugins::set_enabled(&mut guard, &id, enabled)?;
+    crate::settings::save_settings(&guard)?;
+    Ok(build_response_pub(
+        &guard,
+        &state.auth_snapshot(),
+        state.clients_snapshot(),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -183,12 +201,20 @@ mod tests {
         let json = serde_json::to_value(&response).expect("serializes");
         assert_eq!(
             json["plugins"],
-            serde_json::json!([{
-                "id": "claude",
-                "label": "Claude Code",
-                "enabled": true,
-                "can_disable": false,
-            }])
+            serde_json::json!([
+                {
+                    "id": "claude",
+                    "label": "Claude Code",
+                    "enabled": true,
+                    "can_disable": false,
+                },
+                {
+                    "id": "antigravity",
+                    "label": "Antigravity",
+                    "enabled": false,
+                    "can_disable": true,
+                },
+            ])
         );
     }
 }

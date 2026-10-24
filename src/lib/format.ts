@@ -153,6 +153,17 @@ export function contextPercent(msgs: DisplayMessage[]): number {
   return -1;
 }
 
+/** A valid date as yyyy-mm-dd hh:mm:ss in local time. */
+function formatLocalDateTime(d: Date): string {
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mi = String(d.getMinutes()).padStart(2, "0");
+  const ss = String(d.getSeconds()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
+}
+
 /**
  * Formats a timestamp as yyyy-mm-dd hh:mm:ss.
  */
@@ -161,16 +172,24 @@ export function formatExactTime(ts: string): string {
   try {
     const d = new Date(ts);
     if (isNaN(d.getTime())) return "";
-    const yyyy = d.getFullYear();
-    const mm = String(d.getMonth() + 1).padStart(2, "0");
-    const dd = String(d.getDate()).padStart(2, "0");
-    const hh = String(d.getHours()).padStart(2, "0");
-    const mi = String(d.getMinutes()).padStart(2, "0");
-    const ss = String(d.getSeconds()).padStart(2, "0");
-    return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
+    return formatLocalDateTime(d);
   } catch {
     return "";
   }
+}
+
+/**
+ * Formats a Unix-millisecond timestamp as yyyy-mm-dd hh:mm:ss.
+ *
+ * Distinct from `formatExactTime`, which parses a *string*. Passing epoch
+ * milliseconds as a string there yields an Invalid Date and a silent empty
+ * result, so numeric epochs need this.
+ */
+export function formatMsTimestamp(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return "";
+  const d = new Date(ms);
+  if (isNaN(d.getTime())) return "";
+  return formatLocalDateTime(d);
 }
 
 /**

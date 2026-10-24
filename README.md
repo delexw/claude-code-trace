@@ -1,4 +1,4 @@
-<p align="center"> 
+<p align="center">
   <img src="icon.png" alt="Claude Code Trace app icon" width="128" />
 </p>
 
@@ -13,94 +13,92 @@
 [![Textual](https://img.shields.io/badge/textual-8.2%2B-5A4FCF?logo=textualize&logoColor=white)](https://textual.textualize.io/)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-blue)](https://github.com/delexw/claude-code-trace/releases)
 
-<p align="center">
-  <strong><a href="#install">⬇&#65039; Install Claude Code Trace</a></strong>
-</p>
-
-**Claude Code Trace** is a **Claude Code session log viewer** and **Jev-powered AI agent efficiency analyzer** for local JSONL files stored in `~/.claude/projects/`. It combines real-time Claude Code trace observability with structured behavioural analysis from [Jev, TypeSafe AI's System One Model](https://typesafe.ai/blog/introducing-system-one-models-and-jev).
-
-Browse, tail, and inspect Claude Code conversations in real time. Claude Code Trace renders Claude Code JSONL session files as readable conversations with expandable tool calls, token counts, timestamps, MCP tool call detection, and live log tailing. Its optional Jev integration scores agent progress, tool use, focus, exploration, recovery, and token efficiency using typed probabilistic decisions. It runs as a **GUI app** for macOS, Linux, and Windows, a **Web app** or a **TUI**.
-
-## Jev-powered AI agent efficiency analysis
-
-Claude Code Trace turns a Claude Code agent trace into a privacy-reviewed, redacted analysis request for Jev. The resulting session efficiency dashboard helps identify repeated work, thrashing, excessive exploration, failed retries, effective recovery, useful subagent work, and inefficient token usage.
-
-- **Structured Jev decisions** — evaluates agent behaviour using typed probabilities rather than generated prose
-- **Token efficiency analysis** — considers total tokens, context growth, turns, repeated work, and tool activity without evaluating monetary cost
-- **Trace-linked findings** — jumps from an efficiency finding to the relevant Claude Code messages
-- **Privacy before external analysis** — shows the exact redacted payload and requires confirmation before sending it
-- **Secure API tokens** — stores Jev and provider API tokens in macOS Keychain, Windows Credential Manager, or Linux Secret Service
-- **Versioned local results** — caches one latest result per session and marks it stale when the trace or analysis formula changes
-
-> **Integration credit:** The Jev-powered Claude Code analysis workflow was designed and built in Claude Code Trace by [delexw](https://github.com/delexw). Jev is developed by [TypeSafe AI](https://typesafe.ai/); this open-source project is independent and is not an official TypeSafe AI integration.
-
-Use Claude Code Trace when you want to:
-
-- View Claude Code conversation history from `~/.claude/projects/`
-- Find Claude Code sessions by user message
-- Inspect Claude Code tool calls, MCP calls, timestamps, and token usage
-- Analyze Claude Code agent efficiency with Jev and review trace-linked behavioural findings
-- Monitor live Claude Code sessions while they are running
-- Debug long-running Claude Code workflows without reading raw JSONL files
-- Support and build a personal AI harness platform such as [DovePaw Lite](https://github.com/PixelPaw-Labs/DovePaw-Lite)
-- Browse Claude Code session logs from a desktop, browser, or terminal interface
-
-> Claude Code Trace is also used to support and build [**DovePaw Lite**](https://github.com/PixelPaw-Labs/DovePaw-Lite), a personal AI harness platform for orchestrating local agents.
->
-> Also check out [**Codex Trace**](https://github.com/PixelPaw-Labs/codex-trace) — a session viewer for OpenAI Codex.
+**Claude Code Trace** is a viewer for the session logs Claude Code keeps on your machine
+(`~/.claude/projects/*.jsonl`). It turns raw JSONL into a readable conversation, follows live
+sessions as they run, and can score how efficiently an agent worked. It runs as a desktop app,
+a web app, or a terminal UI, and nothing leaves your machine unless you ask for an analysis.
 
 <p align="center">
-  <img src="demo.gif" alt="Claude Code Trace desktop app showing Claude Code JSONL session logs, messages, and expandable tool calls" />
+  <img src="demo.gif" alt="Claude Code Trace showing a Claude Code session with expandable tool calls" />
 </p>
 
 ## Features
 
-- **Claude Code JSONL viewer** — reads local Claude Code session files from `~/.claude/projects/`
-- **Conversation browser** — renders raw JSONL logs as scrollable Claude Code conversations
-- **Live tailing** — monitor active Claude Code sessions in real time
-- **Session search** — find sessions by user message
-- **Tool call inspection** — expand Claude Code tool calls for detailed debugging
-- **MCP support** — detects Model Context Protocol tool calls and displays human-friendly names
-- **Token visibility** — shows token counts where available in Claude Code session data
-- **Jev-powered efficiency analysis** — scores progress, tool use, focus, exploration, recovery, and token efficiency with trace-linked findings
-- **Desktop, web, and TUI modes** — choose the interface that fits your workflow
-- **Cross-platform builds** — supports macOS, Linux, and Windows
+- **Log viewer** — every session as a conversation, with expandable tool calls, thinking,
+  tool results, sub-agents, token counts and timestamps. Edit tool calls show as word-level diffs.
+- **Live tailing** — an open session updates as Claude Code writes to it, and the picker shows
+  which sessions are still running.
+- **Session picker** — sessions grouped by date and project, searchable by what you asked.
+- **MCP tool calls** — `mcp__<server>__<tool>` calls get readable names, e.g. **MCP figma**.
+- **Debug log and team views** — Claude Code's debug log and team task boards, when a session has them.
+- **Efficiency analysis (optional)** — sends a redacted summary of a session to
+  [Jev](https://typesafe.ai/) and shows trace-linked findings: repeated work, thrashing, recovery,
+  token use. You see the exact payload and confirm before anything is sent.
+- **Source plugins** — Claude Code is built in; other session sources can be switched on in
+  Settings. See [Plugins](#plugins).
+- **Three front ends** — desktop (Tauri), web, and terminal UI (Textual), all reading from the
+  same backend.
 
-## Why use Claude Code Trace?
+## Plugins
 
-Claude Code stores local session history as JSONL files. Those files are useful for debugging and reviewing AI coding sessions, but they are difficult to read directly. Claude Code Trace turns those JSONL logs into an interactive session viewer so you can find sessions by user message, inspect conversations, understand tool usage, and debug Claude Code workflows faster.
+Each session source is a plugin with its own folder on every part of the app. The picker, views
+and settings show whatever the enabled plugins provide.
 
-Unlike general observability platforms, Claude Code Trace focuses on local Claude Code session logs. It does not require sending traces to an external service.
+| Plugin      | What it reads                                                           | Default   |
+| ----------- | ----------------------------------------------------------------------- | --------- |
+| Claude Code | `~/.claude/projects/` session logs                                      | Always on |
+| Antigravity | Google Antigravity "brain" conversations in `~/.gemini/<flavor>/brain/` | Off       |
 
-Claude Code Trace is especially useful when building personal AI harnesses and local agent platforms. It helps inspect Claude Code sessions, understand tool usage, and debug the workflows that power projects like [DovePaw Lite](https://github.com/PixelPaw-Labs/DovePaw-Lite).
+Turn optional plugins on under **Settings → General → Sources**. With more than one on, the
+picker gets an All / per-source filter. Antigravity conversations are read-only, and you can point
+it at a different brain directory in Settings.
+
+To add a plugin, see [specs/15-session-source-plugins.md](specs/15-session-source-plugins.md).
+
+## Architecture
+
+```mermaid
+flowchart LR
+    Logs["Session logs on disk"] --> Backend
+    subgraph Backend["Rust backend"]
+        Plugins["Source plugins: parse, index, watch"]
+        API["HTTP API + SSE, port 11423"]
+        Plugins --> API
+    end
+    Backend -- "Tauri IPC" --> Desktop["Desktop app"]
+    API -- "JWT" --> Web["Web app"]
+    API -- "JWT" --> TUI["Terminal UI"]
+    API -- "JWT" --> Scripts["Your scripts"]
+```
+
+- One Rust backend parses and indexes the logs and watches the open session for changes.
+  The desktop app talks to it over Tauri IPC. Everything else uses the local HTTP API, with a
+  server-sent events stream for live updates.
+- **Every HTTP caller is a registered client** holding its own HS256-signed JWT. The backend
+  signs and checks the tokens itself and stores no credentials, only a list of clients so any one
+  can be revoked or reissued without touching the others. The web UI (`web-ui`) and the terminal
+  UI (`tui`) are registered automatically.
+- A client sends its token in the `X-CCTrace-Token` header, an `Authorization: Bearer` header,
+  a `?token=` query (used for the event stream), or a same-origin cookie.
+- Jev and provider API keys live in the OS credential store (macOS Keychain, Windows Credential
+  Manager, Linux Secret Service), never in the settings file.
+
+Design notes for each part are in [specs/](specs/).
 
 ## Install
 
-### macOS — one-line install
-
-> [!TIP]
-> **No clone. No build tools. No `xattr`.** Paste this into your terminal:
->
-> ```bash
-> curl -fsSL https://raw.githubusercontent.com/delexw/claude-code-trace/main/script/install-macos.sh | bash
-> ```
->
-> This downloads the latest release and installs **Claude Code Trace.app** into
-> `/Applications`, ready to open from Spotlight.
->
-> The app is ad-hoc signed but not notarized by Apple. `curl` never marks a file
-> as downloaded, so the app installed this way just opens. Apple Silicon only.
-
-Pin a specific version, or install somewhere else, with:
+### macOS — one line
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/delexw/claude-code-trace/main/script/install-macos.sh \
-  | CCTRACE_VERSION=v0.15.1 CCTRACE_INSTALL_DIR=~/Applications bash
+curl -fsSL https://raw.githubusercontent.com/delexw/claude-code-trace/main/script/install-macos.sh | bash
 ```
 
-### Download pre-built app
+This installs **Claude Code Trace.app** into `/Applications`. Apple Silicon only. The app is
+ad-hoc signed but not notarized; installed this way it opens straight away.
 
-Grab the latest release from [Releases](https://github.com/delexw/claude-code-trace/releases):
+### Download
+
+Get the latest build from [Releases](https://github.com/delexw/claude-code-trace/releases):
 
 | Platform              | File                        |
 | --------------------- | --------------------------- |
@@ -108,220 +106,75 @@ Grab the latest release from [Releases](https://github.com/delexw/claude-code-tr
 | Linux                 | `.deb`, `.rpm`, `.AppImage` |
 | Windows               | `.msi`, `.exe`              |
 
-The macOS app is ad-hoc signed but not notarized by Apple, so the first time you open a
-downloaded copy macOS refuses it. To open it:
-
-1. Open the `.dmg`, drag **Claude Code Trace.app** to Applications, and open it once.
-   macOS says it can't verify the app — click **Done**.
-2. Open **System Settings → Privacy & Security**, scroll to **Security**, and click
-   **Open Anyway** next to Claude Code Trace.
-3. Confirm with your password. After this the app opens normally.
-
-On macOS 14 and earlier you can instead right-click the app, choose **Open**, then
-**Open** again.
+The first time you open the downloaded macOS app, macOS says it can't verify it. Click **Done**,
+then go to **System Settings → Privacy & Security** and click **Open Anyway**. On macOS 14 and
+earlier you can right-click the app and choose **Open** instead.
 
 ### Build from source
 
-Use this option if you want to build Claude Code Trace locally on macOS, Linux, or Windows with Rust and Node.js installed.
+Needs Rust (stable), Node.js 18+ and Python 3.11+ for the terminal UI. On Linux also install
+`libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev`.
 
 ```bash
-git clone git@github.com:delexw/claude-code-trace.git
+git clone https://github.com/delexw/claude-code-trace.git
 cd claude-code-trace
-./script/install.sh       # builds everything + installs to PATH
-
-cctrace              # desktop app (default)
-cctrace --web        # web mode (opens browser)
-cctrace --tui        # terminal UI
+./script/install.sh       # builds everything and puts cctrace on your PATH
 ```
 
-### Run from source without installing
+### Docker (web mode)
 
 ```bash
-git clone git@github.com:delexw/claude-code-trace.git
-cd claude-code-trace
-npm install
-
-npm run tauri dev        # desktop app with hot reload
-npm run dev:web          # web mode (opens browser)
-npm run dev:tui          # TUI (starts backend + terminal UI)
+docker compose up --build   # then open http://localhost:1421
 ```
 
-### Run in Docker
-
-Docker is supported for web mode only.
-
-For an interactive deployment, use the redeploy script. It asks whether you want to configure or
-update the Jev API key, reads it without echoing, and stores it in a Docker-managed volume that is
-mounted read-only by the running container:
-
-```bash
-./script/redeploy.sh
-```
-
-Answer **No** to keep the existing Docker key unchanged or to run without Jev analysis.
-
-For a manual deployment without the interactive prompt:
-
-```bash
-docker build -t claude-code-trace .
-docker run --rm -p 1421:1421 \
-  -v "$HOME/.claude:/home/app/.claude:ro" \
-  claude-code-trace
-# then open http://localhost:1421
-```
-
-Or use Docker Compose directly:
-
-```bash
-docker compose up --build
-```
-
-See [docs/docker.md](docs/docker.md) for runtime environment variables, volume layout, and troubleshooting.
-
-## Requirements
-
-- [Rust](https://rustup.rs/) 1.88+
-- Node.js 18+
-- macOS: Xcode Command Line Tools (`xcode-select --install`)
-- Linux: `libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev`
-- Windows: [WebView2](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) is required and is pre-installed on Windows 10 and Windows 11
+`./script/redeploy.sh` does the same and can store a Jev API key for the container.
+See [docs/docker.md](docs/docker.md).
 
 ## Usage
 
 ```bash
-cctrace              # desktop app (default)
-cctrace --web        # web mode (opens browser at http://localhost:1420)
-cctrace --tui        # terminal UI (starts backend + TUI together)
+cctrace              # desktop app
+cctrace --web        # web app at http://localhost:1420
+cctrace --tui        # terminal UI
 ```
 
-Launch Claude Code Trace to open the session picker. It automatically discovers Claude Code sessions from `~/.claude/projects/`.
+Pick a session to open it. Click a message to expand it, or press `Enter` for the full detail
+view. Press `?` in any view to see the keys.
 
-Select a session to view the conversation. Click messages to expand tool calls, or open the detail view for full inspection.
+### Efficiency analysis
 
-### Analyze a Claude Code session with Jev
+1. Add your Jev API key: in the desktop app under **Settings → Analytics**; for web mode and the
+   terminal UI, set `JEV_API_KEY` in the backend's environment.
+2. Choose **Analyse efficiency** on a session (`a` in the terminal UI).
+3. Check the redacted payload and confirm.
 
-1. In the desktop app, open **Settings → Analytics** and save your Jev API key to the operating system credential store. In web mode, provide `JEV_API_KEY` in the server environment; the HTTP API deliberately does not accept API-token save or clear requests. The TUI is an HTTP client too, so it reads the key the same way web mode does and cannot store one.
-2. Select **Analyse efficiency** on a session. In the TUI, press `a` on a session row; `,` opens the same analytics settings.
-3. Review the locally redacted payload and explicitly confirm before it is sent.
-4. Use the efficiency dashboard and trace annotations to inspect Jev's findings. The TUI shows live analysis progress and the score on the session row; the dashboard itself is desktop and web only.
+Results are cached per session and marked stale when the session changes.
 
-The default minimized mode sends extracted behavioural signals and selected excerpts. Full-transcript mode is available when more context is needed. Re-analysis replaces the previous result for that session, and API tokens are never written to the settings file.
+### Calling the API
 
-In desktop mode, click **Open in Browser** in the toolbar to switch to browser mode. This opens `http://localhost:1420` in your default browser and hides the desktop window.
-
-If you installed the pre-built `.app`, `.deb`, or `.msi`, you can also launch the desktop app directly and pass `--web` to the binary:
-
-```bash
-# macOS
-/Applications/Claude\ Code\ Trace.app/Contents/MacOS/claude-code-trace --web
-```
-
-### API access
-
-The local HTTP API (port 11423) only answers **accepted clients**: every caller presents its own
-signed credential, so the backend knows who is asking and any one client can be revoked without
-affecting the rest. The web UI and the TUI are registered automatically (`web-ui`, `tui`); the
-desktop app talks over IPC and needs nothing. Settings → **Accepted clients** lists them and lets you
-add, reissue or revoke clients. For your own scripts, add a client there and copy its credential
-(shown once), or bootstrap from the TUI's file in the config dir (`~/.config/claude-code-trace`;
-macOS: `~/Library/Application Support/claude-code-trace`, Windows: `%APPDATA%\claude-code-trace`):
+Add a client under **Settings → Accepted clients** and copy its token (shown once), or use the
+terminal UI's token file:
 
 ```bash
 curl -H "X-CCTrace-Token: $(cat ~/.config/claude-code-trace/clients/tui.jwt)" \
   http://127.0.0.1:11423/api/whoami
 ```
 
-Set `CCTRACE_API_AUTH=off` to disable the check.
-
-> **Note:** The TUI is functional but has a few UX rough edges. Contributions are welcome.
-
-## MCP tool call support
-
-MCP (Model Context Protocol) tool calls are automatically detected and displayed with human-friendly names.
-
-For example, `mcp__chrome-devtools__take_screenshot` renders as **MCP chrome-devtools** with the summary `take screenshot`.
-
-Supported MCP servers include chrome-devtools, figma, atlassian, buildkite, cloudflare, and any other server following the `mcp__<server>__<tool>` naming convention.
-
-## Keybindings
-
-`?` toggles keybind hints in any view.
-
-### List view
-
-| Key               | Action                                 |
-| ----------------- | -------------------------------------- |
-| `j` / `k`         | Move cursor down / up                  |
-| `G` / `g`         | Jump to last / first message           |
-| `Tab`             | Toggle expand/collapse current message |
-| `e` / `c`         | Expand / collapse all Claude messages  |
-| `Enter`           | Open detail view                       |
-| `d`               | Open debug log viewer                  |
-| `t`               | Open team task board when teams exist  |
-| `s` / `q` / `Esc` | Open session picker                    |
-
-### Detail view
-
-| Key         | Action                         |
-| ----------- | ------------------------------ |
-| `j` / `k`   | Navigate items                 |
-| `Tab`       | Toggle expand/collapse item    |
-| `Enter`     | Open subagent or toggle expand |
-| `h` / `l`   | Switch panels left / right     |
-| `q` / `Esc` | Back to list                   |
-
-### Session picker
-
-| Key         | Action                |
-| ----------- | --------------------- |
-| `j` / `k`   | Navigate sessions     |
-| `Enter`     | Open selected session |
-| `q` / `Esc` | Back to list          |
-
-### Debug log viewer
-
-| Key         | Action       |
-| ----------- | ------------ |
-| `q` / `Esc` | Back to list |
+The config folder is `~/Library/Application Support/claude-code-trace` on macOS and
+`%APPDATA%\claude-code-trace` on Windows. Set `CCTRACE_API_AUTH=off` to turn the check off.
 
 ## Development
 
 ```bash
 npm install
 npm run tauri dev        # desktop app with hot reload
-npm run dev:web          # web mode, no desktop window
-npm run dev:tui          # TUI, starts backend + terminal UI together
-npm run tauri build      # production build
+npm run dev:web          # web app
+npm run dev:tui          # backend + terminal UI
+npm run check            # types, lint, format and all tests
+npm run test:e2e         # Playwright, real backend + browser
 ```
 
-### Check and test
-
-```bash
-npm run check            # run all checks at once
-npx vitest run           # frontend tests
-npm run test:e2e         # Playwright end-to-end (builds the headless backend + web UI, drives Chromium)
-cargo test --manifest-path src-tauri/Cargo.toml    # Rust tests
-npx tsc --noEmit         # TypeScript type check
-npx oxlint               # JS/TS lint
-npx oxfmt                # JS/TS format
-cargo clippy --manifest-path src-tauri/Cargo.toml  # Rust lint
-cargo fmt --manifest-path src-tauri/Cargo.toml     # Rust format
-```
-
-## Release
-
-Push a version tag to trigger a GitHub Actions build:
-
-```bash
-git tag v0.4.0
-git push origin v0.4.0
-```
-
-This creates a draft release with macOS, Linux, and Windows artifacts attached. Review and publish it from the [Releases](https://github.com/delexw/claude-code-trace/releases) page.
-
-## Contributing
-
-Bug reports, feature requests, and pull requests are welcome. See [Development](#development) for how to build and run locally. For significant changes, open an issue first to align on scope.
+Issues and pull requests are welcome. For bigger changes, open an issue first.
 
 ## License
 

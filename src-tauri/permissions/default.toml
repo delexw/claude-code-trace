@@ -24,6 +24,8 @@ permissions = [
   "allow-analytics",
   "allow-switch-to-browser",
   "allow-focus-session-window",
+  "allow-set-plugin-enabled",
+  "allow-antigravity",
 ]
 
 [[permission]]
@@ -156,3 +158,8 @@ commands.allow = ["switch_to_browser"]
 identifier = "allow-focus-session-window"
 description = "Allow focusing a live session's terminal window"
 commands.allow = ["focus_session_window"]
+
+[[permission]]
+identifier = "allow-set-plugin-enabled"
+description = "Allow turning a session-source plugin on or off"
+commands.allow = ["set_plugin_enabled"]

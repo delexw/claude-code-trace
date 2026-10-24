@@ -6,6 +6,9 @@
 //! `Command <name> not allowed by ACL` — the bug that hit `set_wsl_distros` when
 //! the WSL feature added the handler but forgot the matching `commands.allow`
 //! entry. The check runs in both directions so a stale ACL grant is caught too.
+//!
+//! `[[permission]]` blocks are read from every file in `permissions/`, since a
+//! source plugin keeps its own (e.g. `permissions/antigravity.toml`).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -48,10 +51,28 @@ fn default_permission_set() -> BTreeSet<String> {
     quoted_strings(&after[..end])
 }
 
+/// The text of every `.toml` file in `permissions/`.
+fn all_permission_files() -> String {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("permissions");
+    let mut files: Vec<_> = std::fs::read_dir(&dir)
+        .expect("permissions/ readable")
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "toml"))
+        .collect();
+    files.sort();
+    files
+        .iter()
+        .map(|path| std::fs::read_to_string(path).expect("permission file readable"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// Map of each `[[permission]]` identifier to the commands it allows.
 fn permission_blocks() -> BTreeMap<String, BTreeSet<String>> {
     let mut map = BTreeMap::new();
-    for chunk in DEFAULT_TOML.split("[[permission]]").skip(1) {
+    let text = all_permission_files();
+    for chunk in text.split("[[permission]]").skip(1) {
         let Some(id_line) = chunk
             .lines()
             .find(|l| l.trim_start().starts_with("identifier"))
@@ -116,4 +137,18 @@ fn wsl_commands_are_acl_granted() {
         granted.contains("set_wsl_distros"),
         "set_wsl_distros must be ACL-granted"
     );
+}
+
+#[test]
+fn plugin_permission_files_are_granted_by_default() {
+    let granted = acl_granted_commands();
+    for command in [
+        "set_plugin_enabled",
+        "list_antigravity_folders",
+        "get_antigravity_settings",
+        "set_antigravity_root",
+        "load_antigravity_session",
+    ] {
+        assert!(granted.contains(command), "{command} must be ACL-granted");
+    }
 }

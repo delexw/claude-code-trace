@@ -18,6 +18,11 @@ import { PLUGIN_ROUTES } from "../plugins/routes";
 /** Declarative mapping from the app's own Tauri command names to HTTP endpoints. */
 const coreRoutes: RouteTable = {
   get_settings: { path: "/api/settings" },
+  set_plugin_enabled: {
+    method: "POST",
+    path: "/api/plugins/enabled",
+    body: (a) => ({ id: a.id, enabled: a.enabled }),
+  },
   get_analytics_settings: { path: "/api/analytics/settings" },
   set_analytics_settings: {
     method: "POST",

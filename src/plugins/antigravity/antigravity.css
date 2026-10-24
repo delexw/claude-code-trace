@@ -1,0 +1,64 @@
+.antigravity__icon {
+  width: 15px;
+  height: 15px;
+  display: block;
+}
+
+.antigravity-section__badge {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  white-space: nowrap;
+  background: linear-gradient(135deg, #1a73e8 0%, #34a853 100%);
+  color: #ffffff;
+}
+
+.antigravity-section__card {
+  border-left-color: rgba(26, 115, 232, 0.4);
+}
+
+.antigravity-section__card:hover {
+  background: rgba(26, 115, 232, 0.06);
+}
+
+/* A card has one fact (its time), so pin it right where a Claude card's time sits. */
+.antigravity-section__meta {
+  justify-content: flex-end;
+}
+
+/* Per-step border colours, so each step type stays scannable. */
+.message--ag-tool {
+  border-left-color: #8b5cf6;
+  background: rgba(139, 92, 246, 0.04);
+}
+
+.message--ag-file {
+  border-left-color: #06b6d4;
+}
+
+.message--ag-search {
+  border-left-color: #f59e0b;
+}
+
+.message--ag-context {
+  border-left-color: #64748b;
+  background: rgba(100, 116, 139, 0.05);
+  opacity: 0.9;
+}
+
+.antigravity-empty {
+  padding: 32px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.antigravity-empty code {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  background: var(--bg-elevated);
+  padding: 1px 6px;
+  border-radius: 3px;
+}

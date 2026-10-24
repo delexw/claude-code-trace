@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { DisplayMessage } from "../types";
 import { shortModel, formatExactTime, firstNLines } from "../lib/format";
 import { getModelColor } from "../lib/theme";
@@ -15,6 +16,18 @@ interface MessageItemProps {
   /** Whether this message is currently being processed */
   isOngoing?: boolean;
   ref?: React.Ref<HTMLDivElement>;
+  /** How a plugin draws this row instead of the look derived from `role`. */
+  roleStyle?: RoleStyle;
+}
+
+/** A source plugin's look for one message row. */
+export interface RoleStyle {
+  /** Modifier class on the row, e.g. `message--tool`. */
+  className: string;
+  label: string;
+  /** Suffix of the `message__role--*` class on the label. */
+  modifier: string;
+  icon?: ReactNode;
 }
 
 function roleClass(msg: DisplayMessage): string {
@@ -48,8 +61,9 @@ export function MessageItem({
   onClick,
   onOpenDetail,
   isOngoing,
+  roleStyle,
 }: MessageItemProps) {
-  const rc = roleClass(msg);
+  const rc = roleStyle?.className ?? roleClass(msg);
   const model = msg.model ? shortModel(msg.model) : "";
   const modelColor = msg.model ? getModelColor(msg.model) : undefined;
   const time = formatExactTime(msg.timestamp);
@@ -65,18 +79,21 @@ export function MessageItem({
     >
       <div className="message__header">
         <span className="message__role-icon">
-          {msg.role === "claude" ? (
-            <ClaudeIcon className="message__claude-icon" />
-          ) : msg.role === "user" ? (
-            <UserIcon />
-          ) : msg.is_error ? (
-            <WarningIcon />
-          ) : (
-            <SystemIcon />
-          )}
+          {roleStyle?.icon ??
+            (msg.role === "claude" ? (
+              <ClaudeIcon className="message__claude-icon" />
+            ) : msg.role === "user" ? (
+              <UserIcon />
+            ) : msg.is_error ? (
+              <WarningIcon />
+            ) : (
+              <SystemIcon />
+            ))}
         </span>
-        <span className={`message__role message__role--${roleCssModifier(msg)}`}>
-          {roleLabel(msg)}
+        <span
+          className={`message__role message__role--${roleStyle?.modifier ?? roleCssModifier(msg)}`}
+        >
+          {roleStyle?.label ?? roleLabel(msg)}
         </span>
         {model && (
           <span className="message__model" style={{ color: modelColor }}>

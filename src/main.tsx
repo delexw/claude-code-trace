@@ -2,8 +2,8 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { openUrl } from "./lib/openUrl";
 import { applyFontScale, readStoredFontScale } from "./lib/fontScale";
-import { App } from "./App";
 import "./styles/global.css";
+import { App } from "./App";
 
 // Apply the persisted scale before React mounts. Virtualized lists measure
 // themselves during mount and must see the final zoom from their first frame.

@@ -106,6 +106,16 @@ async def _post(path: str, body: object = None) -> object:
         return None
 
 
+async def get_json(path: str) -> object:
+    """GET one of the backend's endpoints, for a plugin's own routes."""
+    return await _get(path)
+
+
+async def post_json(path: str, body: object = None) -> object:
+    """POST to one of the backend's endpoints, for a plugin's own routes."""
+    return await _post(path, body)
+
+
 async def get_settings() -> dict:
     """The backend's settings, including which source plugins are enabled."""
     data = await _get("/api/settings")
