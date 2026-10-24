@@ -3,6 +3,60 @@
 All notable changes to claude-code-trace are documented here. Versions follow
 [semantic versioning](https://semver.org/).
 
+## [0.19.0] — 2026-10-24
+
+Claude Code Trace is no longer only about Claude Code. Each place sessions come from is now a
+plugin, and the first new one reads Google Antigravity conversations next to your Claude Code
+sessions. This release also makes the macOS download open properly, lets the terminal UI run
+efficiency analysis, and fixes how several newer Claude Code log shapes are shown.
+
+### Added
+
+- **Antigravity sessions** ([`742b6ce`](https://github.com/delexw/claude-code-trace/commit/742b6ce), @aljorypro-arch). Turn on **Settings → General →
+  Sources → Antigravity** and the picker lists your Google Antigravity "brain" conversations
+  alongside Claude Code sessions. They open in the same message list and detail view, with each
+  step keeping its own label and colour (View File, Grep Search, MCP Tool and so on). It is
+  read-only, off by default, and can point at a custom brain directory. Ported from
+  @aljorypro-arch's original pull request.
+- **Source filter and plugin switches** ([`742b6ce`](https://github.com/delexw/claude-code-trace/commit/742b6ce)). Each session source is now a plugin
+  that can be switched on or off in Settings without a reload. With more than one on, the picker
+  gets an All / per-source filter that is remembered on each device.
+- **macOS app opens instead of showing "damaged"** ([`4959dc6`](https://github.com/delexw/claude-code-trace/commit/4959dc6)). The app is now ad-hoc
+  signed, so a browser-downloaded copy shows the usual "can't verify the developer" prompt, with
+  **Open Anyway** in Privacy & Security. Releases include a `.dmg` again, next to the
+  `.app.tar.gz` the one-line installer uses.
+- **Efficiency analysis in the terminal UI** ([`784e447`](https://github.com/delexw/claude-code-trace/commit/784e447)). Press `a` on a session to run a
+  Jev analysis and watch its progress; `,` opens the analytics settings. A progress strip also
+  shows how far the initial session scan has got, so a large scan no longer looks like a hang.
+- **Thinking balance score** ([`d866b8e`](https://github.com/delexw/claude-code-trace/commit/d866b8e)). The efficiency analysis now rates whether the
+  amount of extended thinking matched the task, and says whether there was too much or too little.
+- **Clear errors when an analysis fails** ([`8495b15`](https://github.com/delexw/claude-code-trace/commit/8495b15)). A failed analysis now says why on
+  the session, in the web app and the terminal UI, instead of only offering Retry.
+
+### Fixed
+
+- **`auto` and `dontAsk` permission modes** ([`f8650a8`](https://github.com/delexw/claude-code-trace/commit/f8650a8), @monsterlag). Both now get their
+  own labelled, coloured pill in the info bar instead of a generic one, and `dontAsk` no longer
+  shows as raw camelCase.
+- **User text shown as written** ([`a0ddae8`](https://github.com/delexw/claude-code-trace/commit/a0ddae8), @monsterlag). Your own messages in the
+  detail view are no longer rendered as Markdown, so `#` in a pasted log stays a `#` instead of
+  turning into a heading.
+- **Loop and scheduled wakeups** ([`0c560fa`](https://github.com/delexw/claude-code-trace/commit/0c560fa)). Prompts re-sent by `/loop` or a scheduled
+  task are shown again; they were being dropped as hidden system entries.
+- **Interrupted or denied tool calls** ([`fec4aaf`](https://github.com/delexw/claude-code-trace/commit/fec4aaf)). A tool call that was cut off by a crash
+  or denied is now marked as such, instead of looking like an ordinary tool failure.
+- **Orphaned tool results** ([`b5b0034`](https://github.com/delexw/claude-code-trace/commit/b5b0034)). A tool result left without its matching call (as
+  Claude Code's transcript self-repair can do) now shows as a tool result, not as a reply from
+  Claude.
+- **Subagent hand-back reports** ([`2a55852`](https://github.com/delexw/claude-code-trace/commit/2a55852)). The framing Claude Code wraps around a
+  subagent's report is removed, so the Task/Agent result shows just the report.
+- **More accurate efficiency inputs** ([`32b26f1`](https://github.com/delexw/claude-code-trace/commit/32b26f1)). Repeated tool calls are matched by what
+  they actually did, subagents are counted correctly, and the excerpts sent for analysis include
+  successful replies as well as failures.
+- **Newer Claude Code versions** ([`865a06b`](https://github.com/delexw/claude-code-trace/commit/865a06b)). Sessions from Claude Code v2.1.267 to
+  v2.1.285 were checked against the parser, including Bash results that carry file diffs; no
+  display changes were needed beyond the fixes above.
+
 ## [0.18.0] — 2026-09-20
 
 Claude Code Trace can now tell you how well an agent session went, not just what happened in it.
@@ -89,6 +143,7 @@ said yes. The whole feature is optional, marked beta, and off until you configur
 > in Claude Code Trace, which is an independent open-source project and not an official TypeSafe AI
 > integration.
 
+[0.19.0]: https://github.com/delexw/claude-code-trace/releases/tag/v0.19.0
 [0.18.0]: https://github.com/delexw/claude-code-trace/releases/tag/v0.18.0
 
 ## [0.17.0] — 2026-09-18
