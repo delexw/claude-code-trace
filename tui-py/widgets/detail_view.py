@@ -77,7 +77,9 @@ def _stats_text_parts(msg: DisplayMessage) -> list[tuple[str, str]]:
 
 def _render_msg_title(msg: DisplayMessage, depth: int, ongoing: bool, anim_frame: int = 0) -> str:
     """Build a Rich markup string for the message Collapsible title."""
-    role_name = "Claude" if msg.role == "claude" else "User" if msg.role == "user" else "System"
+    role_name = msg.role_label or (
+        "Claude" if msg.role == "claude" else "User" if msg.role == "user" else "System"
+    )
     icon = role_icon(msg.role)
     border_clr = get_role_border_color(msg.role, msg.is_error)
     role_clr = (

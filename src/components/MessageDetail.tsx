@@ -61,6 +61,12 @@ interface MessageDetailProps {
   ongoing?: boolean;
   onBack: () => void;
   viewActionsRef: ViewActionsRef;
+  /** A source plugin's title for this message; omitted → derived from `role`. */
+  roleLabel?: string;
+  /** Whether to suggest `claude --debug` for hook events; only meaningful for Claude transcripts. */
+  debugHint?: boolean;
+  /** Shown when the message has no text and no items; omitted → nothing is shown. */
+  emptyNotice?: string;
 }
 
 // Defined at module scope (not inside MarkdownRenderer's render) so the component
@@ -94,6 +100,9 @@ export function MessageDetail({
   ongoing,
   onBack,
   viewActionsRef,
+  roleLabel,
+  debugHint = true,
+  emptyNotice,
 }: MessageDetailProps) {
   const {
     set: expandedItems,
@@ -198,7 +207,7 @@ export function MessageDetail({
     (i) => i.item_type === "ToolCall" || i.item_type === "Subagent",
   );
   const hasHookEvents = msg.items.some((i) => i.item_type === "HookEvent");
-  const showDebugHint = hasToolCalls && !hasHookEvents;
+  const showDebugHint = debugHint && hasToolCalls && !hasHookEvents;
 
   // Stack manipulation
   const openSubagentFromMain = useCallback(
@@ -377,7 +386,8 @@ export function MessageDetail({
         <div className="message-detail__header">
           <BackButton onClick={onBack} />
           <span className="message-detail__title">
-            {msg.role === "user" ? "User" : msg.role === "claude" ? "Claude" : "System"}
+            {roleLabel ??
+              (msg.role === "user" ? "User" : msg.role === "claude" ? "Claude" : "System")}
           </span>
           {model && (
             <span style={{ color: modelColor, fontWeight: 600, fontSize: 12 }}>{model}</span>
@@ -404,6 +414,9 @@ export function MessageDetail({
 
         <div className="message-detail__body" ref={bodyRef}>
           <div className="message-detail__content">
+            {emptyNotice && !hasItems && !msg.content.trim() && (
+              <div className="message-detail__empty">{emptyNotice}</div>
+            )}
             {msg.content && !hasInlineProse && (
               <div
                 className={`message-detail__text${msg.role === "user" ? " message-detail__text--user" : ""}`}

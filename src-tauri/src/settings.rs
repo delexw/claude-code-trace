@@ -15,6 +15,14 @@ pub struct Settings {
     /// and the `CCTRACE_ALLOWED_ORIGINS` env var — see `http_api::build_cors`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allowed_origins: Vec<String>,
+    /// Per-plugin settings, keyed by plugin id: whether it is on, plus the
+    /// plugin's own keys. See `crate::plugins::config`.
+    #[serde(
+        default,
+        skip_serializing_if = "std::collections::BTreeMap::is_empty",
+        deserialize_with = "crate::plugins::config::deserialize_plugin_configs"
+    )]
+    pub plugins: std::collections::BTreeMap<String, crate::plugins::config::PluginConfig>,
 }
 
 /// Env var that relocates the whole per-user config directory (`settings.json`,

@@ -20,7 +20,10 @@ Session sources are plugins (`tui-py/plugins/<id>/`, registry in `tui-py/plugins
 see [15-session-source-plugins.md](15-session-source-plugins.md)). The methods this spec names
 for loading and live updates — `_load_session`, `on_session_update`, `on_picker_refresh`,
 `on_index_progress`, `on_efficiency_update` — live on `ClaudePlugin`
-(`plugins/claude/plugin.py`); `app.CCTraceApp` is the source-agnostic shell.
+(`plugins/claude/plugin.py`); `app.CCTraceApp` is the source-agnostic shell. `AntigravityPlugin`
+(`plugins/antigravity/`) adds an Antigravity section to the picker when that plugin is on; its
+steps are converted to `DisplayMessage` with `role_label` set, which the message list and detail
+view show in place of "Claude"/"User"/"System".
 ---
 
 ## Architecture

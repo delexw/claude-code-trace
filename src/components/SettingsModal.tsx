@@ -33,6 +33,8 @@ function formatDate(unixSeconds: number): string {
 interface SettingsModalProps {
   onClose: () => void;
   onSaved: () => void;
+  /** A plugin was turned on or off; `settings` is the backend's answer. */
+  onPluginsChanged?: (settings: SettingsResponse) => void;
   /** Current global UI zoom level (1 = 100%). */
   fontScale: number;
   /** Apply a new zoom level immediately (also persisted by the caller). */
@@ -70,6 +72,7 @@ function parseOrigins(text: string): string[] {
 export function SettingsModal({
   onClose,
   onSaved,
+  onPluginsChanged,
   fontScale,
   onFontScaleChange,
   recapPreview,
@@ -126,6 +129,24 @@ export function SettingsModal({
     [panelHandles],
   );
   const clearError = useCallback(() => setError(""), []);
+  const [togglingPlugin, setTogglingPlugin] = useState<string | null>(null);
+  const togglePlugin = useCallback(
+    async (id: string, enabled: boolean) => {
+      setTogglingPlugin(id);
+      setError("");
+      try {
+        const res = await invoke<SettingsResponse>("set_plugin_enabled", { id, enabled });
+        applyResponse(res);
+        onPluginsChanged?.(res);
+      } catch (err) {
+        setError(String(err));
+      } finally {
+        setTogglingPlugin(null);
+      }
+    },
+    [applyResponse, onPluginsChanged],
+  );
+  const optionalPlugins = (settings?.plugins ?? []).filter((plugin) => plugin.can_disable);
 
   const handleSave = useCallback(async () => {
     setSaving(true);
@@ -305,6 +326,35 @@ export function SettingsModal({
             </button>
           ))}
         </div>
+        {activeTab === "general" && optionalPlugins.length > 0 && (
+          <>
+            <label className="settings-modal__label">Sources</label>
+            <p className="settings-modal__hint">
+              Where sessions come from besides Claude Code. A source that is off is hidden
+              everywhere.
+            </p>
+            {optionalPlugins.map((plugin) => (
+              <div key={plugin.id} className="settings-modal__source">
+                <span className="settings-modal__source-name">{plugin.label}</span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={plugin.enabled}
+                  aria-label={`Show ${plugin.label} sessions`}
+                  className={`settings-modal__toggle${plugin.enabled ? " settings-modal__toggle--on" : ""}`}
+                  onClick={() => void togglePlugin(plugin.id, !plugin.enabled)}
+                  disabled={togglingPlugin === plugin.id}
+                >
+                  <span className="settings-modal__toggle-knob" />
+                  <span className="settings-modal__toggle-label">
+                    {plugin.enabled ? "On" : "Off"}
+                  </span>
+                </button>
+              </div>
+            ))}
+          </>
+        )}
+
         {/* Kept mounted on every tab so unsaved edits survive a tab switch and Save
             from any tab still saves them, as the rest of this modal's fields do. */}
         <div style={{ display: activeTab === "general" ? "contents" : "none" }}>

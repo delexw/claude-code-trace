@@ -96,7 +96,7 @@ def _render_message(
     if msg.role == "system":
         t = Text()
         t.append(
-            f"{ICON_HRULE * 2} $ System · {truncate(msg.content, 80)} {ICON_HRULE * 2}",
+            f"{ICON_HRULE * 2} $ {msg.role_label or 'System'} · {truncate(msg.content, 80)} {ICON_HRULE * 2}",
             style=theme.TEXT_MUTED,
         )
         return t
@@ -127,7 +127,7 @@ def _render_message(
 
     # ── Header row: role · model · spin · position on left; stats on right ──
     icon = role_icon(msg.role)
-    role_name = "Claude" if msg.role == "claude" else "User"
+    role_name = msg.role_label or ("Claude" if msg.role == "claude" else "User")
 
     left = Text()
     left.append(f"{icon} ", style=f"bold {border_clr}")

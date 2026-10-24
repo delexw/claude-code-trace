@@ -3,7 +3,7 @@ import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { useRegisterViewActions, type ViewActionsRef } from "../hooks/useViewActions";
 import { mergeOverlappingEfficiencyFindings } from "../lib/efficiencyFindings";
 import type { DisplayMessage, EfficiencyFinding } from "../types";
-import { MessageItem } from "./MessageItem";
+import { MessageItem, type RoleStyle } from "./MessageItem";
 
 const NO_FINDINGS: EfficiencyFinding[] = [];
 
@@ -33,6 +33,7 @@ interface MessageRowContext {
   onClick: (index: number) => void;
   onOpenDetail: (index: number) => void;
   findings: EfficiencyFinding[];
+  rowRoleStyle?: (index: number) => RoleStyle | undefined;
 }
 
 /** Placeholder for a row whose body hasn't been fetched yet. Uses the role from
@@ -79,6 +80,7 @@ function renderMessageRow(index: number, _data: unknown, ctx: MessageRowContext)
         onClick={ctx.onClick}
         onOpenDetail={ctx.onOpenDetail}
         isOngoing={index === ctx.lastIndex && ctx.ongoing}
+        roleStyle={ctx.rowRoleStyle?.(index)}
       />
     </>
   );
@@ -103,6 +105,8 @@ interface MessageListProps {
   onExpandAll: () => void;
   onCollapseAll: () => void;
   findings?: EfficiencyFinding[];
+  /** A source plugin's look per row; omitted → each row derives its look from `role`. */
+  rowRoleStyle?: (index: number) => RoleStyle | undefined;
 }
 
 export function MessageList({
@@ -120,6 +124,7 @@ export function MessageList({
   onExpandAll,
   onCollapseAll,
   findings = NO_FINDINGS,
+  rowRoleStyle,
 }: MessageListProps) {
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const mergedFindings = useMemo(() => mergeOverlappingEfficiencyFindings(findings), [findings]);
@@ -217,6 +222,7 @@ export function MessageList({
         onClick: handleClick,
         onOpenDetail,
         findings: mergedFindings,
+        rowRoleStyle,
       }}
       // Stick to the bottom on new/streamed content, but only while the user is
       // already at the bottom (replaces the old near-bottom auto-scroll hook).

@@ -328,7 +328,8 @@ The shared frame: title, the enabled plugins' header totals, the search box, and
 per enabled plugin inside a single scroll container. Claude's section
 (`plugins/claude/ClaudeSessionList.tsx`) groups sessions by date with token/cost stats and
 filters by the search text and the `ProjectTree` selection. The shell owns the search text and
-one selection index across every section.
+one selection index across every section. The source filter in the toolbar can narrow the picker to one
+plugin (see [15-session-source-plugins.md](15-session-source-plugins.md#source-filter-web)).
 
 ---
 

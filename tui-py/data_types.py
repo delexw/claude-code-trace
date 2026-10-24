@@ -102,6 +102,9 @@ class DisplayMessage:
     teammate_spawns: int = 0
     teammate_messages: int = 0
     subagent_label: str = ""
+    # Replaces the role's default name ("Claude", "User", "System") in the list
+    # and detail views, for sources whose steps have names of their own.
+    role_label: str = ""
 
 
 # ---------------------------------------------------------------------------
