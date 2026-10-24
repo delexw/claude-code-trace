@@ -1079,6 +1079,70 @@ body {
   letter-spacing: 0.5px;
 }
 
+/* A plugin's own section of the picker, after the first. */
+.picker__section {
+  margin-top: 12px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.picker__section:first-child {
+  margin-top: 0;
+  border-top: none;
+}
+
+.picker__section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px 4px;
+}
+
+.picker__section-count {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.picker__section-hint {
+  font-size: 10px;
+  color: var(--text-dim);
+  margin-left: auto;
+}
+
+/* Which source the picker shows: All, or one plugin. A segmented control. */
+.picker__sources {
+  display: inline-flex;
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  overflow: hidden;
+  flex: 0 0 auto;
+}
+
+.picker__sources-btn {
+  background: transparent;
+  border: none;
+  border-right: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  padding: 4px 10px;
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.picker__sources-btn:last-child {
+  border-right: none;
+}
+
+.picker__sources-btn:hover,
+.picker__sources-btn--active {
+  background: var(--bg-elevated);
+  color: var(--text-default);
+}
+
+.picker__sources-btn--active {
+  font-weight: 600;
+}
+
 .picker__session {
   display: flex;
   flex-direction: column;
@@ -1657,6 +1721,14 @@ body {
 .message-detail__debug-hint code {
   font-family: var(--font-mono);
   font-size: 11px;
+}
+
+/* Said plainly when a message holds nothing, so the panel does not read as a failed render. */
+.message-detail__empty {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-style: italic;
+  padding: 8px 0;
 }
 
 .message-detail__text {
@@ -3653,6 +3725,19 @@ body {
   background: var(--accent);
   border-color: var(--accent);
   color: #fff;
+}
+
+.settings-modal__source {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.settings-modal__source-name {
+  font-size: 12px;
+  color: var(--text-default);
+  min-width: 120px;
 }
 
 .settings-modal__toggle {

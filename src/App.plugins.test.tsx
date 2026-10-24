@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, within } from "@testing-library/react";
+import { render, screen, fireEvent, within, waitFor } from "@testing-library/react";
 
 const mockInvoke = vi.fn();
 vi.mock("./lib/invoke", async () => {
@@ -18,6 +18,7 @@ vi.mock("./plugins/registry", async () => {
 
 import { App } from "./App";
 import { alpha, beta } from "./test/fakePlugins";
+import { SOURCE_FILTER_KEY } from "./lib/sourceFilter";
 
 function settingsWith(betaEnabled: boolean) {
   return {
@@ -35,13 +36,15 @@ function settingsWith(betaEnabled: boolean) {
 }
 
 function renderApp(betaEnabled: boolean) {
-  mockInvoke.mockImplementation((cmd: string) =>
-    cmd === "get_settings"
-      ? Promise.resolve(settingsWith(betaEnabled))
-      : Promise.resolve(undefined),
-  );
+  mockInvoke.mockImplementation((cmd: string, args?: { enabled: boolean }) => {
+    if (cmd === "get_settings") return Promise.resolve(settingsWith(betaEnabled));
+    if (cmd === "set_plugin_enabled") return Promise.resolve(settingsWith(args!.enabled));
+    return Promise.resolve(undefined);
+  });
   return render(<App />);
 }
+
+const pickerItems = () => screen.queryAllByTestId(/-item$/).map((el) => el.textContent);
 
 const selected = () =>
   screen.getAllByTestId(/-item$/).filter((el) => el.dataset.selected === "true");
@@ -49,6 +52,7 @@ const selected = () =>
 describe("App with session-source plugins", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
   });
 
   it("shows one picker section per enabled plugin, in registry order", async () => {
@@ -121,5 +125,61 @@ describe("App with session-source plugins", () => {
     const modal = await screen.findByText("alpha settings");
     expect(modal).toBeInTheDocument();
     expect(within(document.body).queryByText("beta settings")).toBeNull();
+  });
+
+  it("narrows the picker to one source and remembers the choice", async () => {
+    const { unmount } = renderApp(true);
+    await screen.findByText("beta one");
+
+    fireEvent.click(screen.getByRole("button", { name: "beta" }));
+    expect(pickerItems()).toEqual(["beta one"]);
+    expect(screen.queryByText("alpha stats")).toBeNull();
+
+    unmount();
+    renderApp(true);
+    await screen.findByText("beta one");
+    expect(pickerItems()).toEqual(["beta one"]);
+
+    fireEvent.click(screen.getByRole("button", { name: "All" }));
+    expect(pickerItems()).toEqual(["alpha one", "alpha two", "beta one"]);
+  });
+
+  it("hides the source filter when only one source is on", async () => {
+    renderApp(false);
+    await screen.findByText("alpha one");
+    expect(screen.queryByRole("group", { name: "Show sessions from" })).toBeNull();
+  });
+
+  it("shows every source again when the remembered one is turned off", async () => {
+    localStorage.setItem(SOURCE_FILTER_KEY, "beta");
+    renderApp(false);
+    await screen.findByText("alpha one");
+    expect(pickerItems()).toEqual(["alpha one", "alpha two"]);
+  });
+
+  it("adds and removes a source's sessions when it is switched in Settings", async () => {
+    renderApp(false);
+    await screen.findByText("alpha one");
+    fireEvent.click(screen.getByTitle("Settings"));
+
+    const toggle = await screen.findByRole("switch", { name: "Show beta sessions" });
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    fireEvent.click(toggle);
+
+    expect(await screen.findByText("beta one")).toBeInTheDocument();
+    expect(mockInvoke).toHaveBeenCalledWith("set_plugin_enabled", { id: "beta", enabled: true });
+    await waitFor(() => expect(toggle).toHaveAttribute("aria-checked", "true"));
+
+    fireEvent.click(toggle);
+    await waitFor(() => expect(screen.queryByText("beta one")).toBeNull());
+  });
+
+  it("offers no switch for a source that is always on", async () => {
+    renderApp(true);
+    await screen.findByText("alpha one");
+    fireEvent.click(screen.getByTitle("Settings"));
+
+    await screen.findByRole("switch", { name: "Show beta sessions" });
+    expect(screen.queryByRole("switch", { name: "Show alpha sessions" })).toBeNull();
   });
 });

@@ -16,12 +16,15 @@ import { useKeyboard } from "./hooks/useKeyboard";
 import { useViewActionsRef, useViewActionCallbacks } from "./hooks/useViewActions";
 import { useFontScale } from "./hooks/useFontScale";
 import { useRecapPreview } from "./hooks/useRecapPreview";
+import { useSourceFilter } from "./hooks/useSourceFilter";
+import { ALL_SOURCES } from "./lib/sourceFilter";
 import { SessionPicker } from "./components/SessionPicker";
 import { KeybindBar, PICKER_HINTS } from "./components/KeybindBar";
 import { ViewToolbar } from "./components/ViewToolbar";
 import { ResizeHandle } from "./components/ResizeHandle";
 import { SettingsModal } from "./components/SettingsModal";
 import { BackToMessagesButton } from "./components/BackToMessagesButton";
+import { SourceFilter } from "./components/SourceFilter";
 
 /** Where the main column is: the shared picker, or one of a plugin's views. */
 type Location = { kind: "picker" } | { kind: "view"; plugin: string; view: string };
@@ -43,6 +46,7 @@ export function App() {
   const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTab>("general");
   const [fontScale, setFontScale] = useFontScale();
   const [recapPreview, setRecapPreview] = useRecapPreview();
+  const [sourceFilter, setSourceFilter] = useSourceFilter();
   const [settings, setSettings] = useState<SettingsResponse | null>(null);
   // The plugin whose session "Back to Messages" returns to.
   const [sessionOwner, setSessionOwner] = useState<string | null>(null);
@@ -102,6 +106,24 @@ export function App() {
     runtimesRef.current = runtimes;
   });
 
+  const settingsRef = useRef(settings);
+  useLayoutEffect(() => {
+    settingsRef.current = settings;
+  });
+
+  /** Hand `loaded` to every enabled plugin that `shouldStart` picks. */
+  const startPlugins = useCallback(
+    (loaded: SettingsResponse | null, shouldStart: (plugin: SourcePlugin) => boolean) =>
+      Promise.all(
+        PLUGINS.flatMap((plugin, i) =>
+          isPluginEnabled(plugin, loaded?.plugins) && shouldStart(plugin)
+            ? [runtimesRef.current[i].onSettingsLoaded?.(loaded)]
+            : [],
+        ),
+      ),
+    [],
+  );
+
   // Bootstrap: load settings, then let each enabled plugin start up from them.
   // A 401 means this browser is not an accepted client; every other call would
   // fail the same way, so stop at the banner.
@@ -117,14 +139,19 @@ export function App() {
       // no settings file yet
     }
     setSettings(loaded);
-    await Promise.all(
-      PLUGINS.flatMap((plugin, i) =>
-        isPluginEnabled(plugin, loaded?.plugins)
-          ? [runtimesRef.current[i].onSettingsLoaded?.(loaded)]
-          : [],
-      ),
-    );
-  }, []);
+    await startPlugins(loaded, () => true);
+  }, [startPlugins]);
+
+  // A plugin was turned on or off in Settings: show the new set, and start the
+  // plugins that just came on.
+  const handlePluginsChanged = useCallback(
+    async (next: SettingsResponse) => {
+      const before = settingsRef.current?.plugins;
+      setSettings(next);
+      await startPlugins(next, (plugin) => !isPluginEnabled(plugin, before));
+    },
+    [startPlugins],
+  );
 
   // Auto-discover sessions on mount (once, even under StrictMode's double effect).
   const discoveredRef = useRef(false);
@@ -182,9 +209,20 @@ export function App() {
   };
   const focusSidebar = () => sidebars[0]?.runtime.sidebar?.focus();
 
-  // The picker is one list across every enabled plugin's section; map the
+  // The picker shows every enabled plugin, or just the one the filter picks.
+  const filterMatches = sources.some((s) => s.plugin.id === sourceFilter);
+  const activeFilter = filterMatches ? sourceFilter : ALL_SOURCES;
+  const pickerSources = filterMatches
+    ? sources.filter((s) => s.plugin.id === sourceFilter)
+    : sources;
+  const changeSourceFilter = (filter: string) => {
+    setSourceFilter(filter);
+    setPickerSelectedIndex(0);
+  };
+
+  // The picker is one list across every shown plugin's section; map the
   // shared selection onto (section, index within it).
-  const sections = sources.map((s) => s.runtime.picker);
+  const sections = pickerSources.map((s) => s.runtime.picker);
   const pickerTotal = sections.reduce((sum, section) => sum + section.count, 0);
   const openPickerItem = (index: number) => {
     let offset = 0;
@@ -228,12 +266,12 @@ export function App() {
         <SessionPicker
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
-          headerStats={sources.map((s) => (
+          headerStats={pickerSources.map((s) => (
             <Fragment key={s.plugin.id}>{s.runtime.picker.headerStats}</Fragment>
           ))}
           viewActionsRef={viewActionsRef}
         >
-          {sources.map((s) => {
+          {pickerSources.map((s) => {
             const sectionOffset = offset;
             const { count } = s.runtime.picker;
             offset += count;
@@ -268,9 +306,18 @@ export function App() {
 
       <ViewToolbar
         left={
-          activeView
-            ? activeView.toolbarLeft
-            : owner?.hasOpenSession && <BackToMessagesButton onClick={backToSession} />
+          activeView ? (
+            activeView.toolbarLeft
+          ) : (
+            <>
+              {owner?.hasOpenSession && <BackToMessagesButton onClick={backToSession} />}
+              <SourceFilter
+                sources={sources.map((s) => ({ id: s.plugin.id, label: s.plugin.label }))}
+                value={activeFilter}
+                onChange={changeSourceFilter}
+              />
+            </>
+          )
         }
         collapsible={activeView?.collapsible ?? false}
         onExpandAll={expandAll}
@@ -306,6 +353,7 @@ export function App() {
         <SettingsModal
           onClose={() => setShowSettings(false)}
           onSaved={handleSettingsSaved}
+          onPluginsChanged={(next) => void handlePluginsChanged(next)}
           fontScale={fontScale}
           onFontScaleChange={setFontScale}
           recapPreview={recapPreview}

@@ -151,6 +151,98 @@ The same rule on every surface: a plugin that cannot be disabled is always on; a
 on only when `get_settings().plugins` reports it `enabled: true`. A backend that does not report
 `plugins` therefore never has an optional plugin's routes called.
 
+## Turning plugins on and off
+
+- `settings.json` stores `plugins.<id>.enabled` (plus the plugin's own keys under `plugins.<id>`).
+  A plugin with no stored value uses its descriptor's `enabled_by_default`.
+- `set_plugin_enabled { id, enabled }` (HTTP `POST /api/plugins/enabled`) saves the flag and
+  returns the full settings response. Unknown ids, and turning off a plugin with
+  `can_disable: false`, are errors.
+- Settings → General lists every plugin that can be disabled with an on/off switch. Turning one
+  on or off swaps in the returned settings, so its picker section, views and settings panel appear
+  or disappear without a reload; a plugin that just came on gets `onSettingsLoaded` to start up.
+  The terminal UI reads the flags at start-up.
+
+## Source filter (web)
+
+When two or more plugins are on, the picker toolbar shows an All / one-per-plugin selector
+(`components/SourceFilter.tsx`). Picking a plugin shows only its picker section and header totals;
+the choice is kept in `localStorage` (`cct.sourceFilter`, per device like other UI-only prefs). A
+remembered plugin that is no longer on falls back to All. Changing the filter resets the picker
+selection to the first item.
+
+## Plugin: `antigravity`
+
+Read-only viewer for Google Antigravity (Gemini IDE) "brain" conversations,
+`<root>/<uuid>/.system_generated/logs/transcript.jsonl`. Off by default; can be disabled.
+
+Brain roots, in order: the user's override (`plugins.antigravity.root`), `$GEMINI_HOME/<flavor>/brain`,
+then `~/.gemini/<flavor>/brain` for each flavor in `["antigravity-ide", "antigravity"]`. Folders
+from every existing root are merged and de-duplicated by `uuid`.
+
+| Command (Tauri)                                     | HTTP                            | Returns                                                                        |
+| --------------------------------------------------- | ------------------------------- | ------------------------------------------------------------------------------ |
+| `list_antigravity_folders`                          | `GET /api/antigravity/folders`  | `AntigravityBrainFolder[]`, newest first; `[]` while disabled                  |
+| `get_antigravity_settings`                          | `GET /api/antigravity/settings` | `{ root: string \| null, roots: BrainRoot[] }`                                 |
+| `set_antigravity_root { path: string \| null }`     | `POST /api/antigravity/root`    | same as `get_antigravity_settings`; a path that is not a directory is an error |
+| `load_antigravity_session { path, start?, limit? }` | `POST /api/antigravity/session` | `AntigravityWindow` (`limit` omitted = whole conversation, `0` = index only)   |
+
+```ts
+interface BrainRoot {
+  flavor: string;
+  path: string;
+  exists: boolean;
+} // flavor "custom" for the override
+interface AntigravityBrainFolder {
+  uuid: string;
+  path: string;
+  mod_time_ms: number;
+  title: string | null;
+  flavor: string;
+  has_transcript: boolean;
+}
+interface AntigravityToolCall {
+  name: string;
+  summary: string;
+  input: string;
+}
+interface AntigravityMessage {
+  step_index: number;
+  role:
+    | "user"
+    | "assistant"
+    | "tool"
+    | "file"
+    | "search"
+    | "error"
+    | "checkpoint"
+    | "context"
+    | "system";
+  content: string;
+  created_at: string | null;
+  tool_calls: AntigravityToolCall[];
+  thinking_text: string | null;
+  error_text: string | null;
+  duration_ms: number;
+}
+interface AntigravityWindow {
+  messages: AntigravityMessage[];
+  count: number;
+  start: number;
+  roles: string[];
+  total_rows: number;
+}
+```
+
+- Only folders with `has_transcript` are listed in the picker; the rest are artifact folders.
+- Each step keeps its own label and colour (`MCP Tool`, `View File`, `Grep Search`, ...) in the
+  message list and detail view: web passes a `RoleStyle` through `MessageList.rowRoleStyle` and
+  `MessageDetail.roleLabel`; the TUI sets `DisplayMessage.role_label`. Neither surface shows
+  Claude-only hints (token counts, the debug-log hint) for these steps.
+- Steps that record nothing (no content, thought, tool call or error) are left out of `count`.
+- Each transcript gets a byte-offset index cached in the app's config dir, so opening a large
+  conversation does not re-parse it whole. Nothing is ever written under a brain root.
+
 ## Adding a plugin
 
 1. Rust: `src-tauri/src/plugins/<id>/` implementing `SourcePlugin`; add it to `PLUGINS`; list its

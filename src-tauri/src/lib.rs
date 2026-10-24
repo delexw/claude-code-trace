@@ -115,8 +115,14 @@ fn run_desktop(args: &[String]) {
             plugins::claude::commands::git::get_git_info,
             plugins::claude::commands::debug::get_debug_log,
             plugins::claude::commands::terminal::focus_session_window,
+            // Antigravity source plugin
+            plugins::antigravity::commands::list_antigravity_folders,
+            plugins::antigravity::commands::get_antigravity_settings,
+            plugins::antigravity::commands::set_antigravity_root,
+            plugins::antigravity::commands::load_antigravity_session,
             // Core
             commands::settings::get_settings,
+            commands::settings::set_plugin_enabled,
             commands::settings::set_projects_dir,
             commands::wsl::list_wsl_distros,
             commands::wsl::set_wsl_distros,

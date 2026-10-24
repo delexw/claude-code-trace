@@ -11,6 +11,7 @@ import {
   isDefaultMode,
   contextPercent,
   formatExactTime,
+  formatMsTimestamp,
   groupByDate,
   truncate,
   firstLine,
@@ -398,6 +399,39 @@ describe("formatExactTime", () => {
     // January 5 at 3:04:07 UTC
     const result = formatExactTime("2024-01-05T03:04:07Z");
     expect(result).toMatch(/^\d{4}-01-05 \d{2}:\d{2}:\d{2}$/);
+  });
+
+  it("returns empty for an epoch-milliseconds string", () => {
+    // The reason `formatMsTimestamp` exists: `new Date("1778123456789")` is an
+    // Invalid Date, so handing a numeric epoch to the string parser renders
+    // nothing at all — silently.
+    expect(formatExactTime("1778123456789")).toBe("");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// formatMsTimestamp
+// ---------------------------------------------------------------------------
+describe("formatMsTimestamp", () => {
+  it("formats epoch milliseconds to yyyy-mm-dd hh:mm:ss", () => {
+    expect(formatMsTimestamp(Date.parse("2024-06-15T10:30:45Z"))).toMatch(
+      /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/,
+    );
+  });
+
+  it("renders a timestamp that the string parser cannot", () => {
+    // Guards the regression this function was added for: the same value as a
+    // string is an Invalid Date, as a number it is a real date.
+    const ms = Date.parse("2024-06-15T10:30:45Z");
+    expect(formatExactTime(String(ms))).toBe("");
+    expect(formatMsTimestamp(ms)).not.toBe("");
+  });
+
+  it("returns empty for zero, negative, NaN and Infinity", () => {
+    expect(formatMsTimestamp(0)).toBe("");
+    expect(formatMsTimestamp(-1)).toBe("");
+    expect(formatMsTimestamp(NaN)).toBe("");
+    expect(formatMsTimestamp(Infinity)).toBe("");
   });
 });
 

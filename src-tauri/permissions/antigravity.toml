@@ -1,0 +1,12 @@
+# Permissions for the Antigravity source plugin (src/plugins/antigravity/).
+# Referenced from the `[default]` set in default.toml.
+
+[[permission]]
+identifier = "allow-antigravity"
+description = "Allow listing and reading Antigravity (Gemini IDE) brain conversations, and setting their root"
+commands.allow = [
+  "list_antigravity_folders",
+  "get_antigravity_settings",
+  "set_antigravity_root",
+  "load_antigravity_session",
+]

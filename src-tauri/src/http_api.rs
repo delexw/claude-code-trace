@@ -185,6 +185,7 @@ fn build_router(state: Arc<HttpState>, static_dir: Option<String>) -> Router {
         .route("/api/settings", get(api_get_settings))
         .route("/api/settings/dir", post(api_set_projects_dir))
         .route("/api/settings/origins", post(api_set_allowed_origins))
+        .route("/api/plugins/enabled", post(api_set_plugin_enabled))
         .route(
             "/api/analytics/settings",
             get(api_get_analytics_settings).post(api_set_analytics_settings),
@@ -364,6 +365,36 @@ async fn api_set_allowed_origins(
         }
     };
     guard.allowed_origins = validated;
+    if let Err(e) = crate::settings::save_settings(&guard) {
+        return err_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e);
+    }
+    ok_json(&crate::commands::settings::build_response_pub(
+        &guard,
+        &app_state.auth_snapshot(),
+        app_state.clients_snapshot(),
+    ))
+}
+
+#[derive(Deserialize)]
+struct SetPluginEnabledBody {
+    id: String,
+    enabled: bool,
+}
+
+async fn api_set_plugin_enabled(
+    State(state): State<Arc<HttpState>>,
+    Json(body): Json<SetPluginEnabledBody>,
+) -> Response {
+    let app_state = app_state(&state);
+    let mut guard = match app_state.settings.lock() {
+        Ok(g) => g,
+        Err(e) => {
+            return err_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+        }
+    };
+    if let Err(e) = crate::plugins::set_enabled(&mut guard, &body.id, body.enabled) {
+        return err_response(axum::http::StatusCode::BAD_REQUEST, e);
+    }
     if let Err(e) = crate::settings::save_settings(&guard) {
         return err_response(axum::http::StatusCode::INTERNAL_SERVER_ERROR, e);
     }
@@ -893,6 +924,44 @@ mod tests {
         ] {
             let resp = api_router(enabled()).oneshot(get(uri)).await.unwrap();
             assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "{uri}");
+        }
+    }
+
+    #[tokio::test]
+    async fn plugin_switch_and_antigravity_routes_need_a_credential() {
+        for (method, uri) in [
+            (Method::POST, "/api/plugins/enabled"),
+            (Method::GET, "/api/antigravity/folders"),
+            (Method::GET, "/api/antigravity/settings"),
+            (Method::POST, "/api/antigravity/root"),
+            (Method::POST, "/api/antigravity/session"),
+        ] {
+            let req = Request::builder()
+                .method(method)
+                .uri(uri)
+                .header("content-type", "application/json")
+                .body(Body::from("{}"))
+                .unwrap();
+            let resp = api_router(enabled()).oneshot(req).await.unwrap();
+            assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "{uri}");
+        }
+    }
+
+    #[tokio::test]
+    async fn plugin_switch_rejects_unknown_ids_and_turning_claude_off() {
+        let state = test_state(enabled());
+        let web = credential_for(&state, WEB_UI);
+        let router = build_router(state, None);
+        for body in [
+            serde_json::json!({ "id": "nope", "enabled": true }),
+            serde_json::json!({ "id": "claude", "enabled": false }),
+        ] {
+            let resp = router
+                .clone()
+                .oneshot(post_json("/api/plugins/enabled", &web, body.clone()))
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "{body}");
         }
     }
 
