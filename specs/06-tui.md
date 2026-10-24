@@ -16,6 +16,11 @@ The TUI replaces the earlier React/Ink implementation that lived in `tui/`. The 
 port keeps the same domain types and the same HTTP/SSE contract — only the rendering
 layer changed.
 
+Session sources are plugins (`tui-py/plugins/<id>/`, registry in `tui-py/plugins/__init__.py`;
+see [15-session-source-plugins.md](15-session-source-plugins.md)). The methods this spec names
+for loading and live updates — `_load_session`, `on_session_update`, `on_picker_refresh`,
+`on_index_progress`, `on_efficiency_update` — live on `ClaudePlugin`
+(`plugins/claude/plugin.py`); `app.CCTraceApp` is the source-agnostic shell.
 ---
 
 ## Architecture
@@ -68,13 +73,13 @@ sequenceDiagram
     end
 
     loop on session-update SSE event
-        TUI ->> APP: _on_session_update(_payload)
+        TUI ->> APP: on_session_update(_payload)
         APP ->> BE: GET /api/session/load (re-fetch)
     end
 ```
 
 `session-update` is a lightweight refresh signal (message count + roles,
-never bodies — see [04-http-api.md](04-http-api.md)). `_on_session_update`
+never bodies — see [04-http-api.md](04-http-api.md)). `on_session_update`
 ignores the payload's contents and re-fetches the whole session via
 `load_session` instead, so `self.messages` stays authoritative even though
 the TUI doesn't paginate the way the web frontend does.
@@ -120,10 +125,10 @@ graph TB
     subgraph App["Screen"]
         H["Header"]
         subgraph MAIN["Horizontal #main-area"]
-            PT["ProjectTree (#project-tree)\nwidth: 30 (resizable)"]
+            PT["ProjectTree (#project-tree)\nClaude plugin sidebar, width: 30 (resizable)"]
             SR["SidebarResizer (1 col)"]
             subgraph CS["ContentSwitcher (#content-switcher)"]
-                SP["SessionPicker (#picker)"]
+                SP["SourcePicker (#picker)\none section per enabled plugin"]
                 ML["MessageList (#list)"]
                 DV["DetailView (#detail)"]
                 TB["TeamBoard (#team)"]
@@ -204,10 +209,10 @@ classDiagram
         +ensure_highlight()
         -_first_selectable_index()
     }
-    class SessionPicker
+    class SourcePicker
     class MessageList
     class _ItemListView
-    HighlightListView <|-- SessionPicker
+    HighlightListView <|-- SourcePicker
     HighlightListView <|-- MessageList
     HighlightListView <|-- _ItemListView
 ```
@@ -221,7 +226,7 @@ The base class owns:
   selection.
 - **`ensure_highlight()`** — sets `index` to the first non-disabled child
   if no row is currently highlighted. Idempotent. Skips the disabled
-  header/section rows that SessionPicker puts at the top of its list.
+  header/section rows that SourcePicker puts at the top of its list.
 
 This eliminates the bug class where each list page had its own copy of the
 highlight CSS / index initialization and fell out of sync when only one was
@@ -231,9 +236,12 @@ patched.
 
 ## Component Inventory
 
-### `SessionPicker` (`widgets/session_picker.py`)
+### `SourcePicker` (`widgets/source_picker.py`) and Claude's rows (`plugins/claude/picker_rows.py`)
 
-Inherits `HighlightListView`. Groups sessions by date bucket
+`SourcePicker` inherits `HighlightListView` and shows one section per enabled source plugin
+(see [15-session-source-plugins.md](15-session-source-plugins.md)); every row remembers the
+plugin that owns it, so Enter reaches that plugin's `open`. Claude's section, built by
+`picker_rows.build_section()`, groups sessions by date bucket
 (Today / Yesterday / This Week / This Month / Older), with disabled header
 rows for the bucket title and an aggregate "Sessions (N)" header at the top.
 
@@ -253,7 +261,7 @@ A session that has been analysed by Jev gets a third line from
 `_analysis_line(job, summary)`: the score (`% Jev 82`, coloured by the same
 bands as the web badge, `· stale` when the transcript moved on), a running
 analysis (`Analysing ██████░░░░ 65% · <phase message>`), or a failure with the
-backend's reason. `update_analysis(jobs, summaries)` re-renders only the rows
+backend's reason. `SourcePicker.refresh_rows(plugin_id, items)` re-renders only the rows
 that have analysis state — a full `populate()` would clear the list and drop
 the cursor, and a running job reports progress every second or so.
 
@@ -285,7 +293,7 @@ Rich `Table` (accent rail · content · right-aligned stats).
 
 ```mermaid
 flowchart LR
-    SSE["SSE session-update\n(signal only)"] --> OSU["_on_session_update\n(re-fetches via load_session)"]
+    SSE["SSE session-update\n(signal only)"] --> OSU["on_session_update\n(re-fetches via load_session)"]
     OSU --> WM[watch_messages]
     WM --> SML[_sync_message_list]
     SML --> WORKER["run_worker(populate(...),\nexclusive=True,\ngroup='populate_msglist')"]
@@ -444,7 +452,7 @@ Context percentage colour:
 ```mermaid
 sequenceDiagram
     participant USER as User
-    participant SP as SessionPicker
+    participant SP as SourcePicker
     participant APP as CCTraceApp
     participant ML as MessageList
     participant BE as Rust Backend
@@ -552,7 +560,7 @@ Subscribed events:
   `/api/efficiency/summaries`, because the score lands in the summary, not in
   the finished job.
 - `session-update` — a lightweight signal (count + roles, no bodies, see
-  [04-http-api.md](04-http-api.md)). Calls `_on_session_update(_payload)` on
+  [04-http-api.md](04-http-api.md)). Calls `on_session_update(_payload)` on
   the App, which ignores the payload and re-fetches the session via
   `load_session`, then updates `messages` / `teams` / `ongoing` / `meta` /
   `totals` from the fresh result and calls `_sync_all_widgets()`. If the
@@ -587,11 +595,11 @@ not duplicated in the global CSS.
 | `test_detail_view.py`               | Bordered container, RESPONSE/STEP headings render with live counts and hide when there is no message / no items; "Input"/"Result" label is unboxed while the JSON content is.                                                                             |
 | `test_message_from_dict.py`         | `message_from_dict` (the `POST /api/session/message` response parser) parses top-level fields, full tool_input/tool_result bodies on items, and nested subagent messages.                                                                                 |
 | `test_load_message.py`              | `api.load_message` posts `{path, index}` to `/api/session/message` and returns `None` for an out-of-range index.                                                                                                                                          |
-| `test_session_update.py`            | `_on_session_update` re-fetches via `load_session` on the lightweight signal, is a no-op with no session open, and keeps prior messages when the re-fetch fails.                                                                                          |
+| `test_session_update.py`            | `on_session_update` re-fetches via `load_session` on the lightweight signal, is a no-op with no session open, and keeps prior messages when the re-fetch fails.                                                                                           |
 | `test_format_progress.py`           | `format_bytes` units and the fixed-width, clamped block bar.                                                                                                                                                                                              |
 | `test_index_progress.py`            | Scan line: blank before a scan and once done, "Counting sessions…" before totals are known, percentage measured in bytes.                                                                                                                                 |
 | `test_efficiency_types.py`          | camelCase job/summary/settings parsing, the two provider payload shapes, newest-job-per-session, score bands.                                                                                                                                             |
-| `test_session_picker_analysis.py`   | The score / running / failed analysis line, and that `update_analysis` refreshes rows without rebuilding the list or moving the cursor.                                                                                                                   |
+| `test_session_picker_analysis.py`   | The score / running / failed analysis line, and that `refresh_rows` refreshes rows without rebuilding the list or moving the cursor.                                                                                                                      |
 | `test_efficiency_privacy.py`        | Send stays disabled until the notice is confirmed, cancel and Escape dismiss `False`, and a bracket-filled payload still renders.                                                                                                                         |
 | `test_analytics_settings_screen.py` | Controls open on the loaded values, base URL only for the OpenAI-compatible provider, a stored provider key survives a save, backend refusals are reported verbatim.                                                                                      |
 | `test_app_efficiency.py`            | `index-progress` drives the bar, job updates land against their session, nothing is prepared without a key or sent without confirmation, an open modal disarms the app's own keys but keeps `Tab` working, and app-bound letters type into a modal input. |

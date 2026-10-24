@@ -1,6 +1,32 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import { KeybindBar } from "./KeybindBar";
+import { KeybindBar as KeybindBarFrame, PICKER_HINTS } from "./KeybindBar";
+import { IndexProgressBar } from "./IndexProgressBar";
+import { claudeKeyHints, type ClaudeView } from "../plugins/claude/keyHints";
+import type { IndexProgress } from "../types";
+
+/** The shared bar as the app renders it: picker hints, or Claude's hints for its views. */
+function KeybindBar({
+  index,
+  view,
+  hasTeams,
+  ...rest
+}: {
+  index: IndexProgress;
+  view: "picker" | ClaudeView;
+  hasTeams: boolean;
+  showHints?: boolean;
+  onToggle?: () => void;
+  actions?: Record<string, () => void>;
+}) {
+  return (
+    <KeybindBarFrame
+      status={<IndexProgressBar progress={index} />}
+      hints={view === "picker" ? PICKER_HINTS : claudeKeyHints(view, hasTeams)}
+      {...rest}
+    />
+  );
+}
 
 /** A finished walk: the progress box is empty, as it is for every test not about it. */
 const indexed = {

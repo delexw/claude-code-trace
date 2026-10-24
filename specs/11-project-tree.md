@@ -182,12 +182,12 @@ flowchart TD
 
 ## Integration Points
 
-| Consumer              | Usage                                             |
-| --------------------- | ------------------------------------------------- |
-| Web `ProjectTree.tsx` | Renders hierarchical sidebar with expand/collapse |
-| TUI `ProjectTree.tsx` | Same tree in terminal, with keyboard navigation   |
-| `SessionPicker.tsx`   | Filters sessions by selected project key          |
-| `usePicker.ts`        | Builds tree on each session list refresh          |
+| Consumer                | Usage                                              |
+| ----------------------- | -------------------------------------------------- |
+| Web `ProjectTree.tsx`   | Renders hierarchical sidebar with expand/collapse  |
+| TUI `ProjectTree.tsx`   | Same tree in terminal, with keyboard navigation    |
+| `ClaudeSessionList.tsx` | Lists the sessions `usePicker` filtered by project |
+| `usePicker.ts`          | Builds tree on each session list refresh           |
 
 ---
 

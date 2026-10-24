@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import theme
 from data_types import Liveness, SessionInfo
-from widgets.session_picker import _liveness_badge, _render_session
+from plugins.claude.picker_rows import _liveness_badge, _render_session
 
 
 def test_liveness_badge_busy():

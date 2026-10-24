@@ -1,21 +1,17 @@
-import type { ViewState } from "../types";
-import { BackIcon } from "./Icons";
+import type { ReactNode } from "react";
 import { IoMdSettings } from "react-icons/io";
 import { isTauri } from "../lib/isTauri";
 import { invoke } from "../lib/invoke";
 
 interface ViewToolbarProps {
-  view: ViewState;
-  hasTeams: boolean;
-  hasSession: boolean;
-  onGoToSessions: () => void;
+  /** Navigation buttons of the active view, before the shared right cluster. */
+  left: ReactNode;
+  /** Whether the active view has collapsible entries for Expand/Collapse All. */
+  collapsible: boolean;
   onExpandAll: () => void;
   onCollapseAll: () => void;
   onScrollToTop: () => void;
   onScrollToBottom: () => void;
-  onOpenTeams: () => void;
-  onOpenDebug: () => void;
-  onBackToList: () => void;
   onOpenSettings: () => void;
 }
 
@@ -110,70 +106,25 @@ function RightCluster({
 }
 
 export function ViewToolbar({
-  view,
-  hasTeams,
-  hasSession,
-  onGoToSessions,
+  left,
+  collapsible,
   onExpandAll,
   onCollapseAll,
   onScrollToTop,
   onScrollToBottom,
-  onOpenTeams,
-  onOpenDebug,
-  onBackToList,
   onOpenSettings,
 }: ViewToolbarProps) {
-  const right = (collapsible: boolean) => (
-    <RightCluster
-      collapsible={collapsible}
-      onExpandAll={onExpandAll}
-      onCollapseAll={onCollapseAll}
-      onScrollToTop={onScrollToTop}
-      onScrollToBottom={onScrollToBottom}
-      onOpenSettings={onOpenSettings}
-    />
-  );
-
-  if (view === "list") {
-    return (
-      <div className="view-toolbar">
-        <button className="view-toolbar__btn" onClick={onGoToSessions}>
-          <BackIcon /> Sessions
-        </button>
-        {hasTeams && (
-          <button className="view-toolbar__btn" onClick={onOpenTeams}>
-            Teams
-          </button>
-        )}
-        <button className="view-toolbar__btn" onClick={onOpenDebug}>
-          Debug
-        </button>
-        {right(true)}
-      </div>
-    );
-  }
-
-  if (view === "picker") {
-    return (
-      <div className="view-toolbar">
-        {hasSession && (
-          <button className="view-toolbar__btn" onClick={onBackToList}>
-            <BackIcon /> Back to Messages
-          </button>
-        )}
-        {/* Picker has no collapsible entries — only scroll actions apply. */}
-        {right(false)}
-      </div>
-    );
-  }
-
-  // detail, team, debug
   return (
     <div className="view-toolbar">
-      <button className="view-toolbar__btn" onClick={onBackToList}>
-        <BackIcon /> Back to Messages
-      </button>
-      {right(true)}
+      {left}
+      <RightCluster
+        collapsible={collapsible}
+        onExpandAll={onExpandAll}
+        onCollapseAll={onCollapseAll}
+        onScrollToTop={onScrollToTop}
+        onScrollToBottom={onScrollToBottom}
+        onOpenSettings={onOpenSettings}
+      />
     </div>
   );
 }

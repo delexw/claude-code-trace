@@ -93,12 +93,12 @@ def _capture_notices(app) -> list[tuple[str, str]]:
 async def test_index_progress_event_drives_the_scan_bar():
     async with app_module.CCTraceApp().run_test() as pilot:
         app = pilot.app
-        app._on_index_progress(
+        app.plugins.get("claude").on_index_progress(
             {"files_read": 5, "total_files": 10, "bytes_read": 250, "total_bytes": 1000}
         )
         await pilot.pause()
 
-        assert app.index_progress is not None
+        assert app.plugins.get("claude").index_progress is not None
         assert "25%" in app.query_one("#index-progress", IndexProgressBar).content.plain
 
 
@@ -111,10 +111,10 @@ async def test_index_progress_event_drives_the_scan_bar():
 async def test_efficiency_update_is_kept_against_its_session():
     async with app_module.CCTraceApp().run_test() as pilot:
         app = pilot.app
-        await app._on_efficiency_update(
+        await app.plugins.get("claude").on_efficiency_update(
             {"analysisId": "a1", "sessionPath": "/p/s1.jsonl", "status": "sending", "progress": 30}
         )
-        assert app.efficiency_jobs["/p/s1.jsonl"].progress == 30
+        assert app.plugins.get("claude").efficiency_jobs["/p/s1.jsonl"].progress == 30
 
 
 @pytest.mark.asyncio
@@ -128,18 +128,18 @@ async def test_a_completed_analysis_pulls_in_the_new_score(monkeypatch):
 
     async with app_module.CCTraceApp().run_test() as pilot:
         app = pilot.app
-        await app._on_efficiency_update(
+        await app.plugins.get("claude").on_efficiency_update(
             {"analysisId": "a1", "sessionPath": "/p/s1.jsonl", "status": "completed"}
         )
-        assert app.efficiency_summaries["/p/s1.jsonl"].score == 88
+        assert app.plugins.get("claude").efficiency_summaries["/p/s1.jsonl"].score == 88
 
 
 @pytest.mark.asyncio
 async def test_an_update_without_a_session_path_is_ignored():
     async with app_module.CCTraceApp().run_test() as pilot:
         app = pilot.app
-        await app._on_efficiency_update({"analysisId": "a1"})
-        assert app.efficiency_jobs == {}
+        await app.plugins.get("claude").on_efficiency_update({"analysisId": "a1"})
+        assert app.plugins.get("claude").efficiency_jobs == {}
 
 
 @pytest.mark.asyncio
@@ -168,10 +168,10 @@ async def test_startup_picks_up_analyses_run_from_other_clients(monkeypatch):
 
     async with app_module.CCTraceApp().run_test() as pilot:
         app = pilot.app
-        await app._load_efficiency_state()
+        await app.plugins.get("claude").load_efficiency_state()
 
-        assert app.efficiency_jobs["/p/s1.jsonl"].analysis_id == "new"
-        assert app.efficiency_summaries["/p/s2.jsonl"].score == 64
+        assert app.plugins.get("claude").efficiency_jobs["/p/s1.jsonl"].analysis_id == "new"
+        assert app.plugins.get("claude").efficiency_summaries["/p/s2.jsonl"].score == 64
 
 
 # ---------------------------------------------------------------------------
@@ -193,7 +193,7 @@ async def test_no_data_is_prepared_without_a_jev_key(monkeypatch):
     async with app_module.CCTraceApp().run_test() as pilot:
         app = pilot.app
         notices = _capture_notices(app)
-        await app._analyse_session(SESSION)
+        await app.plugins.get("claude").analyse_session(SESSION)
 
         assert notices and notices[0][1] == "warning"
         assert "JEV_API_KEY" in notices[0][0]
@@ -219,7 +219,7 @@ async def test_nothing_is_sent_until_the_privacy_notice_is_accepted(monkeypatch)
 
     async with app_module.CCTraceApp().run_test() as pilot:
         app = pilot.app
-        worker = app.run_worker(app._analyse_session(SESSION))
+        worker = app.run_worker(app.plugins.get("claude").analyse_session(SESSION))
         await pilot.pause()
 
         assert prepared_for == [("/p/s1.jsonl", "minimized")]
@@ -227,7 +227,7 @@ async def test_nothing_is_sent_until_the_privacy_notice_is_accepted(monkeypatch)
 
         app.screen.query_one("#privacy-cancel", Button).press()
         await worker.wait()
-        assert app.efficiency_jobs == {}
+        assert app.plugins.get("claude").efficiency_jobs == {}
 
 
 @pytest.mark.asyncio
@@ -252,7 +252,7 @@ async def test_confirming_sends_the_prepared_payload_and_tracks_the_job(monkeypa
 
     async with app_module.CCTraceApp().run_test() as pilot:
         app = pilot.app
-        worker = app.run_worker(app._analyse_session(SESSION))
+        worker = app.run_worker(app.plugins.get("claude").analyse_session(SESSION))
         await pilot.pause()
 
         app.screen.query_one("#privacy-confirm", Checkbox).value = True
@@ -262,7 +262,7 @@ async def test_confirming_sends_the_prepared_payload_and_tracks_the_job(monkeypa
 
         # Posted back exactly as prepared — the backend re-reads every field.
         assert sent == [PREPARED]
-        assert app.efficiency_jobs["/p/s1.jsonl"].analysis_id == "a1"
+        assert app.plugins.get("claude").efficiency_jobs["/p/s1.jsonl"].analysis_id == "a1"
 
 
 @pytest.mark.asyncio
@@ -279,7 +279,7 @@ async def test_a_backend_refusal_is_reported_verbatim(monkeypatch):
     async with app_module.CCTraceApp().run_test() as pilot:
         app = pilot.app
         notices = _capture_notices(app)
-        await app._analyse_session(SESSION)
+        await app.plugins.get("claude").analyse_session(SESSION)
 
         assert notices == [("Session transcript is empty", "error")]
 
@@ -293,12 +293,12 @@ async def test_a_backend_refusal_is_reported_verbatim(monkeypatch):
 async def test_the_jev_keys_are_offered_in_the_picker_only():
     async with app_module.CCTraceApp().run_test() as pilot:
         app = pilot.app
-        assert app.check_action("analyse_session", ()) is True
-        assert app.check_action("analytics_settings", ()) is True
+        assert app.check_action("plugin", ("claude", "analyse_session")) is True
+        assert app.check_action("plugin", ("claude", "analytics_settings")) is True
 
         app.view = "list"
-        assert app.check_action("analyse_session", ()) is False
-        assert app.check_action("analytics_settings", ()) is False
+        assert app.check_action("plugin", ("claude", "analyse_session")) is False
+        assert app.check_action("plugin", ("claude", "analytics_settings")) is False
 
 
 @pytest.mark.asyncio
@@ -418,7 +418,7 @@ async def test_a_failed_analysis_is_raised_not_only_written_into_the_row():
         app = pilot.app
         notices = _capture_notices(app)
 
-        await app._on_efficiency_update(
+        await app.plugins.get("claude").on_efficiency_update(
             {
                 "analysisId": "a1",
                 "sessionPath": "/p/s1.jsonl",
@@ -438,7 +438,7 @@ async def test_a_failure_without_detail_falls_back_to_the_job_message():
         app = pilot.app
         notices = _capture_notices(app)
 
-        await app._on_efficiency_update(
+        await app.plugins.get("claude").on_efficiency_update(
             {
                 "analysisId": "a1",
                 "sessionPath": "/p/s1.jsonl",
@@ -459,7 +459,7 @@ async def test_a_cancelled_analysis_says_nothing():
         app = pilot.app
         notices = _capture_notices(app)
 
-        await app._on_efficiency_update(
+        await app.plugins.get("claude").on_efficiency_update(
             {
                 "analysisId": "a1",
                 "sessionPath": "/p/s1.jsonl",

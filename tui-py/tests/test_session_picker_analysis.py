@@ -9,7 +9,8 @@ from textual.widgets import ListItem, Static
 import theme
 from data_types import SessionInfo
 from efficiency import EfficiencyJob, EfficiencySummary
-from widgets.session_picker import SessionPicker, _analysis_line, _render_session
+from plugins.claude.picker_rows import _analysis_line, _render_session, build_section
+from widgets.source_picker import SourcePicker
 
 
 def _plain(session: SessionInfo, job=None, summary=None) -> str:
@@ -88,7 +89,7 @@ async def test_update_analysis_refreshes_rows_without_rebuilding_the_list():
 
     class Harness(App):
         def compose(self) -> ComposeResult:
-            yield SessionPicker(id="picker")
+            yield SourcePicker(id="picker")
 
     sessions = [
         SessionInfo(
@@ -99,17 +100,24 @@ async def test_update_analysis_refreshes_rows_without_rebuilding_the_list():
         ),
     ]
 
+    jobs: dict[str, EfficiencyJob] = {}
+
     async with Harness().run_test() as pilot:
-        picker = pilot.app.query_one("#picker", SessionPicker)
-        picker.populate(sessions=sessions, loading=False, error="")
+        picker = pilot.app.query_one("#picker", SourcePicker)
+        section = build_section(
+            sessions, loading=False, error="", analysis=lambda path: (jobs.get(path), None)
+        )
+        picker.populate([("claude", section)])
         await pilot.pause()
 
         picker.index = picker._first_selectable_index() + 1
         selected_before = picker.index
         nodes_before = list(picker._nodes)
 
-        job = EfficiencyJob(session_path="/p/one.jsonl", status="analysing", progress=75)
-        picker.update_analysis({"/p/one.jsonl": job}, {})
+        jobs["/p/one.jsonl"] = EfficiencyJob(
+            session_path="/p/one.jsonl", status="analysing", progress=75
+        )
+        picker.refresh_rows("claude", [sessions[0]])
         await pilot.pause()
 
         assert picker.index == selected_before
@@ -119,11 +127,14 @@ async def test_update_analysis_refreshes_rows_without_rebuilding_the_list():
             item: ListItem = picker._nodes[raw_idx]
             return item.query_one(Static).content.renderables[0].plain
 
-        analysed_idx = next(
-            idx for idx, s in picker._index_to_session.items() if s.path == "/p/one.jsonl"
-        )
-        untouched_idx = next(
-            idx for idx, s in picker._index_to_session.items() if s.path == "/p/two.jsonl"
-        )
+        def raw_index_of(path: str) -> int:
+            return next(
+                idx
+                for idx in picker.selectable_indices()
+                if picker.entry_at_raw_index(idx)[1].path == path
+            )
+
+        analysed_idx = raw_index_of("/p/one.jsonl")
+        untouched_idx = raw_index_of("/p/two.jsonl")
         assert "75%" in row_text(analysed_idx)
         assert "Jev" not in row_text(untouched_idx)

@@ -387,7 +387,7 @@ visible); below aligns to `"end"`; already visible is a no-op — same behaviour
 ### Everywhere else — `useScrollToSelected`
 
 `useScrollToSelected` still exists and is used by `MessageDetail.tsx`, `DebugViewer.tsx`,
-`SessionPicker.tsx`, and `ProjectTree.tsx`. When the keyboard selection changes, the selected item
+`plugins/claude/ClaudeSessionList.tsx`, and `ProjectTree.tsx`. When the keyboard selection changes, the selected item
 must come into view. The hook walks up the DOM to find the scrollable ancestor and aligns based
 on position.
 

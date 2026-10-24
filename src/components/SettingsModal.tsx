@@ -1,41 +1,13 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { invoke } from "../lib/invoke";
+import type { ApiAuthSource, ApiClient, SettingsResponse } from "../types";
+import type { SettingsPanelHandle, SettingsTab } from "../plugins/types";
+import { PLUGINS, isPluginEnabled } from "../plugins/registry";
 import { setApiToken as setLiveApiToken } from "../lib/apiToken";
 import { PopoutModal } from "./PopoutModal";
 import { FONT_SCALE_PRESETS, formatFontScale } from "../lib/fontScale";
 import { AnalyticsSettings } from "./AnalyticsSettings";
 import { BetaBadge } from "./BetaBadge";
-
-interface SettingsResponse {
-  projects_dir: string | null;
-  default_dir: string;
-  effective_dir: string;
-  effective_dir_exists: boolean;
-  wsl_distros: string[];
-  allowed_origins: string[];
-  /** Whether the HTTP API requires a registered client's credential. */
-  api_auth_enabled?: boolean;
-  /** Where the signing key lives: "file" (persisted), "ephemeral" (config dir
-   * unusable at startup — credentials die with the process) or "disabled". */
-  api_auth_source?: ApiAuthSource;
-  /** The accepted clients. Credentials are never included. */
-  clients?: ApiClient[];
-}
-
-type ApiAuthSource = "file" | "ephemeral" | "disabled";
-
-/** Mirrors `clients::Client` on the backend. */
-export interface ApiClient {
-  id: string;
-  name: string;
-  /** Registered automatically (`web-ui`, `tui`); credential kept in a file the
-   * dev server / TUI read. */
-  builtin: boolean;
-  /** Unix seconds. */
-  created_at: number;
-  issued_at: number;
-  revoked_at?: number | null;
-}
 
 /** `POST /api/clients` and `.../reissue` reply: the credential is returned
  * exactly once and never stored by the backend. */
@@ -72,13 +44,17 @@ interface SettingsModalProps {
   initialTab?: SettingsTab;
 }
 
-type SettingsTab = "general" | "appearance" | "api" | "analytics";
+/** The mounted plugin panels' handles, in registry order. */
+function mountedPanelHandles(handles: Map<string, SettingsPanelHandle>): SettingsPanelHandle[] {
+  return PLUGINS.flatMap((plugin) => {
+    const handle = handles.get(plugin.id);
+    return handle ? [handle] : [];
+  });
+}
 
-/** Merge detected distros with already-configured ones so configured-but-offline
- * distros still appear (and stay toggleable) even when WSL isn't reporting them. */
-function mergeDistros(available: string[], configured: string[]): string[] {
-  const seen = new Set(available);
-  return [...available, ...configured.filter((d) => !seen.has(d))];
+/** The last panel's settings answer — each one is the whole, freshly saved settings. */
+function lastResponse(responses: (SettingsResponse | undefined)[]): SettingsResponse | undefined {
+  return responses.findLast((res) => res !== undefined);
 }
 
 /** Turn textarea contents into a trimmed, non-empty origin list. Splits on
@@ -101,12 +77,7 @@ export function SettingsModal({
   initialTab = "general",
 }: SettingsModalProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
-  const [projectsDir, setProjectsDir] = useState("");
-  const [defaultDir, setDefaultDir] = useState("");
-  const [effectiveDir, setEffectiveDir] = useState("");
-  const [effectiveDirExists, setEffectiveDirExists] = useState(true);
-  const [availableDistros, setAvailableDistros] = useState<string[]>([]);
-  const [selectedDistros, setSelectedDistros] = useState<Set<string>>(new Set());
+  const [settings, setSettings] = useState<SettingsResponse | null>(null);
   const [allowedOriginsText, setAllowedOriginsText] = useState("");
   const [authSource, setAuthSource] = useState<ApiAuthSource>("file");
   const [clients, setClients] = useState<ApiClient[]>([]);
@@ -119,11 +90,7 @@ export function SettingsModal({
   const [saving, setSaving] = useState(false);
 
   const applyResponse = useCallback((res: SettingsResponse) => {
-    setDefaultDir(res.default_dir);
-    setProjectsDir(res.projects_dir ?? "");
-    setEffectiveDir(res.effective_dir);
-    setEffectiveDirExists(res.effective_dir_exists);
-    setSelectedDistros(new Set(res.wsl_distros ?? []));
+    setSettings(res);
     setAllowedOriginsText((res.allowed_origins ?? []).join("\n"));
     setAuthSource(res.api_auth_source ?? (res.api_auth_enabled === false ? "disabled" : "file"));
     setClients(res.clients ?? []);
@@ -137,39 +104,41 @@ export function SettingsModal({
       } catch (err) {
         console.error("Failed to load settings:", err);
       }
-      try {
-        const distros = await invoke<string[]>("list_wsl_distros");
-        setAvailableDistros(distros ?? []);
-      } catch (err) {
-        console.error("Failed to list WSL distros:", err);
-      }
     };
     void load();
   }, [applyResponse]);
 
-  const toggleDistro = useCallback((name: string) => {
-    setSelectedDistros((prev) => {
-      const next = new Set(prev);
-      if (next.has(name)) next.delete(name);
-      else next.add(name);
-      return next;
-    });
-  }, []);
+  const panels = PLUGINS.filter(
+    (plugin) => plugin.SettingsPanel && isPluginEnabled(plugin, settings?.plugins),
+  );
+  const panelHandles = useRef(new Map<string, SettingsPanelHandle>());
+  const panelRegistrations = useMemo(
+    () =>
+      Object.fromEntries(
+        PLUGINS.map((plugin) => [
+          plugin.id,
+          (handle: SettingsPanelHandle | null) => {
+            if (handle) panelHandles.current.set(plugin.id, handle);
+            else panelHandles.current.delete(plugin.id);
+          },
+        ]),
+      ),
+    [panelHandles],
+  );
+  const clearError = useCallback(() => setError(""), []);
 
   const handleSave = useCallback(async () => {
     setSaving(true);
     setError("");
     try {
-      const dirRes = await invoke<SettingsResponse>("set_projects_dir", {
-        path: projectsDir.trim() || null,
-      });
-      const wslRes = await invoke<SettingsResponse>("set_wsl_distros", {
-        distros: [...selectedDistros],
-      });
+      const panelRes = lastResponse(
+        await Promise.all(mountedPanelHandles(panelHandles.current).map((h) => h.save())),
+      );
       const originsRes = await invoke<SettingsResponse>("set_allowed_origins", {
         origins: parseOrigins(allowedOriginsText),
       });
-      applyResponse(originsRes ?? wslRes ?? dirRes);
+      const res = originsRes ?? panelRes;
+      if (res) applyResponse(res);
       onSaved();
       onClose();
     } catch (err) {
@@ -177,14 +146,16 @@ export function SettingsModal({
     } finally {
       setSaving(false);
     }
-  }, [projectsDir, selectedDistros, allowedOriginsText, applyResponse, onSaved, onClose]);
+  }, [panelHandles, allowedOriginsText, applyResponse, onSaved, onClose]);
 
   const handleReset = useCallback(async () => {
     setSaving(true);
     setError("");
     try {
-      const res = await invoke<SettingsResponse>("set_projects_dir", { path: null });
-      applyResponse(res);
+      const res = lastResponse(
+        await Promise.all(mountedPanelHandles(panelHandles.current).map((h) => h.reset?.())),
+      );
+      if (res) applyResponse(res);
       onSaved();
       onClose();
     } catch (err) {
@@ -192,7 +163,7 @@ export function SettingsModal({
     } finally {
       setSaving(false);
     }
-  }, [applyResponse, onSaved, onClose]);
+  }, [panelHandles, applyResponse, onSaved, onClose]);
 
   const replaceClient = useCallback((client: ApiClient) => {
     setClients((prev) => prev.map((c) => (c.id === client.id ? client : c)));
@@ -306,17 +277,11 @@ export function SettingsModal({
     [pending, busyClient, replaceClient, issued],
   );
 
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === "Enter") {
-        e.preventDefault();
-        void handleSave();
-      }
-    },
-    [handleSave],
-  );
-
-  const distros = mergeDistros(availableDistros, [...selectedDistros]);
+  const handleSaveRef = useRef(handleSave);
+  useEffect(() => {
+    handleSaveRef.current = handleSave;
+  });
+  const submit = useCallback(() => void handleSaveRef.current(), []);
 
   return (
     <PopoutModal
@@ -340,67 +305,21 @@ export function SettingsModal({
             </button>
           ))}
         </div>
-        {activeTab === "general" && (
-          <>
-            <label className="settings-modal__label" htmlFor="projects-dir">
-              Projects Directory
-            </label>
-            <input
-              id="projects-dir"
-              className="settings-modal__input"
-              type="text"
-              value={projectsDir}
-              onChange={(e) => {
-                setProjectsDir(e.target.value);
-                setError("");
-              }}
-              onKeyDown={handleKeyDown}
-              placeholder={defaultDir + " (default)"}
-              spellCheck={false}
-              autoFocus
-            />
-            <p className="settings-modal__hint">Default: {defaultDir}</p>
-            {effectiveDir && (
-              <p
-                className={
-                  effectiveDirExists
-                    ? "settings-modal__hint settings-modal__hint--effective"
-                    : "settings-modal__hint settings-modal__hint--missing"
-                }
-              >
-                {effectiveDirExists ? "✓ Active:" : "✗ Not found:"} {effectiveDir}
-              </p>
-            )}
-
-            <label className="settings-modal__label settings-modal__label--section">
-              WSL Distros
-            </label>
-            {distros.length === 0 ? (
-              <p className="settings-modal__hint">
-                No WSL distributions detected. Sessions created inside WSL appear here once a distro
-                is installed.
-              </p>
-            ) : (
-              <>
-                <p className="settings-modal__hint">
-                  Include projects from Claude Code running inside these distributions.
-                </p>
-                <div className="settings-modal__wsl">
-                  {distros.map((name) => (
-                    <label key={name} className="settings-modal__wsl-item">
-                      <input
-                        type="checkbox"
-                        checked={selectedDistros.has(name)}
-                        onChange={() => toggleDistro(name)}
-                      />
-                      <span>{name}</span>
-                    </label>
-                  ))}
-                </div>
-              </>
-            )}
-          </>
-        )}
+        {/* Kept mounted on every tab so unsaved edits survive a tab switch and Save
+            from any tab still saves them, as the rest of this modal's fields do. */}
+        <div style={{ display: activeTab === "general" ? "contents" : "none" }}>
+          {panels.map(({ id, SettingsPanel }) =>
+            SettingsPanel ? (
+              <SettingsPanel
+                key={id}
+                settings={settings}
+                onEdited={clearError}
+                onSubmit={submit}
+                register={panelRegistrations[id]}
+              />
+            ) : null,
+          )}
+        </div>
 
         {(activeTab === "general" || activeTab === "api") && (
           <>

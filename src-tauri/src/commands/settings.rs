@@ -26,7 +26,7 @@ pub struct SettingsResponse {
     /// and `CCTRACE_ALLOWED_ORIGINS` (see `http_api::build_cors`).
     pub allowed_origins: Vec<String>,
     /// Whether this backend can focus a session's terminal window (see
-    /// `commands::terminal::can_focus`). Drives the frontend's Focus button —
+    /// `plugins::claude::commands::terminal::can_focus`). Drives the frontend's Focus button —
     /// true for any local + macOS backend, whether the frontend is the Tauri
     /// app or a browser talking to the HTTP API.
     pub can_focus: bool,
@@ -39,6 +39,8 @@ pub struct SettingsResponse {
     pub api_auth_source: &'static str,
     /// The accepted clients (never their credentials). See `crate::clients`.
     pub clients: Vec<crate::clients::Client>,
+    /// Every session-source plugin and whether it is enabled, in registry order.
+    pub plugins: Vec<crate::plugins::PluginStatus>,
 }
 
 pub fn platform_default_dir() -> String {
@@ -67,10 +69,11 @@ pub fn build_response_pub(
         effective_dir_exists,
         wsl_distros: settings.wsl_distros.clone(),
         allowed_origins: settings.allowed_origins.clone(),
-        can_focus: crate::commands::terminal::can_focus(),
+        can_focus: crate::plugins::claude::commands::terminal::can_focus(),
         api_auth_enabled: auth.is_enabled(),
         api_auth_source: auth.source(),
         clients,
+        plugins: crate::plugins::statuses(settings),
     }
 }
 
@@ -125,7 +128,7 @@ mod tests {
         let json = serde_json::to_value(&response).expect("serializes");
         assert_eq!(
             json.get("can_focus").and_then(|v| v.as_bool()),
-            Some(crate::commands::terminal::can_focus())
+            Some(crate::plugins::claude::commands::terminal::can_focus())
         );
     }
 
@@ -168,5 +171,24 @@ mod tests {
         let json = serde_json::to_value(&response).expect("serializes");
         assert_eq!(json["api_auth_enabled"], false);
         assert_eq!(json["api_auth_source"], "disabled");
+    }
+
+    #[test]
+    fn settings_response_lists_source_plugins() {
+        let response = build_response_pub(
+            &crate::settings::Settings::default(),
+            &crate::auth::AuthMode::Disabled,
+            vec![],
+        );
+        let json = serde_json::to_value(&response).expect("serializes");
+        assert_eq!(
+            json["plugins"],
+            serde_json::json!([{
+                "id": "claude",
+                "label": "Claude Code",
+                "enabled": true,
+                "can_disable": false,
+            }])
+        );
     }
 }
