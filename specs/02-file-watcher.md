@@ -190,8 +190,12 @@ Both are sent when `WatcherHandle` is dropped, which happens whenever a new watc
 
 ## Truncation Detection
 
-When the user runs `/clear` in Claude Code, the session file is truncated.
-The rebuild loop detects this by comparing the new file size to the cached size:
+A session's JSONL file is not guaranteed to only grow. The user running `/clear` truncates it
+outright, and separately, Claude Code's own `CLAUDE_CODE_TRANSCRIPT_LOCAL_GC` can rewrite the file
+in place (trimming old messages), shrinking it below a byte offset an incremental reader had
+already consumed (see `01-parser-pipeline.md`, issue #379). Both cases are handled the same way —
+treat "file is now shorter than what we've already read" as a signal to discard stale offsets and
+re-read, never as a stall:
 
 ```mermaid
 flowchart LR
@@ -201,6 +205,21 @@ flowchart LR
     CMP -->|"yes"| RESET["Reset token scanner\nClear cached state\nRe-parse from byte 0"]
     CMP -->|"no"| INCR["Incremental scan\nfrom prev offset"]
 ```
+
+This check exists at two independent layers, since the watcher-level check above only tracks the
+main session file's size:
+
+- **Watcher** (`watcher.rs`): compares the main session file's size against the previous poll
+  before every rebuild and resets `IncrementalTokenScanner` + message counters on shrink.
+- **Token scanner** (`IncrementalTokenScanner::scan_new_bytes`, `session.rs`): independently
+  detects the same shrink-below-offset condition for the main file _and_ for each subagent file
+  (`rewritten_in_place`), since a subagent's own transcript can be GC'd independently of the main
+  session file. On detection it resets its entire state — not just the byte offset — because
+  `request_tokens` is keyed by requestId and a stale key surviving the rewrite could otherwise mix
+  pre- and post-rewrite totals.
+- **`read_session_incremental`** (`session.rs`): any caller resuming from a stored offset falls
+  back to a full read from byte 0 when that offset now exceeds the file's current length, rather
+  than seeking past the new EOF and silently stalling.
 
 ---
 
