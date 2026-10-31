@@ -848,6 +848,17 @@ mod tests {
     }
 
     #[test]
+    fn summary_mcp_server_with_double_underscore() {
+        // Server names may themselves contain "__" (Claude Code v2.1.299+);
+        // only the last "__" segment is the tool name.
+        let input = Some(json!({"query": "hello"}));
+        assert_eq!(
+            tool_summary("mcp__my__server__actual_tool", &input),
+            "actual tool - hello"
+        );
+    }
+
+    #[test]
     fn summary_default_with_common_keys() {
         let input = Some(json!({"name": "my-tool", "extra": "data"}));
         assert_eq!(tool_summary("SomeUnknown", &input), "my-tool");

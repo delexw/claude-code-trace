@@ -142,6 +142,11 @@ const NOISE_ENTRY_TYPES: &[&str] = &[
     // every file-history-snapshot as structural noise — gaps in the snapshot chain
     // are safe and expected.
     "file-history-snapshot",
+    // v2.1.299+: a mod's session.append hook can use the new `queue` door (or a
+    // prompt.submit rewrite) to make this entry's recorded text differ from what the
+    // user actually typed or what was sent to the model. Doesn't change anything here —
+    // queue-operation is pure bookkeeping and the parser never reads its content as a
+    // displayable prompt — but it's why this type's data can't be assumed verbatim.
     "queue-operation",
     "progress",
     // v2.1.118+: /fork writes a compact pointer entry (type:"fork-context-ref") instead of
@@ -164,6 +169,20 @@ const NOISE_ENTRY_TYPES: &[&str] = &[
     // prompt text) and `leafUuid` (the last-message cursor) but has no conversational
     // content — drop it silently like other structural metadata.
     "last-prompt",
+    // v2.1.300+ (issue #360): Claude Code records each API request's exact system prompt,
+    // tool schemas, and parameters so a shared transcript can reproduce the request. This is
+    // written as three new entry types — "api-request-shape" (deduplicated system/tools
+    // payload, keyed by shapeHash), "api-request-blob" (deduplicated message content, keyed
+    // by hash), and "api-request" (per-call params/cacheControl referencing a shape and a
+    // list of blob hashes in `tail`) — none of which carry a `uuid` or `leafUuid`, so
+    // parse_entry() already drops them before classify() ever runs. They're listed here too
+    // as a second line of defense: "api-request-blob" entries carry a `message.role` ("user"
+    // or "system"), so if a future release ever adds a uuid to them, they would otherwise
+    // fall through to the generic meta-AI fallback below and render as bogus chat bubbles
+    // containing the full duplicated request payload.
+    "api-request-shape",
+    "api-request-blob",
+    "api-request",
 ];
 
 // v2.1.193+: auto-mode denial top-level entry types. Claude Code may use any of these;
@@ -990,7 +1009,20 @@ fn extract_meta_blocks(
         .filter_map(|b| {
             let bt = b.get("type").and_then(|v| v.as_str())?;
             if bt != "tool_result" {
-                return None;
+                // A block type this parser doesn't specifically know about (e.g. a future
+                // server-executed tool's result shape delivered as its own meta entry,
+                // rather than paired within the same assistant turn like the advisor tool).
+                // Keep it as a generic block instead of dropping it so merge_ai_buffer can
+                // still surface it, rather than losing it silently.
+                return Some(ContentBlock {
+                    block_type: bt.to_string(),
+                    text: b
+                        .get("text")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    ..Default::default()
+                });
             }
             let tool_id = b
                 .get("tool_use_id")
@@ -1107,6 +1139,43 @@ mod tests {
                 "Expected None for entry_type={noise_type}"
             );
         }
+    }
+
+    // --- Issue #360: v2.1.300+ api-request-shape/-blob/-request entries ---
+
+    #[test]
+    fn classify_returns_none_for_api_request_entry_types() {
+        // v2.1.300+: Claude Code records each API request's exact system prompt, tool
+        // schemas, and parameters as three new entry types so a shared transcript can
+        // reproduce the request. None of them carry a conversational uuid — classify()
+        // must drop all three as structural noise, not render them as chat content.
+        for noise_type in &["api-request-shape", "api-request-blob", "api-request"] {
+            let e = make_entry(noise_type, Some(json!("content")));
+            assert!(
+                classify(e).is_none(),
+                "Expected None for entry_type={noise_type}"
+            );
+        }
+    }
+
+    #[test]
+    fn classify_returns_none_for_api_request_blob_with_message_role() {
+        // Real "api-request-blob" entries carry message:{role:"user"|"system", content:[...]},
+        // which gives e.message.role a non-empty value. Without api-request-blob in
+        // NOISE_ENTRY_TYPES, this would fall through to the generic meta-AI fallback and
+        // render the full duplicated request payload as a bogus chat bubble. Guard against
+        // that regression even in the hypothetical case where a future release adds a uuid
+        // to these entries, bypassing today's parse_entry()-level drop.
+        let mut e = make_entry(
+            "api-request-blob",
+            Some(json!([{"type": "text", "text": "full system prompt text..."}])),
+        );
+        e.message.role = "system".to_string();
+        e.uuid = "some-future-uuid".to_string();
+        assert!(
+            classify(e).is_none(),
+            "api-request-blob entries must never render as chat content"
+        );
     }
 
     #[test]
@@ -2579,6 +2648,52 @@ mod tests {
                 );
             }
             other => panic!("Expected meta AI with merged error content, got {other:?}"),
+        }
+    }
+
+    // --- Issue #383: Anthropic's API may add message.content block types beyond the
+    // documented text/tool_use/thinking/tool_result set (e.g. a future server-executed
+    // tool whose paired result arrives as its own meta user-role entry, unlike the advisor
+    // tool whose result arrives within the same assistant turn). extract_meta_blocks must
+    // keep such blocks as generic ContentBlocks instead of filtering them out, since it only
+    // used to special-case "tool_result" and drop everything else once any tool_result was
+    // present in the array. ---
+
+    #[test]
+    fn classify_meta_user_entry_keeps_unrecognized_block_alongside_tool_result() {
+        // Entry::is_meta is Claude Code's "isMeta" flag for synthetic internal markers
+        // (re-prompts, stop-hook feedback, loop wakeups) — NOT what makes this a
+        // tool-result-bearing meta AIMsg. Real tool_result entries arrive with is_meta
+        // false and fall through to the generic "unrecognised entry type with a message
+        // role" branch, which is what builds AIMsg::is_meta: true via extract_meta_blocks.
+        let e = Entry {
+            entry_type: "user".to_string(),
+            uuid: "uuid-meta-unknown".to_string(),
+            timestamp: "2025-01-15T10:30:00Z".to_string(),
+            message: EntryMessage {
+                role: "user".to_string(),
+                content: Some(json!([
+                    {"type": "tool_result", "tool_use_id": "toolu_1", "content": "done"},
+                    {"type": "future_server_tool_result", "text": "extra server activity"}
+                ])),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::AI(ai)) => {
+                assert_eq!(ai.blocks.len(), 2, "both blocks must survive extraction");
+                assert!(ai
+                    .blocks
+                    .iter()
+                    .any(|b| b.block_type == "tool_result" && b.tool_id == "toolu_1"));
+                assert!(ai
+                    .blocks
+                    .iter()
+                    .any(|b| b.block_type == "future_server_tool_result"
+                        && b.text == "extra server activity"));
+            }
+            other => panic!("Expected meta AI message, got {other:?}"),
         }
     }
 
