@@ -250,6 +250,9 @@ pub struct Entry {
     // entry to persist the most recent prompt text for background-agent checkpoint/resume.
     // The entry's `leafUuid` points to the last message in the conversation at the time
     // the checkpoint was written.
+    // v2.1.299+: a mod's prompt.submit hook can rewrite or drop the prompt before it's
+    // saved here, so this field reflects what the mod/host chose to persist, not
+    // necessarily the user's literal keystrokes, for sessions with plugins installed.
     #[serde(default, rename = "lastPrompt", deserialize_with = "null_as_default")]
     pub last_prompt: String,
     // Present in auto-mode denial entries (v2.1.193+). When Claude Code's auto-mode denies a
@@ -2875,5 +2878,74 @@ mod tests {
         let bytes = serde_json::to_vec(&line).unwrap();
         let entry = parse_entry(&bytes).expect("must parse unrecognized toolDenialKind value");
         assert_eq!(entry.tool_denial_kind, "outcome-unknown");
+    }
+
+    // --- Issue #360: v2.1.300+ api-request-shape/-blob/-request entries ---
+    //
+    // Captured live from a real v2.1.316 session: Claude Code now writes each API request's
+    // exact system prompt, tool schemas, and parameters to the transcript so a shared session
+    // can reproduce the request. The payload is split into three deduplicated entry types
+    // (shapes/blobs keyed by content hash, referenced by a per-call "api-request" record) and
+    // none of them carry a `uuid` or `leafUuid` field, so parse_entry()'s existing guard drops
+    // all three before they ever reach classify() or the UI.
+
+    #[test]
+    fn parse_entry_drops_api_request_shape_without_uuid() {
+        let line = json!({
+            "type": "api-request-shape",
+            "sessionId": "session-uuid",
+            "shapeHash": "70f784270e2be312d184c92ae7cbf107936a3ccdfd47ded0bc2886b4fa12bc5d",
+            "timestamp": "2026-10-31T21:25:53.859Z",
+            "version": "2.1.316",
+            "shape": {
+                "system": [{"type": "text", "text": "You are a Claude agent..."}],
+                "tools": [{"name": "Bash", "input_schema": {"type": "object"}}]
+            }
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        assert!(
+            parse_entry(&bytes).is_none(),
+            "api-request-shape has no uuid/leafUuid and must be dropped"
+        );
+    }
+
+    #[test]
+    fn parse_entry_drops_api_request_blob_without_uuid() {
+        let line = json!({
+            "type": "api-request-blob",
+            "sessionId": "session-uuid",
+            "hash": "9690ce7fe5b103623bae5d69142eff57cb8d36324ad6456467489872a677b82",
+            "message": {
+                "role": "system",
+                "content": [{"type": "text", "text": "SessionStart hook output..."}]
+            }
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        assert!(
+            parse_entry(&bytes).is_none(),
+            "api-request-blob has no uuid/leafUuid and must be dropped even though it carries a message.role"
+        );
+    }
+
+    #[test]
+    fn parse_entry_drops_api_request_without_uuid() {
+        let line = json!({
+            "type": "api-request",
+            "sessionId": "session-uuid",
+            "id": "7982f0be-3ddd-476a-aef8-eb03a53233cc",
+            "timestamp": "2026-10-31T21:25:53.859Z",
+            "version": "2.1.316",
+            "querySource": "sdk",
+            "shapeHash": "70f784270e2be312d184c92ae7cbf107936a3ccdfd47ded0bc2886b4fa12bc5d",
+            "params": {"model": "claude-opus-5-5", "max_tokens": 32000},
+            "keep": 0,
+            "tail": ["9690ce7fe5b103623bae5d69142eff57cb8d36324ad6456467489872a677b82"],
+            "requestDigest": "626422b5689ee30af425c3a04b874a046bdcd79f44d32d955821c62ec038839"
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        assert!(
+            parse_entry(&bytes).is_none(),
+            "api-request has no uuid/leafUuid and must be dropped"
+        );
     }
 }

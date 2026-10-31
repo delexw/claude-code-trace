@@ -583,7 +583,7 @@ pub fn is_team_task(item: &DisplayItem) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parser::classify::{AIMsg, ClassifiedMsg, ContentBlock, Usage, UserMsg};
+    use crate::parser::classify::{AIMsg, ClassifiedMsg, CompactMsg, ContentBlock, Usage, UserMsg};
     use chrono::Utc;
 
     fn make_ai_msg(blocks: Vec<ContentBlock>, is_meta: bool) -> AIMsg {
@@ -1238,5 +1238,67 @@ mod tests {
             !OngoingChecker::is_chunks_ongoing(&chunks),
             "a session whose only activity is an orphaned tool_result must not appear ongoing"
         );
+    }
+
+    // --- Issue #380: v2.1.299/v2.1.314 added idle compaction, a time-based trigger that
+    // summarizes a conversation after it sits idle, with no new user prompt and no explicit
+    // /compact preceding it. A session can therefore show a "summary" entry with no user
+    // message immediately before it. build_chunks already treats ClassifiedMsg::Compact
+    // generically — it just flushes whatever is in the AI buffer (empty or not) and pushes a
+    // standalone Compact chunk, without ever looking at what came before. These tests pin
+    // that behavior so a future change can't start inferring a compaction's cause from
+    // adjacent messages. ---
+
+    fn compact_msg(text: &str) -> CompactMsg {
+        CompactMsg {
+            timestamp: Utc::now(),
+            text: text.to_string(),
+            is_recap: false,
+        }
+    }
+
+    #[test]
+    fn compact_as_first_message_with_no_preceding_turn_renders_standalone() {
+        // Idle compaction can fire as the very first entry processed (e.g. the session is
+        // resumed straight into a summary with none of the pre-compaction history loaded).
+        // No preceding user or AI message exists at all.
+        let msgs = vec![ClassifiedMsg::Compact(compact_msg(
+            "idle-triggered summary",
+        ))];
+        let chunks = build_chunks(&msgs);
+        assert_eq!(chunks.len(), 1, "a lone Compact message must still render");
+        assert_eq!(chunks[0].chunk_type, ChunkType::Compact);
+        assert_eq!(chunks[0].output, "idle-triggered summary");
+    }
+
+    #[test]
+    fn compact_after_ai_message_with_no_intervening_user_turn_renders_standalone() {
+        // Idle compaction fires purely from elapsed wall-clock time, so it can follow an
+        // assistant turn directly with no new user message in between.
+        let msgs = vec![
+            ClassifiedMsg::AI(make_ai_msg(vec![text_block("here you go")], false)),
+            ClassifiedMsg::Compact(compact_msg("idle-triggered summary")),
+        ];
+        let chunks = build_chunks(&msgs);
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks[0].chunk_type, ChunkType::AI);
+        assert_eq!(chunks[1].chunk_type, ChunkType::Compact);
+        assert_eq!(chunks[1].output, "idle-triggered summary");
+    }
+
+    #[test]
+    fn consecutive_compact_messages_each_render_their_own_chunk() {
+        // Two idle-triggered compactions with nothing but elapsed time between them (no user
+        // turn separates them) must still produce two distinct Compact chunks, not merge or
+        // drop one.
+        let msgs = vec![
+            ClassifiedMsg::Compact(compact_msg("first idle summary")),
+            ClassifiedMsg::Compact(compact_msg("second idle summary")),
+        ];
+        let chunks = build_chunks(&msgs);
+        assert_eq!(chunks.len(), 2);
+        assert!(chunks.iter().all(|c| c.chunk_type == ChunkType::Compact));
+        assert_eq!(chunks[0].output, "first idle summary");
+        assert_eq!(chunks[1].output, "second idle summary");
     }
 }
