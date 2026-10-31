@@ -295,6 +295,44 @@ fn resolve_tool_result(
     }
 }
 
+/// Block types this parser already renders explicitly somewhere (in the context that owns
+/// them). Seeing one of these in the *other* match arm's catch-all means it's a known type
+/// showing up where it isn't expected (e.g. a "thinking" block on a meta/tool-result message)
+/// rather than a genuinely new block type — keep silently dropping those, matching prior
+/// behavior, instead of surfacing them as "unrecognized".
+const KNOWN_CONTENT_BLOCK_TYPES: &[&str] = &[
+    "thinking",
+    "text",
+    "tool_use",
+    "tool_result",
+    "teammate",
+    "hook_event",
+];
+
+/// Renders a content block whose `type` is none of the ones this parser specifically
+/// understands (e.g. a future Anthropic API server-executed tool's call/result shape) as a
+/// generic Output item instead of silently dropping it. Anthropic's API is free to add new
+/// `message.content` block types beyond the documented text/tool_use/thinking/tool_result
+/// set — classify.rs already preserves such blocks with their raw `block_type` rather than
+/// discarding them, so this is the last point before the UI where that data must not vanish.
+/// Blocks with no `type` at all (`block_type` empty), or a type already known and handled
+/// elsewhere, stay dropped, matching prior behavior.
+fn push_unrecognized_block_item(items: &mut Vec<DisplayItem>, b: &ContentBlock) {
+    if b.block_type.is_empty() || KNOWN_CONTENT_BLOCK_TYPES.contains(&b.block_type.as_str()) {
+        return;
+    }
+    let text = if b.text.is_empty() {
+        format!("[Unrecognized content: {}]", b.block_type)
+    } else {
+        b.text.clone()
+    };
+    items.push(DisplayItem {
+        item_type: DisplayItemType::Output,
+        text,
+        ..Default::default()
+    });
+}
+
 fn merge_ai_buffer(buf: &[AIMsg], orphan_pending: bool) -> Chunk {
     let mut texts: Vec<String> = Vec::new();
     let mut thinking = 0usize;
@@ -390,7 +428,7 @@ fn merge_ai_buffer(buf: &[AIMsg], orphan_pending: bool) -> Chunk {
                     "tool_result" => {
                         resolve_tool_result(&mut items, &mut pending, b, m.timestamp);
                     }
-                    _ => {}
+                    _ => push_unrecognized_block_item(&mut items, b),
                 }
             }
         } else {
@@ -420,7 +458,7 @@ fn merge_ai_buffer(buf: &[AIMsg], orphan_pending: bool) -> Chunk {
                             ..Default::default()
                         });
                     }
-                    _ => {}
+                    _ => push_unrecognized_block_item(&mut items, b),
                 }
             }
         }
@@ -708,6 +746,69 @@ mod tests {
         let chunks = build_chunks(&msgs);
         let items = &chunks[0].items;
         assert_eq!(items[0].advisor_model, "claude-opus-4-8");
+    }
+
+    // --- Issue #383: Anthropic's API may add message.content block types beyond the
+    // documented text/tool_use/thinking/tool_result set (e.g. a future server-executed
+    // tool's call/result shape). Such blocks must degrade to a visible item, not vanish. ---
+
+    #[test]
+    fn unrecognized_non_meta_block_type_renders_as_generic_output() {
+        let block = ContentBlock {
+            block_type: "web_search_tool_result".to_string(),
+            ..Default::default()
+        };
+        let msgs = vec![ClassifiedMsg::AI(make_ai_msg(vec![block], false))];
+        let chunks = build_chunks(&msgs);
+        assert_eq!(chunks.len(), 1);
+        let items = &chunks[0].items;
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].item_type, DisplayItemType::Output);
+        assert_eq!(
+            items[0].text,
+            "[Unrecognized content: web_search_tool_result]"
+        );
+    }
+
+    #[test]
+    fn unrecognized_non_meta_block_type_with_text_keeps_its_text() {
+        let block = ContentBlock {
+            block_type: "server_tool_use_delta".to_string(),
+            text: "partial server tool activity".to_string(),
+            ..Default::default()
+        };
+        let msgs = vec![ClassifiedMsg::AI(make_ai_msg(vec![block], false))];
+        let chunks = build_chunks(&msgs);
+        let items = &chunks[0].items;
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].text, "partial server tool activity");
+    }
+
+    #[test]
+    fn unrecognized_meta_block_type_renders_as_generic_output() {
+        let block = ContentBlock {
+            block_type: "code_execution_tool_result".to_string(),
+            ..Default::default()
+        };
+        let msgs = vec![ClassifiedMsg::AI(make_ai_msg(vec![block], true))];
+        let chunks = build_chunks(&msgs);
+        let items = &chunks[0].items;
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].item_type, DisplayItemType::Output);
+        assert_eq!(
+            items[0].text,
+            "[Unrecognized content: code_execution_tool_result]"
+        );
+    }
+
+    #[test]
+    fn block_with_no_type_is_still_dropped() {
+        // No "type" field at all (block_type empty) is malformed/streaming-delta debris,
+        // not a new real block type — must stay silently dropped, matching prior behavior.
+        let block = ContentBlock::default();
+        let msgs = vec![ClassifiedMsg::AI(make_ai_msg(vec![block], false))];
+        let chunks = build_chunks(&msgs);
+        assert!(chunks[0].items.is_empty());
     }
 
     #[test]

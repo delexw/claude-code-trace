@@ -1009,7 +1009,20 @@ fn extract_meta_blocks(
         .filter_map(|b| {
             let bt = b.get("type").and_then(|v| v.as_str())?;
             if bt != "tool_result" {
-                return None;
+                // A block type this parser doesn't specifically know about (e.g. a future
+                // server-executed tool's result shape delivered as its own meta entry,
+                // rather than paired within the same assistant turn like the advisor tool).
+                // Keep it as a generic block instead of dropping it so merge_ai_buffer can
+                // still surface it, rather than losing it silently.
+                return Some(ContentBlock {
+                    block_type: bt.to_string(),
+                    text: b
+                        .get("text")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    ..Default::default()
+                });
             }
             let tool_id = b
                 .get("tool_use_id")
@@ -2635,6 +2648,52 @@ mod tests {
                 );
             }
             other => panic!("Expected meta AI with merged error content, got {other:?}"),
+        }
+    }
+
+    // --- Issue #383: Anthropic's API may add message.content block types beyond the
+    // documented text/tool_use/thinking/tool_result set (e.g. a future server-executed
+    // tool whose paired result arrives as its own meta user-role entry, unlike the advisor
+    // tool whose result arrives within the same assistant turn). extract_meta_blocks must
+    // keep such blocks as generic ContentBlocks instead of filtering them out, since it only
+    // used to special-case "tool_result" and drop everything else once any tool_result was
+    // present in the array. ---
+
+    #[test]
+    fn classify_meta_user_entry_keeps_unrecognized_block_alongside_tool_result() {
+        // Entry::is_meta is Claude Code's "isMeta" flag for synthetic internal markers
+        // (re-prompts, stop-hook feedback, loop wakeups) — NOT what makes this a
+        // tool-result-bearing meta AIMsg. Real tool_result entries arrive with is_meta
+        // false and fall through to the generic "unrecognised entry type with a message
+        // role" branch, which is what builds AIMsg::is_meta: true via extract_meta_blocks.
+        let e = Entry {
+            entry_type: "user".to_string(),
+            uuid: "uuid-meta-unknown".to_string(),
+            timestamp: "2025-01-15T10:30:00Z".to_string(),
+            message: EntryMessage {
+                role: "user".to_string(),
+                content: Some(json!([
+                    {"type": "tool_result", "tool_use_id": "toolu_1", "content": "done"},
+                    {"type": "future_server_tool_result", "text": "extra server activity"}
+                ])),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::AI(ai)) => {
+                assert_eq!(ai.blocks.len(), 2, "both blocks must survive extraction");
+                assert!(ai
+                    .blocks
+                    .iter()
+                    .any(|b| b.block_type == "tool_result" && b.tool_id == "toolu_1"));
+                assert!(ai
+                    .blocks
+                    .iter()
+                    .any(|b| b.block_type == "future_server_tool_result"
+                        && b.text == "extra server activity"));
+            }
+            other => panic!("Expected meta AI message, got {other:?}"),
         }
     }
 
