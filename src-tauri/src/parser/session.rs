@@ -5184,4 +5184,51 @@ mod tests {
         // only that line used to report nothing at all.
         assert!(reported > 0, "a one-line session reported no bytes");
     }
+
+    // --- Issue #376: v2.1.302 headless/SDK default permissionMode "auto" -> "default" ---
+
+    #[test]
+    fn scan_session_metadata_captures_auto_permission_mode_from_headless_session() {
+        // Before v2.1.302, a headless `-p`/Agent SDK session with no explicit
+        // `--permission-mode` on a third-party provider, telemetry-off install, or
+        // fresh install recorded "auto". `--permission-mode auto` still records
+        // "auto" explicitly post-v2.1.302. Either way the parser must read the
+        // value verbatim, not assume a fixed default for this session type.
+        let tmp = env::temp_dir().join("tail-test-issue376-permission-mode-auto");
+        std::fs::create_dir_all(&tmp).unwrap();
+        let path = tmp.join("session.jsonl");
+
+        let entry = "{\"type\":\"user\",\"uuid\":\"u1\",\"permissionMode\":\"auto\",\"message\":{\"role\":\"user\",\"content\":\"hi\"}}\n";
+        std::fs::write(&path, entry).unwrap();
+
+        let meta = scan_session_metadata(path.to_str().unwrap());
+        assert_eq!(
+            meta.permission_mode, "auto",
+            "a recorded 'auto' permissionMode must be captured verbatim"
+        );
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn scan_session_metadata_captures_default_permission_mode_from_headless_session_v2_1_302() {
+        // v2.1.302+: the same headless/SDK conditions above now record "default"
+        // instead of "auto". This must flow through unchanged, the same as any
+        // other explicitly-recorded permissionMode value.
+        let tmp = env::temp_dir().join("tail-test-issue376-permission-mode-default");
+        std::fs::create_dir_all(&tmp).unwrap();
+        let path = tmp.join("session.jsonl");
+
+        let entry = "{\"type\":\"user\",\"uuid\":\"u1\",\"permissionMode\":\"default\",\"message\":{\"role\":\"user\",\"content\":\"hi\"}}\n";
+        std::fs::write(&path, entry).unwrap();
+
+        let meta = scan_session_metadata(path.to_str().unwrap());
+        assert_eq!(
+            meta.permission_mode, "default",
+            "a recorded 'default' permissionMode must be captured verbatim, not coerced to the \
+             empty-field fallback ('manual', issue #190)"
+        );
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
 }

@@ -969,6 +969,16 @@ struct AgentLinkData {
 /// any JSON object generically, so those entries are simply skipped below (no
 /// `agentId`/`color` keys to find) exactly like any other agentId-less result —
 /// no special-casing needed (issue #270).
+///
+/// v2.1.290+: for an in-process teammate, `agentId`/`agent_id` on the Agent result
+/// holds a bare opaque agent ID rather than the `name@team` address it used to carry;
+/// the `name@team` address moved to a new `teammateId`/`teammate_id` field.
+/// `discover_team_sessions` keys team member processes by `name@team` (see
+/// `build_subagent_process` call there), so the link key must prefer
+/// `teammateId`/`teammate_id` when present and only fall back to `agentId`/`agent_id`
+/// for plain subagents (which have no teammate id at all) and for pre-v2.1.290
+/// teammate results (where `agentId` itself was already the `name@team` address)
+/// (issue #361).
 fn scan_agent_links(session_path: &str) -> AgentLinkData {
     let mut data = AgentLinkData {
         agent_to_tool_id: HashMap::new(),
@@ -996,7 +1006,9 @@ fn scan_agent_links(session_path: &str) -> AgentLinkData {
         };
 
         let agent_id = result_map
-            .get("agentId")
+            .get("teammateId")
+            .or_else(|| result_map.get("teammate_id"))
+            .or_else(|| result_map.get("agentId"))
             .or_else(|| result_map.get("agent_id"))
             .and_then(|v| v.as_str())
             .unwrap_or("")
@@ -2411,6 +2423,84 @@ mod tests {
         assert_eq!(
             links.tool_id_to_color.get("toolu_task1"),
             Some(&"blue".to_string())
+        );
+    }
+
+    #[test]
+    fn scan_agent_links_prefers_teammate_id_over_bare_agent_id_v2_1_290() {
+        // v2.1.290: an in-process teammate's Agent result now carries a bare
+        // opaque agentId plus a separate teammateId holding the `name@team`
+        // address. discover_team_sessions keys team member processes by
+        // `name@team`, so the link must be keyed by teammateId, not the bare
+        // agentId (issue #361).
+        let dir = tempfile::tempdir().unwrap();
+        let session_path = dir.path().join("main.jsonl");
+        std::fs::write(
+            &session_path,
+            concat!(
+                r#"{"type":"user","sourceToolUseID":"toolu_task1","toolUseResult":{"agentId":"a783ece79822ccf59","teammateId":"worker1@myteam","color":"blue"},"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_task1","content":"Done"}]},"uuid":"u1","timestamp":"2026-08-26T00:00:00Z"}"#,
+                "\n",
+            ),
+        )
+        .unwrap();
+
+        let links = scan_agent_links(session_path.to_str().unwrap());
+        assert_eq!(
+            links.agent_to_tool_id.get("worker1@myteam"),
+            Some(&"toolu_task1".to_string())
+        );
+        assert!(
+            links.agent_to_tool_id.get("a783ece79822ccf59").is_none(),
+            "bare agentId must not be used as the link key when teammateId is present"
+        );
+        assert_eq!(
+            links.tool_id_to_color.get("toolu_task1"),
+            Some(&"blue".to_string())
+        );
+    }
+
+    #[test]
+    fn scan_agent_links_falls_back_to_snake_case_teammate_id() {
+        // Defensive against either JSON casing for the new field, mirroring the
+        // existing agentId/agent_id fallback below (issue #361).
+        let dir = tempfile::tempdir().unwrap();
+        let session_path = dir.path().join("main.jsonl");
+        std::fs::write(
+            &session_path,
+            concat!(
+                r#"{"type":"user","sourceToolUseID":"toolu_task1","toolUseResult":{"agent_id":"a783ece79822ccf59","teammate_id":"worker1@myteam"},"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_task1","content":"Done"}]},"uuid":"u1","timestamp":"2026-08-26T00:00:00Z"}"#,
+                "\n",
+            ),
+        )
+        .unwrap();
+
+        let links = scan_agent_links(session_path.to_str().unwrap());
+        assert_eq!(
+            links.agent_to_tool_id.get("worker1@myteam"),
+            Some(&"toolu_task1".to_string())
+        );
+    }
+
+    #[test]
+    fn scan_agent_links_uses_bare_agent_id_for_plain_subagent_without_teammate_id() {
+        // Plain (non-teammate) subagent results have no teammateId at all —
+        // the bare agentId remains the link key, matching discover_subagents'
+        // filename-derived proc.id. Must not regress (issue #361).
+        let dir = tempfile::tempdir().unwrap();
+        let session_path = dir.path().join("main.jsonl");
+        std::fs::write(
+            &session_path,
+            concat!(
+                r#"{"type":"user","sourceToolUseID":"toolu_task1","toolUseResult":{"agentId":"agent001","color":"blue"},"message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_task1","content":"Done"}]},"uuid":"u1","timestamp":"2026-08-26T00:00:00Z"}"#,
+                "\n",
+            ),
+        )
+        .unwrap();
+
+        let links = scan_agent_links(session_path.to_str().unwrap());
+        assert_eq!(
+            links.agent_to_tool_id.get("agent001"),
+            Some(&"toolu_task1".to_string())
         );
     }
 
