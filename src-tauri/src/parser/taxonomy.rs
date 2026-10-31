@@ -52,9 +52,13 @@ pub fn categorize_tool_name(name: &str) -> ToolCategory {
 
 /// Parses an MCP tool name like "mcp__server-name__tool_name" into (server, tool).
 /// Returns None if the name doesn't match the mcp__ prefix pattern.
+///
+/// Server names may themselves contain "__" (Claude Code v2.1.299+), so the
+/// last "__" is treated as the separator and everything before it as the
+/// server's whole normalized name, matching Claude Code's own resolution.
 pub fn parse_mcp_tool_name(name: &str) -> Option<(&str, &str)> {
     let rest = name.strip_prefix("mcp__")?;
-    let sep = rest.find("__")?;
+    let sep = rest.rfind("__")?;
     let server = &rest[..sep];
     let tool = &rest[sep + 2..];
     if server.is_empty() || tool.is_empty() {
@@ -164,6 +168,20 @@ mod tests {
     }
 
     #[test]
+    fn parse_mcp_tool_name_server_with_double_underscore() {
+        // Claude Code v2.1.299+ allows server names that themselves contain
+        // "__"; the LAST "__" is the separator, not the first.
+        assert_eq!(
+            parse_mcp_tool_name("mcp__my__server__actual_tool"),
+            Some(("my__server", "actual_tool"))
+        );
+        assert_eq!(
+            parse_mcp_tool_name("mcp__a__b__c__tool_name"),
+            Some(("a__b__c", "tool_name"))
+        );
+    }
+
+    #[test]
     fn parse_mcp_tool_name_invalid() {
         assert_eq!(parse_mcp_tool_name("Read"), None);
         assert_eq!(parse_mcp_tool_name("mcp__"), None);
@@ -181,6 +199,10 @@ mod tests {
             "MCP chrome-devtools"
         );
         assert_eq!(mcp_display_name("Read"), "Read");
+        assert_eq!(
+            mcp_display_name("mcp__my__server__actual_tool"),
+            "MCP my__server"
+        );
     }
 
     #[test]
