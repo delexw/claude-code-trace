@@ -68,6 +68,17 @@ lazy_static! {
         Regex::new(r"(?is)<system-reminder>.*?</system-reminder>").unwrap(),
     ];
 
+    // v2.1.304+ (issue #381): the isCompactSummary resumed-conversation message embeds the
+    // names of tools called before the compaction as <system-reminder><tools-used-before-
+    // summary>Bash, Read</tools-used-before-summary></system-reminder>, immediately before the
+    // "Summary:" prose. Confirmed via a real v2.1.316 session (`/compact` capture): the
+    // system-reminder wraps nothing but this tag. Matched and replaced with readable text in
+    // sanitize_content *before* NOISE_TAG_PATTERNS runs, since that generic pass would otherwise
+    // delete the tool list along with its wrapper.
+    pub static ref RE_TOOLS_USED_BEFORE_SUMMARY: Regex = Regex::new(
+        r"(?is)<system-reminder>\s*<tools-used-before-summary>(.*?)</tools-used-before-summary>\s*</system-reminder>"
+    ).unwrap();
+
     // Command tag patterns - removed after extracting display form.
     pub static ref COMMAND_TAG_PATTERNS: Vec<Regex> = vec![
         Regex::new(r"(?is)<command-name>.*?</command-name>").unwrap(),
