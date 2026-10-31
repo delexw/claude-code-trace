@@ -2876,4 +2876,61 @@ mod tests {
         let entry = parse_entry(&bytes).expect("must parse unrecognized toolDenialKind value");
         assert_eq!(entry.tool_denial_kind, "outcome-unknown");
     }
+
+    // --- Issue #382: v2.1.304 added a transcript line naming the event and plugin when one
+    // plugin's hook registration causes another plugin's ("mod's") hook to be skipped for that
+    // event. Empirically confirmed by running `claude --debug -p "say hello"` against the
+    // installed v2.1.316 CLI with multiple competing plugins loaded and inspecting the resulting
+    // session JSONL directly: the notice is delivered through the *existing* <task-notification>
+    // mechanism built for issue #262, not a new entry shape. It first appears as transient
+    // `queue-operation`/`attachment` bookkeeping (`{"type":"queue-operation","operation":
+    // "enqueue",...,"content":"<task-notification>\n<plugin>: its <hook> hook was skipped.
+    // \"<other-plugin>\" runs first and sent the event on past it.\n</task-notification>"}`, and
+    // `{"type":"attachment","attachment":{"type":"queued_command","prompt":"<task-notification>
+    // ...","commandMode":"task-notification","isMeta":true}}`), then — when actually delivered as
+    // a turn rather than absorbed into the next prompt — as a plain `type:"user"` entry whose
+    // `message.content` is exactly that `<task-notification>...</task-notification>` string. ---
+
+    #[test]
+    fn parse_entry_user_entry_with_plugin_hook_skip_task_notification_v2_1_304() {
+        // Delivered via the same generic queued_command/task-notification mechanism as any other
+        // between-turn notification (issue #262) — not is_meta, same as those.
+        let line = json!({
+            "type": "user",
+            "uuid": "hook-skip-notification-uuid-382",
+            "parentUuid": "prior-uuid-382",
+            "timestamp": "2026-10-19T10:00:00Z",
+            "message": {
+                "role": "user",
+                "content": "<task-notification>\nmy-plugin: its prompt.compose hook was skipped. \"other-plugin\" runs first and sent the event on past it.\n</task-notification>"
+            }
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry =
+            parse_entry(&bytes).expect("must parse delivered plugin hook-skip task-notification");
+        assert_eq!(entry.entry_type, "user");
+        assert!(!entry.is_meta);
+    }
+
+    #[test]
+    fn parse_entry_attachment_queued_command_for_plugin_hook_skip_v2_1_304() {
+        // The transient bookkeeping shape observed before/if a notification is ever delivered
+        // (or absorbed into the next turn instead).
+        let line = json!({
+            "type": "attachment",
+            "uuid": "queued-command-uuid-382",
+            "parentUuid": "prior-uuid-382",
+            "timestamp": "2026-10-19T10:00:00Z",
+            "attachment": {
+                "type": "queued_command",
+                "prompt": "<task-notification>\nmy-plugin: its prompt.compose hook was skipped. \"other-plugin\" runs first and sent the event on past it.\n</task-notification>",
+                "commandMode": "task-notification",
+                "isMeta": true
+            }
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes)
+            .expect("queued_command attachment for hook-skip notice must still parse");
+        assert_eq!(entry.entry_type, "attachment");
+    }
 }

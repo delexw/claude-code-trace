@@ -4569,4 +4569,53 @@ mod tests {
             other => panic!("Expected AI message, got {other:?}"),
         }
     }
+
+    // --- Issue #382: v2.1.304 added a transcript line naming the event and plugin when one
+    // plugin's hook registration causes another plugin's ("mod's") hook to be skipped for that
+    // event. Empirically confirmed by running `claude --debug -p "say hello"` against the
+    // installed v2.1.316 CLI with multiple competing plugins loaded and inspecting the resulting
+    // session JSONL directly: the notice is delivered through the *existing*
+    // queued_command/<task-notification> mechanism built for issue #262, not a new entry shape —
+    // see the matching comment block in entry.rs for the exact captured shapes. ---
+
+    #[test]
+    fn classify_renders_plugin_hook_skip_task_notification_as_system_msg_v2_1_304() {
+        let content = "<task-notification>\nmy-plugin: its prompt.compose hook was skipped. \"other-plugin\" runs first and sent the event on past it.\n</task-notification>";
+        let e = make_entry("user", Some(serde_json::json!(content)));
+        match classify(e) {
+            Some(ClassifiedMsg::System(s)) => {
+                assert!(!s.is_error);
+                assert!(
+                    s.output.contains("prompt.compose hook was skipped"),
+                    "got: {:?}",
+                    s.output
+                );
+            }
+            other => {
+                panic!("Expected System for plugin hook-skip task-notification, got {other:?}")
+            }
+        }
+    }
+
+    #[test]
+    fn classify_drops_queued_command_attachment_for_plugin_hook_skip_as_noise_v2_1_304() {
+        // The transient bookkeeping shape (no hookEvent) must not render or duplicate the
+        // notification — only the eventually-delivered type:"user" entry above should.
+        let e = Entry {
+            entry_type: "attachment".to_string(),
+            uuid: "uuid-queued-command-382".to_string(),
+            timestamp: "2026-10-19T10:00:00Z".to_string(),
+            attachment: Some(serde_json::json!({
+                "type": "queued_command",
+                "prompt": "<task-notification>\nmy-plugin: its prompt.compose hook was skipped. \"other-plugin\" runs first and sent the event on past it.\n</task-notification>",
+                "commandMode": "task-notification",
+                "isMeta": true
+            })),
+            ..Default::default()
+        };
+        assert!(
+            classify(e).is_none(),
+            "queued_command attachment bookkeeping must remain noise"
+        );
+    }
 }
