@@ -142,6 +142,11 @@ const NOISE_ENTRY_TYPES: &[&str] = &[
     // every file-history-snapshot as structural noise — gaps in the snapshot chain
     // are safe and expected.
     "file-history-snapshot",
+    // v2.1.299+: a mod's session.append hook can use the new `queue` door (or a
+    // prompt.submit rewrite) to make this entry's recorded text differ from what the
+    // user actually typed or what was sent to the model. Doesn't change anything here —
+    // queue-operation is pure bookkeeping and the parser never reads its content as a
+    // displayable prompt — but it's why this type's data can't be assumed verbatim.
     "queue-operation",
     "progress",
     // v2.1.118+: /fork writes a compact pointer entry (type:"fork-context-ref") instead of

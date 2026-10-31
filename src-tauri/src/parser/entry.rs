@@ -250,6 +250,9 @@ pub struct Entry {
     // entry to persist the most recent prompt text for background-agent checkpoint/resume.
     // The entry's `leafUuid` points to the last message in the conversation at the time
     // the checkpoint was written.
+    // v2.1.299+: a mod's prompt.submit hook can rewrite or drop the prompt before it's
+    // saved here, so this field reflects what the mod/host chose to persist, not
+    // necessarily the user's literal keystrokes, for sessions with plugins installed.
     #[serde(default, rename = "lastPrompt", deserialize_with = "null_as_default")]
     pub last_prompt: String,
     // Present in auto-mode denial entries (v2.1.193+). When Claude Code's auto-mode denies a
