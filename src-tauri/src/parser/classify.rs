@@ -164,6 +164,20 @@ const NOISE_ENTRY_TYPES: &[&str] = &[
     // prompt text) and `leafUuid` (the last-message cursor) but has no conversational
     // content — drop it silently like other structural metadata.
     "last-prompt",
+    // v2.1.300+ (issue #360): Claude Code records each API request's exact system prompt,
+    // tool schemas, and parameters so a shared transcript can reproduce the request. This is
+    // written as three new entry types — "api-request-shape" (deduplicated system/tools
+    // payload, keyed by shapeHash), "api-request-blob" (deduplicated message content, keyed
+    // by hash), and "api-request" (per-call params/cacheControl referencing a shape and a
+    // list of blob hashes in `tail`) — none of which carry a `uuid` or `leafUuid`, so
+    // parse_entry() already drops them before classify() ever runs. They're listed here too
+    // as a second line of defense: "api-request-blob" entries carry a `message.role` ("user"
+    // or "system"), so if a future release ever adds a uuid to them, they would otherwise
+    // fall through to the generic meta-AI fallback below and render as bogus chat bubbles
+    // containing the full duplicated request payload.
+    "api-request-shape",
+    "api-request-blob",
+    "api-request",
 ];
 
 // v2.1.193+: auto-mode denial top-level entry types. Claude Code may use any of these;
@@ -1107,6 +1121,43 @@ mod tests {
                 "Expected None for entry_type={noise_type}"
             );
         }
+    }
+
+    // --- Issue #360: v2.1.300+ api-request-shape/-blob/-request entries ---
+
+    #[test]
+    fn classify_returns_none_for_api_request_entry_types() {
+        // v2.1.300+: Claude Code records each API request's exact system prompt, tool
+        // schemas, and parameters as three new entry types so a shared transcript can
+        // reproduce the request. None of them carry a conversational uuid — classify()
+        // must drop all three as structural noise, not render them as chat content.
+        for noise_type in &["api-request-shape", "api-request-blob", "api-request"] {
+            let e = make_entry(noise_type, Some(json!("content")));
+            assert!(
+                classify(e).is_none(),
+                "Expected None for entry_type={noise_type}"
+            );
+        }
+    }
+
+    #[test]
+    fn classify_returns_none_for_api_request_blob_with_message_role() {
+        // Real "api-request-blob" entries carry message:{role:"user"|"system", content:[...]},
+        // which gives e.message.role a non-empty value. Without api-request-blob in
+        // NOISE_ENTRY_TYPES, this would fall through to the generic meta-AI fallback and
+        // render the full duplicated request payload as a bogus chat bubble. Guard against
+        // that regression even in the hypothetical case where a future release adds a uuid
+        // to these entries, bypassing today's parse_entry()-level drop.
+        let mut e = make_entry(
+            "api-request-blob",
+            Some(json!([{"type": "text", "text": "full system prompt text..."}])),
+        );
+        e.message.role = "system".to_string();
+        e.uuid = "some-future-uuid".to_string();
+        assert!(
+            classify(e).is_none(),
+            "api-request-blob entries must never render as chat content"
+        );
     }
 
     #[test]
