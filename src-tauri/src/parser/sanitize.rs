@@ -105,8 +105,19 @@ pub fn sanitize_content(s: &str) -> String {
         }
     }
 
+    // v2.1.304+ (issue #381): pull the tools-called-before-compaction list out into a
+    // readable line before the generic <system-reminder> stripping below runs, otherwise
+    // that pass deletes the list along with its wrapper tags.
+    let mut result = RE_TOOLS_USED_BEFORE_SUMMARY
+        .replace_all(s, |caps: &regex::Captures| {
+            format!(
+                "Tools used before summary: {}",
+                caps.get(1).map(|m| m.as_str().trim()).unwrap_or("")
+            )
+        })
+        .to_string();
+
     // Strip noise tags.
-    let mut result = s.to_string();
     for pat in NOISE_TAG_PATTERNS.iter() {
         result = pat.replace_all(&result, "").to_string();
     }
@@ -511,6 +522,50 @@ mod tests {
     fn sanitize_local_command_caveat_removed() {
         let s = "text<local-command-caveat>caveat</local-command-caveat>end";
         assert_eq!(sanitize_content(s), "textend");
+    }
+
+    // ---- Issue #381: v2.1.304+ tools-used-before-summary compat ----
+
+    #[test]
+    fn sanitize_tools_used_before_summary_single_tool() {
+        // Real shape captured from a v2.1.316 session via `/compact`.
+        let s = "This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.\n\n<system-reminder>\n<tools-used-before-summary>Bash</tools-used-before-summary>\n</system-reminder>\nSummary:\n1. Primary Request: did stuff.";
+        let result = sanitize_content(s);
+        assert!(
+            result.contains("Tools used before summary: Bash"),
+            "tool list must survive sanitize_content, got: {result}"
+        );
+        assert!(
+            result.contains("This session is being continued"),
+            "surrounding prose must be preserved"
+        );
+        assert!(
+            result.contains("Summary:\n1. Primary Request"),
+            "summary prose after the tag must be preserved"
+        );
+        assert!(
+            !result.contains("<system-reminder>")
+                && !result.contains("<tools-used-before-summary>"),
+            "raw wrapper tags must not leak into the displayed text"
+        );
+    }
+
+    #[test]
+    fn sanitize_tools_used_before_summary_multiple_tools() {
+        // Real shape captured from a v2.1.316 session with Bash, Read, and Write calls.
+        let s = "<system-reminder>\n<tools-used-before-summary>Bash, Read, Write</tools-used-before-summary>\n</system-reminder>\nSummary:\ndone.";
+        assert_eq!(
+            sanitize_content(s),
+            "Tools used before summary: Bash, Read, Write\nSummary:\ndone."
+        );
+    }
+
+    #[test]
+    fn sanitize_content_without_tools_used_before_summary_is_unaffected() {
+        // Pre-v2.1.304 compact summaries have no tools-used-before-summary tag at all --
+        // must pass through unchanged (other than the usual noise stripping).
+        let s = "This session is being continued from a previous conversation that ran out of context.\n\nSummary:\n1. Did stuff.";
+        assert_eq!(sanitize_content(s), s);
     }
 
     // ---- Issue #237: v2.1.224+ cross-session SendMessage compat ----
