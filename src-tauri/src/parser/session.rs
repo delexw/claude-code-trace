@@ -389,6 +389,17 @@ pub fn read_session_incremental(
     offset: u64,
 ) -> Result<(Vec<ClassifiedMsg>, u64, u64), String> {
     let f = fs::File::open(path).map_err(|e| format!("opening {path}: {e}"))?;
+
+    // Claude Code may rewrite (not purely append to) its own transcript file —
+    // e.g. CLAUDE_CODE_TRANSCRIPT_LOCAL_GC trims old messages in place. If the
+    // file is now shorter than the offset we were asked to resume from, that
+    // offset no longer lands on a line boundary in the current content: seeking
+    // there would either hit EOF (silently stalling the tail forever) or, once
+    // the file grows past the old offset again, land mid-line and read garbage.
+    // Fall back to a full read from the start instead.
+    let file_len = f.metadata().map(|m| m.len()).unwrap_or(0);
+    let offset = if offset > file_len { 0 } else { offset };
+
     let mut reader = BufReader::new(f);
     reader
         .seek(SeekFrom::Start(offset))
@@ -1721,6 +1732,20 @@ impl IncrementalTokenScanner {
     /// Scan only new bytes from the main session file and any changed subagent files.
     /// Returns the current totals.
     pub fn scan_new_bytes(&mut self, path: &str) -> crate::convert::SessionTotals {
+        // Detect the main file or any subagent file having been rewritten in
+        // place rather than purely appended to (e.g.
+        // CLAUDE_CODE_TRANSCRIPT_LOCAL_GC trimming old messages). A shrunk
+        // file means our stored byte offset into it no longer lands on a
+        // line boundary, and `request_tokens` may hold now-stale entries
+        // keyed by requestIds that GC trimmed away. Reset everything and
+        // rescan from scratch up front — before either scan below runs —
+        // so this call always produces one consistent, complete result
+        // rather than freezing or partially mixing pre- and post-rewrite
+        // state.
+        if self.rewritten_in_place(path) {
+            *self = Self::new();
+        }
+
         // 1. Read new bytes from main session file.
         self.scan_main_file(path);
 
@@ -1729,6 +1754,33 @@ impl IncrementalTokenScanner {
 
         // 3. Compute totals from accumulated state.
         self.compute_totals()
+    }
+
+    /// True if the main session file or any subagent file has shrunk below
+    /// the byte offset this scanner has already consumed from it.
+    fn rewritten_in_place(&self, path: &str) -> bool {
+        let main_len = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+        if main_len < self.offset {
+            return true;
+        }
+
+        let dir = super::subagent::subagents_dir(path);
+        let Ok(entries) = fs::read_dir(&dir) else {
+            return false;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if !name.starts_with("agent-") || !name.ends_with(".jsonl") {
+                continue;
+            }
+            let key = dir.join(&name).to_string_lossy().to_string();
+            let sub_offset = self.subagent_offsets.get(&key).copied().unwrap_or(0);
+            let current_size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+            if current_size < sub_offset {
+                return true;
+            }
+        }
+        false
     }
 
     fn scan_main_file(&mut self, path: &str) {
@@ -1771,7 +1823,10 @@ impl IncrementalTokenScanner {
             let file_path = dir.join(&name);
             let key = file_path.to_string_lossy().to_string();
 
-            // Check if file has grown since last scan.
+            // Check if file has grown since last scan. (A shrink is handled
+            // up front by `rewritten_in_place` resetting the whole scanner
+            // before this method runs, so by this point size can only have
+            // grown or stayed the same.)
             let current_size = entry.metadata().map(|m| m.len()).unwrap_or(0);
             let prev_size = self.subagent_sizes.get(&key).copied().unwrap_or(0);
             if current_size <= prev_size {
@@ -2897,6 +2952,83 @@ mod tests {
         std::fs::remove_dir_all(&tmp).ok();
     }
 
+    // --- Issue #379: CLAUDE_CODE_TRANSCRIPT_LOCAL_GC can rewrite/truncate a
+    // live-tailed file in place, invalidating the scanner's stored byte offset ---
+
+    #[test]
+    fn incremental_scanner_detects_main_file_truncation_and_rescans() {
+        let tmp = env::temp_dir().join("tail-test-scanner-truncate-main");
+        std::fs::create_dir_all(&tmp).unwrap();
+        let path = tmp.join("session.jsonl");
+
+        let entry1 = r#"{"type":"assistant","uuid":"a1","requestId":"r1","message":{"model":"claude-sonnet-4-20250514","role":"assistant","content":[],"usage":{"input_tokens":100,"output_tokens":50,"cache_read_input_tokens":0,"cache_creation_input_tokens":0},"stop_reason":"end_turn"}}"#;
+        std::fs::write(&path, format!("{entry1}\n")).unwrap();
+
+        let mut scanner = IncrementalTokenScanner::new();
+        let totals1 = scanner.scan_new_bytes(path.to_str().unwrap());
+        assert_eq!(totals1.total_tokens, 150);
+
+        // Simulate CLAUDE_CODE_TRANSCRIPT_LOCAL_GC rewriting the file in place
+        // with a shorter, trimmed version that drops the old entry.
+        let entry2 = r#"{"type":"assistant","uuid":"a2","requestId":"r2","message":{"model":"claude-sonnet-4-20250514","role":"assistant","content":[],"usage":{"input_tokens":10,"output_tokens":5,"cache_read_input_tokens":0,"cache_creation_input_tokens":0},"stop_reason":"end_turn"}}"#;
+        let rewritten = format!("{entry2}\n");
+        assert!(
+            rewritten.len() < std::fs::metadata(&path).unwrap().len() as usize,
+            "fixture must actually shrink the file to exercise truncation detection"
+        );
+        std::fs::write(&path, &rewritten).unwrap();
+
+        // Without truncation detection, the scanner would seek past the new
+        // (shorter) EOF from its stale offset and read nothing — permanently
+        // freezing totals at the pre-rewrite value.
+        let totals2 = scanner.scan_new_bytes(path.to_str().unwrap());
+        assert_eq!(
+            totals2.total_tokens, 15,
+            "must reset and recompute totals from the rewritten content, not freeze"
+        );
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn incremental_scanner_detects_subagent_truncation_and_rescans() {
+        let tmp = env::temp_dir().join("tail-test-scanner-truncate-subagent");
+        std::fs::create_dir_all(&tmp).unwrap();
+        let session_path = tmp.join("session.jsonl");
+        std::fs::write(&session_path, "").unwrap();
+
+        let subagents_dir = tmp.join("session").join("subagents");
+        std::fs::create_dir_all(&subagents_dir).unwrap();
+        let agent_path = subagents_dir.join("agent-1.jsonl");
+
+        let entry1 = r#"{"type":"assistant","uuid":"sa1","requestId":"sr1","message":{"model":"claude-sonnet-4-20250514","role":"assistant","content":[],"usage":{"input_tokens":200,"output_tokens":80,"cache_read_input_tokens":0,"cache_creation_input_tokens":0},"stop_reason":"end_turn"}}"#;
+        std::fs::write(&agent_path, format!("{entry1}\n")).unwrap();
+
+        let mut scanner = IncrementalTokenScanner::new();
+        let totals1 = scanner.scan_new_bytes(session_path.to_str().unwrap());
+        assert_eq!(totals1.total_tokens, 280);
+
+        // Simulate the subagent transcript being rewritten in place with a
+        // shorter, trimmed version — independent of the main session file.
+        let entry2 = r#"{"type":"assistant","uuid":"sa2","requestId":"sr2","message":{"model":"claude-sonnet-4-20250514","role":"assistant","content":[],"usage":{"input_tokens":20,"output_tokens":8,"cache_read_input_tokens":0,"cache_creation_input_tokens":0},"stop_reason":"end_turn"}}"#;
+        let rewritten = format!("{entry2}\n");
+        assert!(
+            rewritten.len() < std::fs::metadata(&agent_path).unwrap().len() as usize,
+            "fixture must actually shrink the file to exercise truncation detection"
+        );
+        std::fs::write(&agent_path, &rewritten).unwrap();
+
+        // Without truncation detection, "size did not grow" alone would skip
+        // this file forever, freezing its contribution to totals.
+        let totals2 = scanner.scan_new_bytes(session_path.to_str().unwrap());
+        assert_eq!(
+            totals2.total_tokens, 28,
+            "must reset and recompute the subagent's contribution, not freeze"
+        );
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
     // --- resolve_live_chain_uuids tests ---
 
     fn make_entry(uuid: &str, parent_uuid: &str, leaf_uuid: &str, is_sidechain: bool) -> Entry {
@@ -3468,6 +3600,45 @@ mod tests {
             1,
             "completed line should produce a message"
         );
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    // --- Issue #379: CLAUDE_CODE_TRANSCRIPT_LOCAL_GC can rewrite/truncate the
+    // transcript file in place, invalidating a stale byte offset ---
+
+    #[test]
+    fn read_session_incremental_detects_truncation_and_rereads_from_start() {
+        let tmp = env::temp_dir().join("tail-test-truncation-rewrite");
+        std::fs::create_dir_all(&tmp).unwrap();
+        let path = tmp.join("session.jsonl");
+
+        let u1 = "{\"type\":\"user\",\"uuid\":\"u1\",\"parentUuid\":null,\"isSidechain\":false,\"timestamp\":\"2025-01-15T10:00:00Z\",\"message\":{\"role\":\"user\",\"content\":\"Hello\"}}\n";
+        let u2 = "{\"type\":\"user\",\"uuid\":\"u2\",\"parentUuid\":\"u1\",\"isSidechain\":false,\"timestamp\":\"2025-01-15T10:00:01Z\",\"message\":{\"role\":\"user\",\"content\":\"World\"}}\n";
+        std::fs::write(&path, format!("{u1}{u2}")).unwrap();
+
+        let (msgs, offset, _) = read_session_incremental(path.to_str().unwrap(), 0).unwrap();
+        assert_eq!(msgs.len(), 2);
+
+        // Simulate CLAUDE_CODE_TRANSCRIPT_LOCAL_GC rewriting the file in place
+        // with a shorter, trimmed version (old entries dropped).
+        let rewritten = "{\"type\":\"user\",\"uuid\":\"u3\",\"parentUuid\":null,\"isSidechain\":false,\"timestamp\":\"2025-01-15T10:00:02Z\",\"message\":{\"role\":\"user\",\"content\":\"Fresh\"}}\n";
+        assert!(
+            (rewritten.len() as u64) < offset,
+            "fixture must actually shrink the file to exercise truncation detection"
+        );
+        std::fs::write(&path, rewritten).unwrap();
+
+        // Resuming from the stale (now out-of-range) offset must not seek past
+        // the new EOF and stall — it must fall back to a full re-read.
+        let (new_msgs, new_offset, _) =
+            read_session_incremental(path.to_str().unwrap(), offset).unwrap();
+        assert_eq!(
+            new_msgs.len(),
+            1,
+            "must fall back to reading the rewritten file from the start"
+        );
+        assert_eq!(new_offset, rewritten.len() as u64);
 
         std::fs::remove_dir_all(&tmp).ok();
     }
