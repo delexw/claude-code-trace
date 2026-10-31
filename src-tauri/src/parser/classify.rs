@@ -3480,6 +3480,47 @@ mod tests {
         }
     }
 
+    // --- Issue #381: v2.1.304+ tools-used-before-summary compat ---
+
+    #[test]
+    fn classify_compact_summary_surfaces_tools_used_before_summary() {
+        // v2.1.304 release notes: "Added the names of the tools called earlier to the
+        // compaction summary in the transcript view (Ctrl+O)." Confirmed via a real v2.1.316
+        // session (`/compact` capture) that Claude Code embeds this as
+        // <system-reminder><tools-used-before-summary>Bash, Read</tools-used-before-summary>
+        // </system-reminder> inside the isCompactSummary message, right before "Summary:". The
+        // generic <system-reminder> noise stripping must not delete the tool list along with it.
+        let e = Entry {
+            entry_type: "user".to_string(),
+            uuid: "compact-summary-uuid-381".to_string(),
+            timestamp: "2026-10-31T21:43:08Z".to_string(),
+            is_compact_summary: true,
+            message: super::super::entry::EntryMessage {
+                role: "user".to_string(),
+                content: Some(json!(
+                    "This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.\n\n<system-reminder>\n<tools-used-before-summary>Bash, Read</tools-used-before-summary>\n</system-reminder>\nSummary:\n1. Primary Request: did stuff."
+                )),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::Compact(c)) => {
+                assert!(
+                    c.text.contains("Tools used before summary: Bash, Read"),
+                    "tool list must be surfaced, got: {}",
+                    c.text
+                );
+                assert!(
+                    c.text.contains("This session is being continued"),
+                    "surrounding prose must be preserved"
+                );
+                assert!(!c.text.contains("<system-reminder>"));
+            }
+            other => panic!("Expected Compact for isCompactSummary user entry, got {other:?}"),
+        }
+    }
+
     // --- Issue #124: v2.1.166+ fallbackModel retry stubs (empty-content assistant entries) ---
 
     #[test]
