@@ -107,7 +107,7 @@ parse this format:
 ```mermaid
 flowchart LR
     NAME["mcp__chrome-devtools__take_screenshot"]
-    NAME --> SPLIT["strip 'mcp__' prefix\nfind next '__'"]
+    NAME --> SPLIT["strip 'mcp__' prefix\nfind LAST '__'"]
     SPLIT --> SRV["server: chrome-devtools"]
     SPLIT --> TOOL["tool: take_screenshot"]
     SRV --> DISP["mcp_display_name():\n'MCP chrome-devtools'"]
@@ -118,6 +118,11 @@ flowchart LR
 The category for all `mcp__` tools is `Mcp` regardless of server. Names that match the prefix
 pattern but have an empty server or tool segment (e.g. `mcp____tool`) are rejected by
 `parse_mcp_tool_name` and fall through to category `Other`.
+
+Server names may themselves contain `__` (Claude Code v2.1.299+). `parse_mcp_tool_name` splits
+on the _last_ `__`, so everything before it — however many `__` it contains — is the server's
+whole normalized name, and only the final segment is the tool name, e.g.
+`mcp__my__server__actual_tool` → server `my__server`, tool `actual_tool`.
 
 ---
 
