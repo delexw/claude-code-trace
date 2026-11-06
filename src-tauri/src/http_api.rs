@@ -935,6 +935,10 @@ mod tests {
             (Method::GET, "/api/antigravity/settings"),
             (Method::POST, "/api/antigravity/root"),
             (Method::POST, "/api/antigravity/session"),
+            (Method::GET, "/api/codex/sessions"),
+            (Method::GET, "/api/codex/settings"),
+            (Method::POST, "/api/codex/root"),
+            (Method::POST, "/api/codex/session"),
         ] {
             let req = Request::builder()
                 .method(method)

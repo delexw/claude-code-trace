@@ -48,10 +48,18 @@ and settings show whatever the enabled plugins provide.
 | ----------- | ----------------------------------------------------------------------- | --------- |
 | Claude Code | `~/.claude/projects/` session logs                                      | Always on |
 | Antigravity | Google Antigravity "brain" conversations in `~/.gemini/<flavor>/brain/` | Off       |
+| Codex       | `~/.codex/sessions/` and `~/.codex/archived_sessions/` rollout logs     | Off       |
 
 Turn optional plugins on under **Settings → General → Sources**. With more than one on, the
 picker gets an All / per-source filter. Antigravity conversations are read-only, and you can point
 it at a different brain directory in Settings.
+
+Enable **Codex** under Sources to browse Codex chats. It reads `$CODEX_HOME` (or `~/.codex`)
+and, on Windows, also detects Codex homes in installed WSL distributions. Set a Codex Home
+Directory in Settings to read one specific home instead. Messages, readable reasoning, tool
+calls and results, and recorded token totals are supported; encrypted reasoning stays hidden.
+The web and desktop viewers follow updates to an open chat; press `r` to refresh in the terminal
+UI. Chat files are read-only. All committed Codex test data is fabricated.
 
 To add a plugin, see [specs/15-session-source-plugins.md](specs/15-session-source-plugins.md).
 

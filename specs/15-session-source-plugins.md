@@ -243,6 +243,32 @@ interface AntigravityWindow {
 - Each transcript gets a byte-offset index cached in the app's config dir, so opening a large
   conversation does not re-parse it whole. Nothing is ever written under a brain root.
 
+## Plugin: `codex`
+
+Read-only Codex rollout viewer, off by default. It scans `sessions/` and
+`archived_sessions/` below `$CODEX_HOME` or `~/.codex`. On Windows it also discovers installed
+WSL distributions and their Codex homes. A custom `plugins.codex.root` replaces auto-detection
+and points to a Codex home, rather than directly to its sessions folder.
+
+| Command                                     | HTTP                      | Returns                                                   |
+| ------------------------------------------- | ------------------------- | --------------------------------------------------------- |
+| `list_codex_sessions`                       | `GET /api/codex/sessions` | `CodexSession[]`, newest first; empty while disabled      |
+| `get_codex_settings`                        | `GET /api/codex/settings` | `{root: string \| null, roots: [{path, source, exists}]}` |
+| `set_codex_root {path}`                     | `POST /api/codex/root`    | Updated Codex settings; null clears the override          |
+| `load_codex_session {path, start?, limit?}` | `POST /api/codex/session` | `CodexWindow`; limit 0 fetches metadata only              |
+
+`CodexSession` contains `id`, `path`, `title`, `cwd`, `model`, `modified_at` (ISO timestamp),
+`archived`, and `source`. `CodexWindow` contains shared `DisplayMessage` bodies plus `count`,
+`start`, `roles`, `ongoing`, `revision`, and `input_tokens`, `output_tokens`, `cache_read_tokens`,
+`total_tokens`. The shared assistant role remains `claude` for renderer compatibility; each
+Codex frontend labels it **Codex**. No Claude-only actions are attached to these sessions.
+
+The parser reconciles response items and duplicate event messages, matches tool results by call
+ID, and omits encrypted reasoning. The web/desktop source polls the active conversation using
+its revision and loads bounded message windows. Terminal refresh uses `r`. Test transcripts
+and expected messages are fabricated; personal Windows and WSL chats may only be used for
+read-only local validation.
+
 ## Adding a plugin
 
 1. Rust: `src-tauri/src/plugins/<id>/` implementing `SourcePlugin`; add it to `PLUGINS`; list its

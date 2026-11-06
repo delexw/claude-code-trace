@@ -143,7 +143,7 @@ def _picker_entries(app) -> list[tuple[str, object]]:
 
 
 def test_the_registered_sources_in_picker_order():
-    assert [plugin.id for plugin in REGISTRY] == ["claude", "antigravity"]
+    assert [plugin.id for plugin in REGISTRY] == ["claude", "antigravity", "codex"]
 
 
 def test_a_backend_without_a_plugins_list_leaves_only_required_plugins_on():

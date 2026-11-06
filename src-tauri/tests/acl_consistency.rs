@@ -148,6 +148,10 @@ fn plugin_permission_files_are_granted_by_default() {
         "get_antigravity_settings",
         "set_antigravity_root",
         "load_antigravity_session",
+        "list_codex_sessions",
+        "load_codex_session",
+        "get_codex_settings",
+        "set_codex_root",
     ] {
         assert!(granted.contains(command), "{command} must be ACL-granted");
     }

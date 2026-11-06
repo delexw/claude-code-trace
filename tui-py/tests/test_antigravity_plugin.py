@@ -241,7 +241,7 @@ def _entries(app) -> list[tuple[str, object]]:
 
 
 def test_antigravity_is_registered_after_claude():
-    assert [p.id for p in REGISTRY][-1] == "antigravity"
+    assert [p.id for p in REGISTRY].index("antigravity") > [p.id for p in REGISTRY].index("claude")
 
 
 @pytest.mark.asyncio

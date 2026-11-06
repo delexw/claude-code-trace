@@ -5,6 +5,8 @@
  * HTML shell, gated on an allowlisted `Host`.
  */
 import { expect, test } from "@playwright/test";
+import { appendFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { E2E } from "../playwright.config";
 import {
   addClient,
@@ -28,6 +30,59 @@ import {
 
 const { port, configDir, projectsDir } = E2E.sameOrigin;
 const api = `http://127.0.0.1:${port}`;
+
+test("Codex source opens fabricated chats and follows appended output", async ({
+  page,
+  request,
+}) => {
+  await ensureWebUiActive(request, api, configDir);
+  const headers = { "X-CCTrace-Token": readCredential(configDir, "tui") };
+  const codexRoot = resolve(E2E.tmp, "same/codex");
+  expect(
+    (await request.post(`${api}/api/codex/root`, { headers, data: { path: codexRoot } })).status(),
+  ).toBe(200);
+  try {
+    await page.goto("/");
+    await expect(page.getByText(FIXTURE_FIRST_MESSAGE)).toBeVisible();
+    await page.getByTitle("Settings").click();
+    await page.getByRole("tab", { name: "General", exact: true }).click();
+    const toggle = page.getByRole("switch", { name: "Show Codex sessions" });
+    await expect(toggle).toHaveAttribute("aria-checked", "false");
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-checked", "true");
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    const title = "Build a toy calculator for the fabricated Codex test";
+    await expect(page.getByText(title, { exact: true })).toBeVisible();
+    await page.getByText(title, { exact: true }).click();
+    await expect(
+      page.getByText("The fabricated calculator is ready.", { exact: true }).first(),
+    ).toBeVisible();
+    await expect(page.getByText("Claude", { exact: true })).toHaveCount(0);
+    const followup = {
+      timestamp: new Date().toISOString(),
+      type: "response_item",
+      payload: {
+        type: "message",
+        role: "assistant",
+        content: [{ type: "output_text", text: "Fabricated live update arrived." }],
+      },
+    };
+    appendFileSync(
+      resolve(codexRoot, "sessions/2026/01/01/rollout-fabricated.jsonl"),
+      `${JSON.stringify(followup)}\n`,
+    );
+    await expect(
+      page.getByText("Fabricated live update arrived.", { exact: true }).first(),
+    ).toBeVisible();
+    await page.getByRole("button", { name: /Sessions/ }).click();
+    await expect(page.getByText(title, { exact: true })).toBeVisible();
+  } finally {
+    await request.post(`${api}/api/plugins/enabled`, {
+      headers,
+      data: { id: "codex", enabled: false },
+    });
+  }
+});
 
 test.describe("HTTP API without a browser", () => {
   test("keeps every secret on the test path, never the real config dir", () => {

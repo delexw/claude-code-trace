@@ -1,0 +1,11 @@
+{"timestamp":"2026-01-01T12:00:00Z","type":"session_meta","payload":{"id":"fabricated-codex-session","cwd":"/example/toy-calculator","cli_version":"0.0.0-test","originator":"synthetic-fixture"}}
+{"timestamp":"2026-01-01T12:00:01Z","type":"turn_context","payload":{"model":"example-model","cwd":"/example/toy-calculator"}}
+{"timestamp":"2026-01-01T12:00:02Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Build a toy calculator for the fabricated Codex test"}]}}
+{"timestamp":"2026-01-01T12:00:02Z","type":"event_msg","payload":{"type":"user_message","message":"Build a toy calculator for the fabricated Codex test"}}
+{"timestamp":"2026-01-01T12:00:03Z","type":"response_item","payload":{"type":"reasoning","summary":[{"type":"summary_text","text":"Check the fabricated calculator first."}]}}
+{"timestamp":"2026-01-01T12:00:04Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"echo fabricated-calculator\"}","call_id":"fabricated-tool"}}
+{"timestamp":"2026-01-01T12:00:05Z","type":"response_item","payload":{"type":"function_call_output","call_id":"fabricated-tool","output":"fabricated-calculator-output"}}
+{"timestamp":"2026-01-01T12:00:06Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"The fabricated calculator is ready."}]}}
+{"timestamp":"2026-01-01T12:00:06Z","type":"event_msg","payload":{"type":"agent_message","message":"The fabricated calculator is ready."}}
+{"timestamp":"2026-01-01T12:00:07Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":40,"cached_input_tokens":5,"output_tokens":10,"total_tokens":50}}}}
+{"timestamp":"2026-01-01T12:00:08Z","type":"event_msg","payload":{"type":"task_complete"}}
