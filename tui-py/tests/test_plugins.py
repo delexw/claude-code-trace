@@ -6,11 +6,11 @@ from __future__ import annotations
 from unittest.mock import Mock
 
 import pytest
-from textual.widgets import Static
+from textual.widgets import Collapsible, ListView, Static
 
 import api
 import app as app_module
-from data_types import SessionInfo
+from data_types import DisplayItem, DisplayMessage, SessionInfo
 from plugins import REGISTRY
 from plugins.base import (
     PickerRow,
@@ -279,6 +279,28 @@ async def test_opening_a_row_goes_to_the_plugin_that_owns_it(monkeypatch):
         await pilot.pause()
 
         assert pilot.app.plugins.get("fake").opened == ["fake-1"]
+
+
+@pytest.mark.asyncio
+async def test_enter_expands_the_first_detail_item(monkeypatch):
+    _settings(monkeypatch, fake_enabled=False)
+    async with TwoSourceApp().run_test() as pilot:
+        await _settle(pilot)
+        app = pilot.app
+        app._detail_full_message = DisplayMessage(
+            role="claude",
+            items=[DisplayItem(id="fabricated-tool", item_type="ToolCall", tool_name="Read")],
+        )
+        app.view = "detail"
+        app._sync_detail_view()
+        await pilot.pause()
+        items = app.query_one("#items-list", ListView)
+        items.index = 0
+        items.focus()
+        first = app.query_one("#item-0", Collapsible)
+        assert first.collapsed
+        await pilot.press("enter")
+        assert not first.collapsed
 
 
 @pytest.mark.asyncio

@@ -374,10 +374,9 @@ class CCTraceApp(App):
                     self._sync_detail_view_for_message_index(raw_idx)
                     self.view = "detail"
 
-        elif lv_id == "items-list":
+        elif lv_id == "items-list" and event.index is not None:
             # Enter on a detail-view item → toggle expand, or drill into subagent
-            if event.index is not None:
-                self._handle_detail_enter(event.index)
+            self._handle_detail_enter(event.index)
 
     def on_list_view_highlighted(self, _event: ListView.Highlighted) -> None:
         """No-op — widgets manage their own highlight; Footer renders keybinds."""
