@@ -1,6 +1,15 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { invoke } from "../../lib/invoke";
-import type { DisplayMessage } from "../../types";
+import type { DisplayMessage, GitInfo } from "../../types";
 import type { KeyHint, SourceContext, SourceRuntime, SourceView } from "../types";
 import { MessageList } from "../../components/MessageList";
 import { MessageDetail } from "../../components/MessageDetail";
@@ -8,10 +17,15 @@ import { BackIcon } from "../../components/Icons";
 import { BackToMessagesButton } from "../../components/BackToMessagesButton";
 import { CodexInfoBar } from "./CodexInfoBar";
 import { CodexHeaderStats } from "./CodexHeaderStats";
+import { useCodexProjects } from "./useCodexProjects";
 import { CodexPickerSection, visibleSessions } from "./CodexPickerSection";
 import { roleLabel, roleStyle } from "./roleStyles";
 import type { CodexSession, CodexWindow } from "./types";
 import "./codex.css";
+
+const CodexEfficiency = lazy(() =>
+  import("./CodexEfficiency").then((module) => ({ default: module.CodexEfficiency })),
+);
 
 interface OpenChat {
   session: CodexSession;
@@ -44,11 +58,12 @@ function errorText(error: unknown): string {
 }
 
 export function useCodexSource(ctx: SourceContext): SourceRuntime {
-  const { openView, goToPicker, viewActionsRef } = ctx;
+  const { openView, goToPicker, viewActionsRef, setPickerIndex } = ctx;
   const [sessions, setSessions] = useState<CodexSession[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [chat, setChat] = useState<OpenChat | null>(null);
+  const [git, setGit] = useState<{ path: string; info: GitInfo } | null>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [expanded, setExpanded] = useState<Set<number>>(() => new Set());
   const enabledRef = useRef(ctx.enabled);
@@ -163,6 +178,19 @@ export function useCodexSource(ctx: SourceContext): SourceRuntime {
   }, []);
 
   const path = chat?.session.path;
+  const cwd = chat?.session.cwd;
+  useEffect(() => {
+    if (!ctx.enabled || !path || !cwd) return;
+    let disposed = false;
+    void invoke<GitInfo>("get_git_info", { cwd })
+      .then((info) => {
+        if (!disposed) setGit({ path, info });
+      })
+      .catch(() => {});
+    return () => {
+      disposed = true;
+    };
+  }, [ctx.enabled, path, cwd]);
   useEffect(() => {
     if (!ctx.enabled || ctx.activeView === null || !path) return;
     let stopped = false;
@@ -186,6 +214,7 @@ export function useCodexSource(ctx: SourceContext): SourceRuntime {
           if (
             current.window.ongoing !== index.ongoing ||
             current.window.cost_usd !== index.cost_usd ||
+            current.window.cost_partial !== index.cost_partial ||
             current.window.total_tokens !== index.total_tokens
           ) {
             setChat((latest) =>
@@ -196,6 +225,7 @@ export function useCodexSource(ctx: SourceContext): SourceRuntime {
                       ...latest.window,
                       ongoing: index.ongoing,
                       cost_usd: index.cost_usd,
+                      cost_partial: index.cost_partial,
                       total_tokens: index.total_tokens,
                       input_tokens: index.input_tokens,
                       output_tokens: index.output_tokens,
@@ -237,9 +267,19 @@ export function useCodexSource(ctx: SourceContext): SourceRuntime {
     return () => window.clearInterval(timer);
   }, [ctx.enabled, ctx.activeView, loadSessions]);
 
+  const selectProject = useCallback(() => {
+    setPickerIndex(0);
+    goToPicker();
+  }, [setPickerIndex, goToPicker]);
+  const projects = useCodexProjects({
+    sessions,
+    loading,
+    onRefresh: loadSessions,
+    onSelect: selectProject,
+  });
   const conversations = useMemo(
-    () => visibleSessions(sessions, ctx.searchQuery),
-    [sessions, ctx.searchQuery],
+    () => visibleSessions(sessions, ctx.searchQuery, projects.selectedProject),
+    [sessions, ctx.searchQuery, projects.selectedProject],
   );
   const count = chat?.window.count ?? 0;
   const showList = useCallback(() => openView("list"), [openView]);
@@ -277,7 +317,13 @@ export function useCodexSource(ctx: SourceContext): SourceRuntime {
     },
     [ensureRange],
   );
-  const infoBar = chat ? <CodexInfoBar session={chat.session} window={chat.window} /> : undefined;
+  const infoBar = chat ? (
+    <CodexInfoBar
+      session={chat.session}
+      window={chat.window}
+      gitInfo={git && git.path === path ? git.info : null}
+    />
+  ) : undefined;
   const alert = error ? (
     <div className="codex-error" role="alert">
       {error}
@@ -308,6 +354,8 @@ export function useCodexSource(ctx: SourceContext): SourceRuntime {
       q: goToPicker,
       Escape: goToPicker,
       s: goToPicker,
+      h: projects.sidebar.focus,
+      ArrowLeft: projects.sidebar.focus,
     },
     hints: LIST_HINTS,
     hintActions: { sessions: goToPicker },
@@ -317,23 +365,43 @@ export function useCodexSource(ctx: SourceContext): SourceRuntime {
         {!chat ? null : count === 0 ? (
           <div className="codex-empty">This Codex chat has no recorded messages yet.</div>
         ) : (
-          <MessageList
-            key={`${path}:${ctx.fontScale}`}
-            count={count}
-            getMessage={getMessage}
-            roles={chat.window.roles}
-            selectedIndex={selectedIndex}
-            expandedSet={expanded}
-            ongoing={chat.window.ongoing}
-            onRangeChange={onRangeChange}
-            onSelect={setSelectedIndex}
-            onToggle={toggle}
-            onOpenDetail={openDetail}
-            viewActionsRef={viewActionsRef}
-            onExpandAll={expandAll}
-            onCollapseAll={collapseAll}
-            rowRoleStyle={rowRoleStyle}
-          />
+          <div className="session-view">
+            {ctx.enabled && (
+              <Suspense fallback={null}>
+                <CodexEfficiency
+                  key={chat.session.path}
+                  session={chat.session}
+                  currentTurns={count}
+                  openSettings={() => ctx.openSettings("analytics")}
+                  onJumpToFinding={(finding) => {
+                    const index = Math.max(0, Math.min(count - 1, finding.startMessageIndex));
+                    setSelectedIndex(index);
+                    setExpanded((previous) => new Set([...previous, index]));
+                    visibleRange.current = { start: index, end: index + 1 };
+                    void ensureRange(index, index + 1);
+                    showList();
+                  }}
+                />
+              </Suspense>
+            )}
+            <MessageList
+              key={`${path}:${ctx.fontScale}`}
+              count={count}
+              getMessage={getMessage}
+              roles={chat.window.roles}
+              selectedIndex={selectedIndex}
+              expandedSet={expanded}
+              ongoing={chat.window.ongoing}
+              onRangeChange={onRangeChange}
+              onSelect={setSelectedIndex}
+              onToggle={toggle}
+              onOpenDetail={openDetail}
+              viewActionsRef={viewActionsRef}
+              onExpandAll={expandAll}
+              onCollapseAll={collapseAll}
+              rowRoleStyle={rowRoleStyle}
+            />
+          </div>
         )}
       </>
     ),
@@ -358,6 +426,7 @@ export function useCodexSource(ctx: SourceContext): SourceRuntime {
               onBack={showList}
               viewActionsRef={viewActionsRef}
               roleLabel={roleLabel(message)}
+              messageRoleStyle={roleStyle}
               debugHint={false}
               emptyNotice="This Codex message records no text, tool call or result."
             />
@@ -370,6 +439,7 @@ export function useCodexSource(ctx: SourceContext): SourceRuntime {
   };
 
   return {
+    sidebar: ctx.enabled ? projects.sidebar : undefined,
     picker: {
       count: ctx.enabled ? conversations.length : 0,
       headerStats: ctx.enabled ? <CodexHeaderStats sessions={conversations} /> : undefined,

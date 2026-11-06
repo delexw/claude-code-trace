@@ -86,7 +86,23 @@ export function App() {
     activeView: location.kind === "view" && location.plugin === plugin.id ? location.view : null,
     openView: viewOpeners[plugin.id],
     goToPicker,
-    setPickerIndex: setPickerSelectedIndex,
+    setPickerIndex: (localIndex) => {
+      if (sourceFilter !== ALL_SOURCES && sourceFilter !== plugin.id) {
+        setSourceFilter(plugin.id);
+        setPickerSelectedIndex(localIndex);
+        return;
+      }
+      let offset = 0;
+      for (const [index, candidate] of PLUGINS.entries()) {
+        if (candidate.id === plugin.id) break;
+        if (
+          isPluginEnabled(candidate, settingsRef.current?.plugins) &&
+          sourceFilter === ALL_SOURCES
+        )
+          offset += runtimesRef.current[index].picker.count;
+      }
+      setPickerSelectedIndex(offset + localIndex);
+    },
     searchQuery,
     viewActionsRef,
     fontScale,
@@ -103,11 +119,13 @@ export function App() {
   // the render that created the callback.
   const runtimesRef = useRef(runtimes);
   useLayoutEffect(() => {
+    // oxlint-disable-next-line react/immutability -- post-commit event-handler snapshot; source callbacks only read it on user actions
     runtimesRef.current = runtimes;
   });
 
   const settingsRef = useRef(settings);
   useLayoutEffect(() => {
+    // oxlint-disable-next-line react/immutability -- post-commit event-handler snapshot; source callbacks only read it on user actions
     settingsRef.current = settings;
   });
 
@@ -202,20 +220,29 @@ export function App() {
   const owner = sources.find((s) => s.plugin.id === sessionOwner)?.runtime;
   const backToSession = () => owner?.backToSession();
 
-  const sidebars = sources.flatMap((s) => (s.runtime.sidebar ? [s] : []));
-  const focusedSidebar = sidebars.find((s) => s.runtime.sidebar?.focused)?.runtime.sidebar;
-  const blurSidebars = () => {
-    for (const s of sidebars) s.runtime.sidebar?.blur();
-  };
-  const focusSidebar = () => sidebars[0]?.runtime.sidebar?.focus();
-
   // The picker shows every enabled plugin, or just the one the filter picks.
   const filterMatches = sources.some((s) => s.plugin.id === sourceFilter);
   const activeFilter = filterMatches ? sourceFilter : ALL_SOURCES;
   const pickerSources = filterMatches
     ? sources.filter((s) => s.plugin.id === sourceFilter)
     : sources;
+  const sidebars = (activeSource ? [activeSource] : pickerSources).filter((s) => s.runtime.sidebar);
+  const focusedSidebar = sidebars.find((s) => s.runtime.sidebar?.focused)?.runtime.sidebar;
+  const blurSidebars = () => {
+    for (const s of sources) s.runtime.sidebar?.blur();
+  };
+  const focusSidebar = () => {
+    blurSidebars();
+    // Match the selected picker section when several sources share the sidebar.
+    let offset = 0;
+    const selectedSource = pickerSources.find((s) => {
+      offset += s.runtime.picker.count;
+      return pickerSelectedIndex < offset;
+    });
+    (sidebars.find((s) => s === selectedSource) ?? sidebars[0])?.runtime.sidebar?.focus();
+  };
   const changeSourceFilter = (filter: string) => {
+    blurSidebars();
     setSourceFilter(filter);
     setPickerSelectedIndex(0);
   };
@@ -328,11 +355,24 @@ export function App() {
       />
 
       <div className="app-body">
-        {sidebars.map((s) => (
-          <Fragment key={s.plugin.id}>
-            {s.runtime.sidebar?.render({ width: sidebarWidth, minWidth: 100, maxWidth: 400 })}
-          </Fragment>
-        ))}
+        {sidebars.length > 0 && (
+          <aside
+            className="source-sidebars"
+            style={{ width: sidebarWidth, minWidth: 100, maxWidth: 400 }}
+          >
+            {sidebars.map((s) => (
+              <div
+                className="source-sidebars__section"
+                key={s.plugin.id}
+                onClickCapture={() => {
+                  for (const peer of sources) if (peer !== s) peer.runtime.sidebar?.blur();
+                }}
+              >
+                {s.runtime.sidebar?.render({ width: "100%", flex: 1, minHeight: 0 })}
+              </div>
+            ))}
+          </aside>
+        )}
         {sidebars.length > 0 && <ResizeHandle onResize={setSidebarWidth} />}
         <div className="main-content" onClick={blurSidebars}>
           {activeView ? activeView.render() : renderPicker()}

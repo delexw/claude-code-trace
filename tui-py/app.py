@@ -21,7 +21,7 @@ from textual import events
 from textual.actions import parse as parse_action
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal
+from textual.containers import Horizontal, Vertical
 from textual.reactive import reactive
 from textual.widget import Widget
 from textual.widgets import ContentSwitcher, Footer, Header, ListView
@@ -178,8 +178,9 @@ class CCTraceApp(App):
         yield Header()
         with Horizontal(id="main-area"):
             self._sidebar_widgets = self._take_widgets("compose_sidebar")
-            yield from self._sidebar_widgets
             if self._sidebar_widgets:
+                with Vertical(id="source-sidebars"):
+                    yield from self._sidebar_widgets
                 yield SidebarResizer(id="sidebar-resizer")
             with ContentSwitcher(initial="picker", id="content-switcher"):
                 yield SourcePicker(id="picker")
@@ -249,6 +250,7 @@ class CCTraceApp(App):
                 widget.display = self.plugins.is_enabled(plugin.id)
         for plugin in turned_on:
             plugin.start()
+        self._sync_sidebar_visibility()
         if self.view == PICKER_VIEW:
             self.sync_picker()
 
@@ -517,6 +519,12 @@ class CCTraceApp(App):
             plugin = self.plugins.get(str(plugin_id))
             if plugin is None:
                 return False
+            if (
+                self.view in ("list", "detail")
+                and self._session_plugin is not None
+                and plugin is not self._session_plugin
+            ):
+                return False
             return plugin.check_action(str(plugin_action), self.view)
         return True
 
@@ -602,6 +610,8 @@ class CCTraceApp(App):
     def action_focus_sidebar(self) -> None:
         """h: focus the first focusable widget in the sidebar."""
         for widget in self._sidebar_widgets:
+            if not widget.display:
+                continue
             for node in [widget, *widget.query("*")]:
                 if node.focusable:
                     node.focus()
@@ -728,9 +738,23 @@ class CCTraceApp(App):
 
     def _sync_all_widgets(self) -> None:
         self._sync_info_bar()
+        self._sync_sidebar_visibility()
         for plugin in self.plugins.enabled():
             plugin.sync_sidebar()
         self._sync_content_view()
+
+    def _sync_sidebar_visibility(self) -> None:
+        owner = (
+            self._session_plugin
+            if self.view in ("list", "detail")
+            else self._view_owners.get(self.view)
+        )
+        for plugin in self.plugins.all():
+            for widget in self._plugin_widgets.get(plugin.id, []):
+                if widget in self._sidebar_widgets:
+                    widget.display = self.plugins.is_enabled(plugin.id) and (
+                        owner is None or plugin is owner
+                    )
 
     def _sync_info_bar(self) -> None:
         if not self.session_path or self.view == "picker":
@@ -738,18 +762,38 @@ class CCTraceApp(App):
             return
         parts: list[str] = []
         # last segment of path
-        parts.append(self.session_path.split("/")[-1][:40])
+        parts.append(
+            (self.meta.session_id or self.session_path.replace("\\", "/").split("/")[-1])[:40]
+        )
         if self.meta.git_branch:
             parts.append(f"@{self.meta.git_branch}")
         if self.meta.permission_mode and self.meta.permission_mode != "default":
             parts.append(self.meta.permission_mode)
+        if self.meta.sandbox_policy:
+            parts.append(self.meta.sandbox_policy)
+        if self.meta.duration_ms is not None:
+            from format_utils import format_duration
+
+            parts.append(format_duration(self.meta.duration_ms))
+        if self.meta.context_window and self.meta.context_tokens is not None:
+            parts.append(f"ctx {round(self.meta.context_tokens / self.meta.context_window * 100)}%")
         if self.ongoing:
             parts.append("⬤ live")
-        if self.totals and self.totals.cost_usd > 0:
+        if self.totals:
             from format_utils import format_cost, format_tokens
 
-            parts.append(format_tokens(self.totals.total_tokens))
-            parts.append(format_cost(self.totals.cost_usd))
+            if self.totals.total_tokens > 0:
+                parts.append(format_tokens(self.totals.total_tokens))
+            if self.totals.model:
+                parts.append(self.totals.model)
+            if self.totals.estimated_cost:
+                parts.append(
+                    f"~{format_cost(self.totals.cost_usd)}{'+' if self.totals.cost_partial else ''} estimated API cost"
+                    if self.totals.cost_usd is not None
+                    else "Cost unavailable"
+                )
+            elif self.totals.cost_usd is not None and self.totals.cost_usd > 0:
+                parts.append(format_cost(self.totals.cost_usd))
         self.sub_title = "  ·  ".join(parts)
 
     def _sync_session_picker(self) -> None:

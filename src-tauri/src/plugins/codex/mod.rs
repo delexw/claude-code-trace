@@ -79,3 +79,16 @@ pub fn load_session(
 ) -> Result<reader::CodexWindow, String> {
     reader::load_window(std::path::Path::new(path), start.unwrap_or(0), limit)
 }
+
+pub fn prepare_efficiency_payload(
+    path: &str,
+    mode: Option<crate::efficiency::settings::PayloadMode>,
+) -> Result<crate::efficiency::PreparedEfficiencyPayload, String> {
+    let window = load_session(path, None, None)?;
+    crate::commands::efficiency::prepare_display_efficiency_payload(
+        path,
+        mode.unwrap_or_else(|| crate::efficiency::settings::load().default_payload_mode),
+        &window.messages,
+        window.total_tokens,
+    )
+}

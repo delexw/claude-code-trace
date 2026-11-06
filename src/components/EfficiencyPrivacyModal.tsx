@@ -8,6 +8,7 @@ interface EfficiencyPrivacyModalProps {
   busy: boolean;
   onCancel: () => void;
   onConfirm: () => void;
+  sourceLabel?: string;
 }
 
 export function EfficiencyPrivacyModal({
@@ -15,6 +16,7 @@ export function EfficiencyPrivacyModal({
   busy,
   onCancel,
   onConfirm,
+  sourceLabel = "Claude Code",
 }: EfficiencyPrivacyModalProps) {
   const [privacyConfirmed, setPrivacyConfirmed] = useState(false);
 
@@ -41,8 +43,8 @@ export function EfficiencyPrivacyModal({
           <div>
             <h3 id="privacy-notice-summary">Your session data will leave this device</h3>
             <p>
-              This analysis sends selected data from this Claude Code session to Jev, an external AI
-              service.
+              This analysis sends selected data from this {sourceLabel} session to Jev, an external
+              AI service.
             </p>
           </div>
         </section>

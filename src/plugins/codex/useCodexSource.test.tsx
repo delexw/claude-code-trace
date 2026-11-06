@@ -6,6 +6,7 @@ import { makeMessage, makeSession, makeWindow } from "./testFixtures";
 
 const mockInvoke = vi.fn();
 vi.mock("../../lib/invoke", () => ({ invoke: (...args: unknown[]) => mockInvoke(...args) }));
+vi.mock("./CodexEfficiency", () => ({ CodexEfficiency: () => null }));
 vi.mock("react-virtuoso", () => ({
   Virtuoso: ({
     totalCount = 0,
@@ -57,6 +58,7 @@ function Harness({
   });
   return (
     <>
+      {source.sidebar?.render({})}
       {view ? (
         <>
           {source.views[view].render()}
@@ -136,6 +138,19 @@ describe("useCodexSource", () => {
     expect(latest.picker.count).toBe(0);
   });
 
+  it("reads current Git information for the chat's recorded working folder", async () => {
+    const originalServe = mockInvoke.getMockImplementation()!;
+    mockInvoke.mockImplementation((command, args) =>
+      command === "get_git_info"
+        ? Promise.resolve({ branch: "fabricated-feature", dirty: true, worktree_dirs: [] })
+        : originalServe(command, args),
+    );
+    render(<Harness />);
+    await open();
+    expect(await screen.findByTitle("Current Git branch")).toHaveTextContent("fabricated-feature");
+    expect(mockInvoke).toHaveBeenCalledWith("get_git_info", { cwd: "/work/sample" });
+  });
+
   it("uses the same search results for keyboard selection and displayed cards", async () => {
     mockInvoke.mockResolvedValue([
       makeSession(),
@@ -151,6 +166,40 @@ describe("useCodexSource", () => {
     expect(latest.picker.count).toBe(1);
     expect(screen.getByText("Add sample tests")).toBeInTheDocument();
     expect(screen.queryByText("Repair the sample build")).toBeNull();
+  });
+
+  it("filters projects across searches, refreshes and returning from a conversation", async () => {
+    const other = makeSession({
+      id: "other",
+      path: "/invented/other.jsonl",
+      title: "Invent a calendar",
+      cwd: "/work/calendar",
+      cost_usd: 2,
+    });
+    const originalServe = mockInvoke.getMockImplementation()!;
+    mockInvoke.mockImplementation((command, args) =>
+      command === "list_codex_sessions"
+        ? Promise.resolve([makeSession(), other])
+        : originalServe(command, args),
+    );
+    const rendered = render(<Harness />);
+    await start();
+    fireEvent.click(screen.getByText("sample", { selector: ".project-tree__name" }));
+    expect(latest.picker.count).toBe(1);
+    expect(screen.queryByText("Invent a calendar")).toBeNull();
+    expect(screen.getByLabelText("Estimated Codex API token cost")).toHaveTextContent("$0.25");
+    await act(async () => {
+      latest.onSettingsSaved!();
+    });
+    rendered.rerender(<Harness searchQuery="calendar" />);
+    expect(latest.picker.count).toBe(0);
+    rendered.rerender(<Harness searchQuery="" />);
+    fireEvent.click(screen.getByText("Repair the sample build"));
+    await screen.findByText("The sample build now passes.");
+    act(() => latest.views.list.keyMap.q());
+    expect(latest.picker.count).toBe(1);
+    fireEvent.click(screen.getByText("All Projects"));
+    expect(latest.picker.count).toBe(2);
   });
 
   it("totals only search-matched sessions in the shared picker header", async () => {
@@ -277,12 +326,14 @@ describe("useCodexSource", () => {
     render(<Harness />);
     await open();
     expect(screen.getByLabelText("Estimated API token cost")).toHaveTextContent("$0.25");
-    mockInvoke.mockResolvedValue(makeWindow({ cost_usd: 1.5, total_tokens: 1500, messages: [] }));
+    mockInvoke.mockResolvedValue(
+      makeWindow({ cost_usd: 1.5, cost_partial: true, total_tokens: 1500, messages: [] }),
+    );
     mockInvoke.mockClear();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(2100);
     });
-    expect(screen.getByLabelText("Estimated API token cost")).toHaveTextContent("$1.50");
+    expect(screen.getByLabelText("Estimated API token cost")).toHaveTextContent("$1.50+");
     expect(screen.getByText("1.5k tokens")).toBeInTheDocument();
     expect(mockInvoke).toHaveBeenCalledOnce();
     expect(screen.getByText("The sample build now passes.")).toBeInTheDocument();

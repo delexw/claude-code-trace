@@ -50,3 +50,13 @@ pub async fn load_codex_session(
         .await
         .map_err(|e| e.to_string())?
 }
+
+#[tauri::command]
+pub async fn prepare_codex_efficiency_payload(
+    path: String,
+    payload_mode: Option<crate::efficiency::settings::PayloadMode>,
+) -> Result<crate::efficiency::PreparedEfficiencyPayload, String> {
+    tokio::task::spawn_blocking(move || super::prepare_efficiency_payload(&path, payload_mode))
+        .await
+        .map_err(|e| e.to_string())?
+}

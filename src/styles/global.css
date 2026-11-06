@@ -237,6 +237,21 @@ body {
   overflow: hidden;
 }
 
+.source-sidebars {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.source-sidebars__section {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  border-bottom: 1px solid var(--border);
+}
+
 /* ---- Resize Handle ---- */
 
 .resize-handle {

@@ -8,7 +8,15 @@ export function knownCost(cost: number | null | undefined): cost is number {
   return typeof cost === "number" && Number.isFinite(cost) && cost >= 0;
 }
 
-export function CodexCost({ cost, className }: { cost: number | null; className: string }) {
+export function CodexCost({
+  cost,
+  className,
+  partial = false,
+}: {
+  cost: number | null;
+  className: string;
+  partial?: boolean;
+}) {
   if (!knownCost(cost)) {
     return (
       <span
@@ -21,8 +29,17 @@ export function CodexCost({ cost, className }: { cost: number | null; className:
     );
   }
   return (
-    <span className={className} aria-label="Estimated API token cost" title={COST_ESTIMATE_HINT}>
+    <span
+      className={className}
+      aria-label="Estimated API token cost"
+      title={
+        partial
+          ? `Known subtotal; additional worker costs are unavailable. ${COST_ESTIMATE_HINT}`
+          : COST_ESTIMATE_HINT
+      }
+    >
       <CostIcon /> ≈ ${formatCost(cost)}
+      {partial && "+"}
     </span>
   );
 }

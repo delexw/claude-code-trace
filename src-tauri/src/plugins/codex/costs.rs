@@ -10,9 +10,6 @@
 //! rates because a session-wide cumulative input count is not a request size.
 
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::{BufRead, BufReader};
-use std::path::Path;
 
 use serde_json::Value;
 
@@ -369,38 +366,6 @@ fn estimate(charge: &Charge) -> Option<f64> {
             / 1_000_000.0
             + usage.output as f64 * output * output_scale * speed / 1_000_000.0,
     )
-}
-
-pub(super) fn scan(path: &Path) -> Result<UsageSummary, String> {
-    let file = File::open(path).map_err(|error| error.to_string())?;
-    let mut tracker = UsageTracker::default();
-    for line in BufReader::new(file).split(b'\n') {
-        let line = line.map_err(|error| error.to_string())?;
-        let Ok(line) = std::str::from_utf8(&line) else {
-            continue;
-        };
-        // Most rollout bytes are unrelated tool output. Avoid parsing those
-        // bodies when indexing the picker and retain no conversation text.
-        if ![
-            "turn_context",
-            "token_usage_record",
-            "token_count",
-            "task_started",
-            "turn_started",
-            "task_complete",
-            "turn_complete",
-            "turn_aborted",
-        ]
-        .iter()
-        .any(|kind| line.contains(kind))
-        {
-            continue;
-        }
-        if let Ok(row) = serde_json::from_str(line.trim_start_matches('\u{feff}')) {
-            tracker.observe(&row);
-        }
-    }
-    Ok(tracker.summary())
 }
 
 #[cfg(test)]

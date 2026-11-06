@@ -6,6 +6,8 @@
 {"timestamp":"2026-01-01T12:00:03Z","type":"response_item","payload":{"type":"reasoning","summary":[{"type":"summary_text","text":"Check the fabricated calculator first."}]}}
 {"timestamp":"2026-01-01T12:00:04Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"echo fabricated-calculator\"}","call_id":"fabricated-tool"}}
 {"timestamp":"2026-01-01T12:00:05Z","type":"response_item","payload":{"type":"function_call_output","call_id":"fabricated-tool","output":"fabricated-calculator-output"}}
+{"timestamp":"2026-01-01T12:00:05Z","type":"response_item","payload":{"type":"function_call","name":"spawn_agent","arguments":"{\"message\":\"Check the fictional calculator arithmetic\",\"agent_type\":\"worker\"}","call_id":"fabricated-spawn"}}
+{"timestamp":"2026-01-01T12:00:05Z","type":"response_item","payload":{"type":"function_call_output","call_id":"fabricated-spawn","output":"{\"agent_id\":\"fabricated-worker\"}"}}
 {"timestamp":"2026-01-01T12:00:06Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"The fabricated calculator is ready."}]}}
 {"timestamp":"2026-01-01T12:00:06Z","type":"event_msg","payload":{"type":"agent_message","message":"The fabricated calculator is ready."}}
 {"timestamp":"2026-01-01T12:00:07Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000000,"cached_input_tokens":200000,"output_tokens":100000,"total_tokens":1100000}}}}

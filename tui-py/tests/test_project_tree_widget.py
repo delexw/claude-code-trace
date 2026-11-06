@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 from textual.app import App, ComposeResult
 
-from data_types import SessionInfo
+from data_types import FlatItem, SessionInfo
 from widgets.project_tree import ProjectTree, _VimTree
 
 
@@ -24,6 +26,24 @@ def _sessions(count: int, mod_time: str = "2026-09-20T10:00:00Z") -> list[Sessio
 class Harness(App):
     def compose(self) -> ComposeResult:
         yield ProjectTree(id="project-tree")
+
+
+@pytest.mark.asyncio
+async def test_source_owned_folders_preserve_collapse_on_refresh():
+    async with Harness().run_test() as pilot:
+        sidebar = pilot.app.query_one("#project-tree", ProjectTree)
+        entries = [
+            FlatItem(name="All Projects", count=2),
+            FlatItem(key="real-folder", name="app", count=1, has_children=True),
+            FlatItem(key="real-child", name="tools", count=1, depth=1),
+        ]
+        sidebar.update_items(entries, None)
+        tree = sidebar.query_one("#tree-inner", _VimTree)
+        parent = tree.root.children[1]
+        parent.collapse()
+        await pilot.pause()
+        sidebar.update_items([replace(item, count=item.count + 1) for item in entries], None)
+        assert not tree.root.children[1].is_expanded
 
 
 async def _tree(pilot, sessions, selected=None) -> _VimTree:

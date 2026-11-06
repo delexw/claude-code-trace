@@ -12,7 +12,7 @@ import {
   fenceInlineJson,
 } from "../lib/format";
 import { getModelColor, getTeamColor } from "../lib/theme";
-import { MessageItem } from "./MessageItem";
+import { MessageItem, type RoleStyle } from "./MessageItem";
 import { DetailItem } from "./DetailItem";
 import { useToggleSet } from "../hooks/useToggleSet";
 import { useScrollToSelected } from "../hooks/useScrollToSelected";
@@ -63,6 +63,8 @@ interface MessageDetailProps {
   viewActionsRef: ViewActionsRef;
   /** A source plugin's title for this message; omitted → derived from `role`. */
   roleLabel?: string;
+  /** Source styling applies to messages in nested agent panels as well. */
+  messageRoleStyle?: (message: DisplayMessage) => RoleStyle | undefined;
   /** Whether to suggest `claude --debug` for hook events; only meaningful for Claude transcripts. */
   debugHint?: boolean;
   /** Shown when the message has no text and no items; omitted → nothing is shown. */
@@ -101,6 +103,7 @@ export function MessageDetail({
   onBack,
   viewActionsRef,
   roleLabel,
+  messageRoleStyle,
   debugHint = true,
   emptyNotice,
 }: MessageDetailProps) {
@@ -387,6 +390,7 @@ export function MessageDetail({
           <BackButton onClick={onBack} />
           <span className="message-detail__title">
             {roleLabel ??
+              messageRoleStyle?.(msg)?.label ??
               (msg.role === "user" ? "User" : msg.role === "claude" ? "Claude" : "System")}
           </span>
           {model && (
@@ -433,6 +437,7 @@ export function MessageDetail({
                       key={item.id}
                       ref={idx === selectedItem ? scrollRef : undefined}
                       item={item}
+                      agentIcon={messageRoleStyle?.(msg)?.icon}
                       index={idx}
                       isSelected={idx === selectedItem}
                       isExpanded={expandedItems.has(idx)}
@@ -476,6 +481,7 @@ export function MessageDetail({
             style={widthStyle}
             isFocused={isFocused}
             panelStack={panelStack}
+            messageRoleStyle={messageRoleStyle}
             onOpenDetail={(detailMsg) => openDetailAt(depth, detailMsg)}
             onBackToList={() => backToListAt(depth)}
             onOpenSubagent={(item) => openSubagentAt(depth, item)}
@@ -498,6 +504,7 @@ interface PanelColumnProps {
   style?: React.CSSProperties;
   isFocused: boolean;
   panelStack: PanelEntry[];
+  messageRoleStyle?: (message: DisplayMessage) => RoleStyle | undefined;
   onOpenDetail: (msg: DisplayMessage) => void;
   onBackToList: () => void;
   onOpenSubagent: (item: DisplayItem) => void;
@@ -513,6 +520,7 @@ function PanelColumn({
   style,
   isFocused,
   panelStack,
+  messageRoleStyle,
   onOpenDetail,
   onBackToList,
   onOpenSubagent,
@@ -527,6 +535,7 @@ function PanelColumn({
       {entry.kind === "agent-list" ? (
         <AgentListColumn
           item={entry.item}
+          messageRoleStyle={messageRoleStyle}
           style={style}
           isFocused={isFocused}
           onOpenDetail={onOpenDetail}
@@ -538,6 +547,7 @@ function PanelColumn({
         <AgentDetailColumn
           item={entry.item}
           msg={entry.msg}
+          messageRoleStyle={messageRoleStyle}
           style={style}
           isFocused={isFocused}
           depth={depth}
@@ -557,6 +567,7 @@ function PanelColumn({
 
 interface AgentListColumnProps {
   item: DisplayItem;
+  messageRoleStyle?: (message: DisplayMessage) => RoleStyle | undefined;
   style?: React.CSSProperties;
   isFocused: boolean;
   onOpenDetail: (msg: DisplayMessage) => void;
@@ -567,6 +578,7 @@ interface AgentListColumnProps {
 
 function AgentListColumn({
   item,
+  messageRoleStyle,
   style,
   isFocused,
   onOpenDetail,
@@ -643,7 +655,12 @@ function AgentListColumn({
       }
       onClick={onFocus}
     >
-      <AgentPanelHeader item={item} panelColor={panelColor} onClose={onClose} />
+      <AgentPanelHeader
+        item={item}
+        panelColor={panelColor}
+        icon={agentIcon(item, messageRoleStyle)}
+        onClose={onClose}
+      />
       <div className="agent-panel__content">
         <div className="agent-panel__list" ref={listRef}>
           {messages.map((msg, i) => {
@@ -655,6 +672,7 @@ function AgentListColumn({
                 key={`${msg.role}-${msg.timestamp}`}
                 ref={isSelected ? selectedRef : undefined}
                 message={msg}
+                roleStyle={messageRoleStyle?.(msg)}
                 index={i}
                 isSelected={isSelected}
                 isExpanded={isExpanded}
@@ -675,6 +693,7 @@ function AgentListColumn({
 interface AgentDetailColumnProps {
   item: DisplayItem;
   msg: DisplayMessage;
+  messageRoleStyle?: (message: DisplayMessage) => RoleStyle | undefined;
   style?: React.CSSProperties;
   isFocused: boolean;
   depth: number;
@@ -689,6 +708,7 @@ interface AgentDetailColumnProps {
 function AgentDetailColumn({
   item,
   msg,
+  messageRoleStyle,
   style,
   isFocused,
   depth,
@@ -779,12 +799,18 @@ function AgentDetailColumn({
       }
       onClick={onFocus}
     >
-      <AgentPanelHeader item={item} panelColor={panelColor} onClose={onClose} />
+      <AgentPanelHeader
+        item={item}
+        panelColor={panelColor}
+        icon={agentIcon(item, messageRoleStyle)}
+        onClose={onClose}
+      />
       <div className="agent-panel__content">
         <div className="message-detail__header" style={{ borderBottom: "1px solid var(--border)" }}>
           <BackButton onClick={onBack} />
           <span className="message-detail__title">
-            {msg.role === "user" ? "User" : msg.role === "claude" ? "Claude" : "System"}
+            {messageRoleStyle?.(msg)?.label ??
+              (msg.role === "user" ? "User" : msg.role === "claude" ? "Claude" : "System")}
           </span>
           {model && (
             <span style={{ color: modelColor, fontWeight: 600, fontSize: 12 }}>{model}</span>
@@ -817,6 +843,7 @@ function AgentDetailColumn({
                       key={di.id}
                       ref={idx === selectedItem ? scrollRef : undefined}
                       item={di}
+                      agentIcon={messageRoleStyle?.(msg)?.icon}
                       index={idx}
                       isSelected={idx === selectedItem}
                       isExpanded={expandedItems.has(idx)}
@@ -843,13 +870,26 @@ function AgentDetailColumn({
 
 /* ─── Shared agent panel header ─── */
 
+function agentIcon(
+  item: DisplayItem,
+  messageRoleStyle?: (message: DisplayMessage) => RoleStyle | undefined,
+): React.ReactNode {
+  for (const message of item.subagent_messages) {
+    const icon = messageRoleStyle?.(message)?.icon;
+    if (icon != null) return icon;
+  }
+  return undefined;
+}
+
 function AgentPanelHeader({
   item,
   panelColor,
+  icon,
   onClose,
 }: {
   item: DisplayItem;
   panelColor?: string;
+  icon?: React.ReactNode;
   onClose: () => void;
 }) {
   return (
@@ -860,9 +900,7 @@ function AgentPanelHeader({
       <button className="agent-panel__close" onClick={onClose}>
         <IoMdCloseCircle className="icon--close" />
       </button>
-      <span className="agent-panel__icon">
-        <ClaudeIcon />
-      </span>
+      <span className="agent-panel__icon">{icon ?? <ClaudeIcon />}</span>
       <span className="agent-panel__type" style={panelColor ? { color: panelColor } : undefined}>
         {item.subagent_type || item.tool_name || "Subagent"}
       </span>

@@ -80,9 +80,12 @@ class EfficiencyPrivacyScreen(ModalScreen[bool]):
     }
     """
 
-    def __init__(self, payload: PreparedPayload, **kwargs) -> None:
+    def __init__(
+        self, payload: PreparedPayload, source_label: str = "Claude Code", **kwargs
+    ) -> None:
         super().__init__(**kwargs)
         self._payload = payload
+        self._source_label = source_label
 
     def compose(self) -> ComposeResult:
         with Vertical(id="privacy-dialog"):
@@ -93,7 +96,7 @@ class EfficiencyPrivacyScreen(ModalScreen[bool]):
             with VerticalScroll(id="privacy-body"):
                 yield Static(
                     f"[bold {theme.TOKEN_HIGH}]Your session data will leave this device.[/] "
-                    "This analysis sends selected data from this Claude Code session to Jev, "
+                    f"This analysis sends selected data from this {self._source_label} session to Jev, "
                     "an external AI service operated by TypeSafe AI."
                 )
                 yield Static("\n[bold]Where your data goes[/]")

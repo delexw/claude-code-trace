@@ -3,6 +3,8 @@ the shell composes and routes to them without knowing any of them by name."""
 
 from __future__ import annotations
 
+from unittest.mock import Mock
+
 import pytest
 from textual.widgets import Static
 
@@ -74,6 +76,30 @@ class TwoSourceApp(app_module.CCTraceApp):
     CSS_PATH = None
     PLUGIN_REGISTRY = (ClaudePlugin, FakePlugin)
     BINDINGS = [binding_for(FakePlugin.id, key) for key in FakePlugin.KEYS]
+
+
+class SidebarPlugin(FakePlugin):
+    def compose_sidebar(self):
+        yield Static("Fake Projects", id="fake-project-tree")
+
+
+class SidebarApp(TwoSourceApp):
+    PLUGIN_REGISTRY = (ClaudePlugin, SidebarPlugin)
+
+
+class ResumePlugin(FakePlugin):
+    KEYS = (PluginKey("y", "copy_resume", "Copy resume"),)
+
+    def action_copy_resume(self):
+        self.poked += 1
+
+    def check_action(self, action, view):
+        return view in ("list", "detail")
+
+
+class ResumeApp(TwoSourceApp):
+    PLUGIN_REGISTRY = (ClaudePlugin, ResumePlugin)
+    BINDINGS = [binding_for(plugin.id, key) for plugin in PLUGIN_REGISTRY for key in plugin.KEYS]
 
 
 class _RecordingSSE:
@@ -196,6 +222,49 @@ async def test_an_enabled_plugin_adds_its_rows_after_claude_s(monkeypatch):
         assert _picker_entries(pilot.app) == [("claude", SESSION), ("fake", "fake-1")]
         assert pilot.app.query_one("#fake-status").display is True
         assert pilot.app.plugins.get("fake").started == 1
+
+
+@pytest.mark.asyncio
+async def test_source_sidebars_stack_and_follow_the_open_view_owner(monkeypatch):
+    _settings(monkeypatch, fake_enabled=True)
+    async with SidebarApp().run_test() as pilot:
+        await _settle(pilot)
+        app = pilot.app
+        claude_tree = app.query_one("#project-tree")
+        fake_tree = app.query_one("#fake-project-tree")
+        assert claude_tree.parent.id == "source-sidebars"
+        assert fake_tree.parent is claude_tree.parent
+        assert claude_tree.display and fake_tree.display
+        app._session_plugin = app.plugins.get("fake")
+        app.view = "list"
+        await pilot.pause()
+        assert not claude_tree.display
+        assert fake_tree.display
+        app.view = "picker"
+        await pilot.pause()
+        assert claude_tree.display and fake_tree.display
+
+
+@pytest.mark.asyncio
+async def test_shared_resume_key_runs_only_for_the_active_source(monkeypatch):
+    _settings(monkeypatch, fake_enabled=True)
+    async with ResumeApp().run_test() as pilot:
+        await _settle(pilot)
+        app = pilot.app
+        claude = app.plugins.get("claude")
+        fake = app.plugins.get("fake")
+        claude.current_session = SESSION
+        copied = Mock()
+        monkeypatch.setattr(app, "copy_to_clipboard", copied)
+        app._session_plugin = fake
+        app.view = "list"
+        await pilot.press("y")
+        assert fake.poked == 1
+        copied.assert_not_called()
+        app._session_plugin = claude
+        await pilot.press("y")
+        copied.assert_called_once()
+        assert fake.poked == 1
 
 
 @pytest.mark.asyncio

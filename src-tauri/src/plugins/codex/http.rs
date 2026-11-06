@@ -15,6 +15,7 @@ pub(super) fn routes() -> Router<Arc<HttpState>> {
         .route("/api/codex/settings", get(get_settings))
         .route("/api/codex/root", post(set_root))
         .route("/api/codex/session", post(load_session))
+        .route("/api/codex/efficiency/prepare", post(prepare_efficiency))
 }
 
 async fn list_sessions(State(state): State<Arc<HttpState>>) -> Response {
@@ -83,6 +84,25 @@ async fn load_session(Json(body): Json<LoadBody>) -> Response {
     }
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PrepareBody {
+    path: String,
+    payload_mode: Option<crate::efficiency::settings::PayloadMode>,
+}
+
+async fn prepare_efficiency(Json(body): Json<PrepareBody>) -> Response {
+    match tokio::task::spawn_blocking(move || {
+        super::prepare_efficiency_payload(&body.path, body.payload_mode)
+    })
+    .await
+    {
+        Ok(Ok(payload)) => ok_json(&payload),
+        Ok(Err(e)) => err_response(StatusCode::BAD_REQUEST, e),
+        Err(e) => err_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -137,5 +157,52 @@ mod tests {
         let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(body["count"], 1);
         assert_eq!(body["messages"][0]["content"], "Invent a small demo");
+    }
+
+    #[tokio::test]
+    async fn efficiency_preview_uses_codex_messages_and_redacts_locally() {
+        let state = Arc::new(HttpState {
+            app_state: Arc::new(crate::state::AppState::for_tests(
+                crate::auth::AuthMode::Disabled,
+            )),
+            app: None,
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("rollout-invented.jsonl");
+        std::fs::write(&path, concat!(
+            "{\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"Build a fictional calculator API_KEY=pretend-secret-value\"}]}}\n",
+            "{\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"exec_command\",\"call_id\":\"sample-call\",\"arguments\":\"{\\\"cmd\\\":\\\"echo fictional\\\"}\"}}\n",
+            "{\"type\":\"response_item\",\"payload\":{\"type\":\"function_call_output\",\"call_id\":\"sample-call\",\"output\":\"fictional\"}}\n"
+        )).unwrap();
+        let response = routes()
+            .with_state(state)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/codex/efficiency/prepare")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({"path":path,"payloadMode":"full-transcript"})
+                            .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["input"]["task"]["turns"], 2);
+        assert_eq!(body["input"]["signals"]["toolCalls"], 1);
+        assert_eq!(body["input"]["actions"][0]["tool"], "exec_command");
+        assert!(body["input"]["task"]["firstUserMessage"]
+            .as_str()
+            .unwrap()
+            .starts_with("Build a fictional calculator"));
+        assert!(!String::from_utf8(bytes.to_vec())
+            .unwrap()
+            .contains("pretend-secret-value"));
     }
 }

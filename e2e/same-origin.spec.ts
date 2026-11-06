@@ -53,18 +53,27 @@ test("Codex source opens fabricated chats and follows appended output", async ({
     await page.getByRole("button", { name: "Save", exact: true }).click();
     const title = "Build a toy calculator for the fabricated Codex test";
     await expect(page.getByText(title, { exact: true })).toBeVisible();
-    await expect(page.locator(".codex-section__card")).toHaveCount(1);
-    await expect(page.locator(".codex-section__card")).not.toContainText(
-      "external_codex_apps_open_page",
-    );
+    await expect(page.locator(".codex-section__card")).toHaveCount(2);
+    await expect(
+      page.locator(".codex-section__card").filter({ hasText: "external_codex_apps_open_page" }),
+    ).toHaveCount(0);
     await expect(page.locator(".codex-section__card").filter({ hasText: title })).toContainText(
       "$2.62",
     );
+    await page.getByRole("button", { name: "Codex", exact: true }).click();
+    await expect(page.getByText("Codex Projects", { exact: true })).toBeVisible();
+    await expect(page.getByText("Projects", { exact: true })).toHaveCount(0);
+    await page.locator(".project-tree__item").filter({ hasText: "toy-calculator" }).click();
+    await expect(page.locator(".codex-section__card")).toHaveCount(1);
+    await expect(
+      page.getByText("Invent a toy calendar in a second folder", { exact: true }),
+    ).toHaveCount(0);
     await page.getByText(title, { exact: true }).click();
     await expect(
       page.getByText("The fabricated calculator is ready.", { exact: true }).first(),
     ).toBeVisible();
     await expect(page.locator(".info-bar__cost")).toContainText("$2.62");
+    await expect(page.getByRole("button", { name: "Copy Codex resume command" })).toBeVisible();
     await expect(page.getByText("Claude", { exact: true })).toHaveCount(0);
     const followup = {
       timestamp: new Date().toISOString(),
@@ -98,8 +107,25 @@ test("Codex source opens fabricated chats and follows appended output", async ({
       page.getByText("Fabricated live update arrived.", { exact: true }).first(),
     ).toBeVisible();
     await expect(page.locator(".info-bar__cost")).toContainText("$3.52");
+    await page
+      .locator(".message-list .message")
+      .filter({ hasText: "spawn_agent" })
+      .locator(".message__detail-btn")
+      .click();
+    await page
+      .locator(".detail-item__summary")
+      .filter({ hasText: "Check the fictional calculator arithmetic" })
+      .click();
+    await expect(
+      page.getByText("A fictional background worker checked arithmetic.", { exact: true }),
+    ).toBeVisible();
+    await expect(page.getByText("Claude", { exact: true })).toHaveCount(0);
+    await page.getByRole("button", { name: /Back to Messages/ }).click();
     await page.getByRole("button", { name: /Sessions/ }).click();
     await expect(page.getByText(title, { exact: true })).toBeVisible();
+    await expect(page.locator(".codex-section__card")).toHaveCount(1);
+    await page.locator(".project-tree__item").filter({ hasText: "All Projects" }).click();
+    await expect(page.locator(".codex-section__card")).toHaveCount(2);
   } finally {
     await request.post(`${api}/api/plugins/enabled`, {
       headers,

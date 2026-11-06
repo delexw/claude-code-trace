@@ -62,10 +62,18 @@ reasoning stays hidden. Costs appear on session cards, in picker totals, and in 
 info bar. They are API-equivalent model-token estimates using [OpenAI's published rates](https://developers.openai.com/api/docs/pricing),
 including cached input, rather than subscription bills. Missing usage or unknown pricing shows
 as unavailable, and totals with unpriced chats are marked with `+`.
+Verified linked worker usage is counted once, excluding inherited history. If worker usage
+cannot be attributed, the known subtotal remains visible with `+`.
 The picker shows user chats with their saved names or first meaningful prompt. Background-agent
 rollouts are excluded, and client page metadata is skipped when choosing a title.
-The web and desktop viewers follow updates to an open chat; press `r` to refresh in the terminal
-UI. Chat files are read-only. All committed Codex test data is fabricated.
+The project sidebar groups chats by their original working folder, with nested folders,
+collapse controls, search and date groups. Recorded model, Git branch, approval/sandbox policy,
+context usage, active status and turn timing appear when available. Resume and Fork buttons
+copy commands for the chat's Windows or WSL environment, including custom Codex homes.
+Efficiency analysis uses the same local redaction, payload preview and consent flow as Claude
+sessions; no transcript is sent merely by opening a chat.
+The web, desktop and terminal viewers follow updates to an open chat; `r` also refreshes the
+terminal UI manually. Chat files are read-only. All committed Codex test data is fabricated.
 
 To add a plugin, see [specs/15-session-source-plugins.md](specs/15-session-source-plugins.md).
 

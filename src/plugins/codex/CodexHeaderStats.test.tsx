@@ -37,6 +37,18 @@ describe("CodexHeaderStats", () => {
     expect(screen.queryByText(/\$0\.00/)).toBeNull();
   });
 
+  it("marks known subtotals when every chat is priced but worker costs are incomplete", () => {
+    render(
+      <CodexHeaderStats
+        sessions={[
+          makeSession({ cost_usd: 1.25, cost_partial: true }),
+          makeSession({ cost_usd: 2.5 }),
+        ]}
+      />,
+    );
+    expect(screen.getByLabelText("Estimated Codex API token cost")).toHaveTextContent("$3.75+");
+  });
+
   it("includes known zeros and does not add empty-session notices", () => {
     const rendered = render(<CodexHeaderStats sessions={[makeSession({ cost_usd: 0 })]} />);
     expect(screen.getByLabelText("Estimated Codex API token cost")).toHaveTextContent("$0.00");

@@ -123,6 +123,7 @@ fn run_desktop(args: &[String]) {
             // Codex source plugin
             plugins::codex::commands::list_codex_sessions,
             plugins::codex::commands::load_codex_session,
+            plugins::codex::commands::prepare_codex_efficiency_payload,
             plugins::codex::commands::get_codex_settings,
             plugins::codex::commands::set_codex_root,
             // Core

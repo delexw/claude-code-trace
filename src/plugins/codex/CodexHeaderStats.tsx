@@ -15,7 +15,7 @@ export function CodexHeaderStats({ sessions }: { sessions: CodexSession[] }) {
       priced++;
     }
   }
-  const complete = priced === sessions.length;
+  const complete = priced === sessions.length && !sessions.some((session) => session.cost_partial);
   return (
     <>
       {totalTokens > 0 && (
@@ -30,7 +30,7 @@ export function CodexHeaderStats({ sessions }: { sessions: CodexSession[] }) {
           title={
             complete
               ? COST_ESTIMATE_HINT
-              : `Estimated API token cost for ${priced} of ${sessions.length} chats; remaining costs unavailable. ${COST_ESTIMATE_HINT}`
+              : `Known subtotal for ${priced} of ${sessions.length} chats; remaining usage or worker costs unavailable. ${COST_ESTIMATE_HINT}`
           }
         >
           <CostIcon /> ≈ ${formatCost(totalCost)}

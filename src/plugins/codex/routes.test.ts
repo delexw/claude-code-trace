@@ -10,4 +10,14 @@ describe("Codex routes", () => {
     ).toEqual({ path: "/sample/chat.jsonl", start: 12, limit: 0 });
     expect(codexRoutes.set_codex_root.body!({})).toEqual({ path: null });
   });
+
+  it("prepares Codex efficiency data through its own source adapter", () => {
+    expect(codexRoutes.prepare_codex_efficiency_payload.path).toBe("/api/codex/efficiency/prepare");
+    expect(
+      codexRoutes.prepare_codex_efficiency_payload.body!({
+        path: "/invented/chat.jsonl",
+        payloadMode: "minimized",
+      }),
+    ).toEqual({ path: "/invented/chat.jsonl", payloadMode: "minimized" });
+  });
 });
