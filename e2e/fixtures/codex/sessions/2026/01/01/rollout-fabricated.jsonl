@@ -1,5 +1,6 @@
 {"timestamp":"2026-01-01T12:00:00Z","type":"session_meta","payload":{"id":"fabricated-codex-session","cwd":"/example/toy-calculator","cli_version":"0.0.0-test","originator":"synthetic-fixture"}}
 {"timestamp":"2026-01-01T12:00:01Z","type":"turn_context","payload":{"model":"gpt-6.1-sol","cwd":"/example/toy-calculator"}}
+{"timestamp":"2026-01-01T12:00:01Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<external_codex_apps_open_page>{\"page_id\":null}</external_codex_apps_open_page>"}]}}
 {"timestamp":"2026-01-01T12:00:02Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Build a toy calculator for the fabricated Codex test"}]}}
 {"timestamp":"2026-01-01T12:00:02Z","type":"event_msg","payload":{"type":"user_message","message":"Build a toy calculator for the fabricated Codex test"}}
 {"timestamp":"2026-01-01T12:00:03Z","type":"response_item","payload":{"type":"reasoning","summary":[{"type":"summary_text","text":"Check the fabricated calculator first."}]}}

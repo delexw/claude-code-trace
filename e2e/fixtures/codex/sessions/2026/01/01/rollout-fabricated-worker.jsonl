@@ -1,0 +1,4 @@
+{"timestamp":"2026-01-01T12:10:00Z","type":"session_meta","payload":{"id":"fabricated-worker-session","source":{"subagent":{"thread_spawn":{"parent_thread_id":"fabricated-codex-session","depth":1}}},"cwd":"/example/toy-calculator","forked_from_id":"fabricated-codex-session"}}
+{"timestamp":"2026-01-01T12:10:01Z","type":"turn_context","payload":{"model":"gpt-6.1-sol","cwd":"/example/toy-calculator"}}
+{"timestamp":"2026-01-01T12:10:02Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Build a toy calculator for the fabricated Codex test"}]}}
+{"timestamp":"2026-01-01T12:10:03Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"A fictional background worker checked arithmetic."}]}}

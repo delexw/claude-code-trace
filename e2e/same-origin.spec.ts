@@ -53,6 +53,10 @@ test("Codex source opens fabricated chats and follows appended output", async ({
     await page.getByRole("button", { name: "Save", exact: true }).click();
     const title = "Build a toy calculator for the fabricated Codex test";
     await expect(page.getByText(title, { exact: true })).toBeVisible();
+    await expect(page.locator(".codex-section__card")).toHaveCount(1);
+    await expect(page.locator(".codex-section__card")).not.toContainText(
+      "external_codex_apps_open_page",
+    );
     await expect(page.locator(".codex-section__card").filter({ hasText: title })).toContainText(
       "$2.62",
     );

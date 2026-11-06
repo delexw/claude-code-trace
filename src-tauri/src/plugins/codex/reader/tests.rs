@@ -493,6 +493,159 @@ fn plugin_toggle_and_custom_root_keep_other_settings() {
 }
 
 #[test]
+fn discovery_uses_real_prompt_after_control_messages_and_ignores_generated_control_names() {
+    let tmp = tempfile::tempdir().unwrap();
+    let id = "00000000-0000-0000-0000-000000000201";
+    let path = tmp.path().join(format!("sessions/rollout-{id}.jsonl"));
+    let control =
+        "<external_codex_apps_open_page>{\"page_id\":null}</external_codex_apps_open_page>";
+    write_rows(
+        &path,
+        &[
+            row(
+                "session_meta",
+                json!({"id":id,"source":"vscode","cwd":"/fictional/project"}),
+            ),
+            response("user", "# AGENTS.md instructions for an invented project"),
+            response("user", control),
+            response("user", "Build a fabricated puzzle game"),
+            row(
+                "event_msg",
+                json!({"type":"user_message","message":"Build a fabricated puzzle game"}),
+            ),
+            row(
+                "event_msg",
+                json!({"type":"user_message","message":"A later fictional follow-up"}),
+            ),
+            row("turn_context", json!({"model":"gpt-6.1-sol"})),
+        ],
+    );
+    fs::write(
+        tmp.path().join("session_index.jsonl"),
+        json!({"id":id,"thread_name":control}).to_string(),
+    )
+    .unwrap();
+    let roots = [CodexRoot {
+        path: tmp.path().to_string_lossy().into_owned(),
+        source: "custom".into(),
+        exists: true,
+    }];
+    let sessions = discover_sessions(&roots);
+    assert_eq!(sessions.len(), 1);
+    assert_eq!(sessions[0].title, "Build a fabricated puzzle game");
+    let window = load_window(&path, 0, None).unwrap();
+    assert_eq!(
+        window
+            .messages
+            .iter()
+            .find(|message| message.content == control)
+            .unwrap()
+            .role,
+        "system"
+    );
+}
+
+#[test]
+fn discovery_filters_background_agents_without_merging_independent_same_title_chats() {
+    let tmp = tempfile::tempdir().unwrap();
+    let parent = "00000000-0000-0000-0000-000000000211";
+    let child = "00000000-0000-0000-0000-000000000212";
+    let fork = "00000000-0000-0000-0000-000000000213";
+    let legacy_child = "00000000-0000-0000-0000-000000000214";
+    let future_source = "00000000-0000-0000-0000-000000000215";
+    for (id, source, forked_from) in [
+        (parent, json!("vscode"), Value::Null),
+        (
+            child,
+            json!({"subagent":{"thread_spawn":{"parent_thread_id":parent,"depth":1}}}),
+            json!(parent),
+        ),
+        (fork, json!("vscode"), json!(parent)),
+        (legacy_child, json!("subagent"), json!(parent)),
+        (future_source, json!({"future_source":{}}), Value::Null),
+    ] {
+        write_rows(
+            &tmp.path().join(format!("sessions/rollout-{id}.jsonl")),
+            &[
+                row(
+                    "session_meta",
+                    json!({"id":id,"source":source,"forked_from_id":forked_from,"cwd":"/fictional/project"}),
+                ),
+                // Later metadata can be inherited from a different rollout. It
+                // must not change whether the file's own session is a user chat.
+                row(
+                    "session_meta",
+                    json!({"id":child,"source":{"subagent":"review"}}),
+                ),
+                response("user", "An identical fabricated prompt"),
+                row("turn_context", json!({"model":"gpt-6.1-sol"})),
+            ],
+        );
+    }
+    let roots = [CodexRoot {
+        path: tmp.path().to_string_lossy().into_owned(),
+        source: "custom".into(),
+        exists: true,
+    }];
+    let sessions = discover_sessions(&roots);
+    let ids = sessions
+        .iter()
+        .map(|session| session.id.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    assert_eq!(ids, [parent, fork, future_source].into_iter().collect());
+    assert!(sessions
+        .iter()
+        .all(|session| session.title == "An identical fabricated prompt"));
+    assert!(
+        load_window(
+            &tmp.path().join(format!("sessions/rollout-{child}.jsonl")),
+            0,
+            None
+        )
+        .is_ok(),
+        "filtering the picker does not remove access to a rollout"
+    );
+}
+
+#[test]
+fn discovery_preserves_real_text_after_known_control_blocks_and_other_prompt_markup() {
+    let tmp = tempfile::tempdir().unwrap();
+    let cases = [
+        ("201", "<external_codex_apps_open_page>{\"page_id\":null}</external_codex_apps_open_page>\n<external_codex_apps_open_page>{\"page_id\":null}</external_codex_apps_open_page>\nInvestigate a fictional display bug", "Investigate a fictional display bug"),
+        ("202", "<instruction>Keep this fictional user markup</instruction>", "<instruction>Keep this fictional user markup</instruction>"),
+        ("203", "<external_codex_apps_open_page>{\"page_id\":null}</external_codex_apps_open_page>", "203"),
+    ];
+    for (id, prompt, _) in cases {
+        write_rows(
+            &tmp.path()
+                .join(format!("sessions/rollout-fictional-{id}.jsonl")),
+            &[
+                row("session_meta", json!({"id":id,"source":"vscode"})),
+                row("turn_context", json!({"model":"gpt-6.1-sol"})),
+                response("user", prompt),
+            ],
+        );
+    }
+    let roots = [CodexRoot {
+        path: tmp.path().to_string_lossy().into_owned(),
+        source: "custom".into(),
+        exists: true,
+    }];
+    let sessions = discover_sessions(&roots);
+    assert_eq!(sessions.len(), cases.len());
+    for (id, _, expected) in cases {
+        assert_eq!(
+            sessions
+                .iter()
+                .find(|session| session.id == id)
+                .unwrap()
+                .title,
+            expected
+        );
+    }
+}
+
+#[test]
 fn costs_are_shared_by_discovery_and_windows_and_update_without_new_messages() {
     let tmp = tempfile::tempdir().unwrap();
     let path = tmp.path().join("sessions/rollout-fictional-cost.jsonl");

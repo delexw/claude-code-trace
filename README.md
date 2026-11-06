@@ -62,6 +62,8 @@ reasoning stays hidden. Costs appear on session cards, in picker totals, and in 
 info bar. They are API-equivalent model-token estimates using [OpenAI's published rates](https://developers.openai.com/api/docs/pricing),
 including cached input, rather than subscription bills. Missing usage or unknown pricing shows
 as unavailable, and totals with unpriced chats are marked with `+`.
+The picker shows user chats with their saved names or first meaningful prompt. Background-agent
+rollouts are excluded, and client page metadata is skipped when choosing a title.
 The web and desktop viewers follow updates to an open chat; press `r` to refresh in the terminal
 UI. Chat files are read-only. All committed Codex test data is fabricated.
 

@@ -100,8 +100,21 @@ fn revision(metadata: &fs::Metadata) -> String {
     format!("{}:{nanos}", metadata.len())
 }
 
+/// Context supplied by the client is not a user-authored chat name. Strip only
+/// recognized leading blocks so real prompts containing XML remain intact.
+fn without_page_context(content: &str) -> &str {
+    let mut content = content.trim_start();
+    while let Some(rest) = content.strip_prefix("<external_codex_apps_open_page>") {
+        let Some((_, rest)) = rest.split_once("</external_codex_apps_open_page>") else {
+            return "";
+        };
+        content = rest.trim_start();
+    }
+    content
+}
+
 fn injected(content: &str) -> bool {
-    let content = content.trim_start();
+    let content = without_page_context(content);
     [
         "# AGENTS.md",
         "<environment_context>",
@@ -110,9 +123,11 @@ fn injected(content: &str) -> bool {
     ]
     .iter()
     .any(|prefix| content.starts_with(prefix))
+        || content.is_empty()
 }
 
 fn title(content: &str) -> Option<String> {
+    let content = without_page_context(content);
     (!content.trim().is_empty() && !injected(content)).then(|| {
         content
             .split_whitespace()
@@ -163,6 +178,13 @@ fn metadata(
         match row["type"].as_str().unwrap_or_default() {
             "session_meta" => {
                 if !saw_meta {
+                    // Subagent files inherit the parent's prompts and titles.
+                    // Classify only this file's own first metadata record;
+                    // later records can belong to inherited parent histories.
+                    let source = &payload["source"];
+                    if source == "subagent" || source.get("subagent").is_some() {
+                        return None;
+                    }
                     let id = string(payload, "id");
                     if !id.is_empty() {
                         session.id = id;
@@ -181,7 +203,7 @@ fn metadata(
                     session.cwd = cwd;
                 }
             }
-            "event_msg" if payload["type"] == "user_message" => {
+            "event_msg" if payload["type"] == "user_message" && session.title.is_empty() => {
                 if let Some(hint) = title(&string(payload, "message")) {
                     session.title = hint;
                 }
@@ -306,8 +328,9 @@ fn session_names(home: &Path) -> HashMap<String, String> {
         };
         let id = string(&row, "id");
         let name = string(&row, "thread_name");
-        if !id.is_empty() && !name.trim().is_empty() {
-            names.insert(id, name);
+        let name = without_page_context(&name);
+        if !id.is_empty() && title(name).is_some() {
+            names.insert(id, name.trim().to_owned());
         }
     }
     names

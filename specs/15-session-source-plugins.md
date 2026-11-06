@@ -250,6 +250,12 @@ Read-only Codex rollout viewer, off by default. It scans `sessions/` and
 WSL distributions and their Codex homes. A custom `plugins.codex.root` replaces auto-detection
 and points to a Codex home, rather than directly to its sessions folder.
 
+The picker excludes rollouts whose first session metadata explicitly identifies a subagent
+source. Later inherited metadata does not change that classification. User-created forks and
+independent chats remain separate even when they share a title. Saved chat names take priority;
+client page-context blocks are skipped when selecting either a saved name or a prompt-derived
+fallback. A real prompt following a known page-context block is preserved.
+
 | Command                                     | HTTP                      | Returns                                                   |
 | ------------------------------------------- | ------------------------- | --------------------------------------------------------- |
 | `list_codex_sessions`                       | `GET /api/codex/sessions` | `CodexSession[]`, newest first; empty while disabled      |
