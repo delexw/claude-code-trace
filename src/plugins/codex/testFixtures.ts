@@ -12,6 +12,8 @@ export function makeSession(overrides: Partial<CodexSession> = {}): CodexSession
     modified_at: "2026-01-02T12:00:00Z",
     archived: false,
     source: "local",
+    total_tokens: 30,
+    cost_usd: 0.25,
     ...overrides,
   };
 }
@@ -54,6 +56,7 @@ export function makeWindow(overrides: Partial<CodexWindow> = {}): CodexWindow {
     output_tokens: 10,
     cache_read_tokens: 0,
     revision: "sample-revision",
+    cost_usd: 0.25,
     ...overrides,
   };
 }

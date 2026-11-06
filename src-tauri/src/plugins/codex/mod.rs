@@ -2,6 +2,7 @@
 
 #[cfg(feature = "desktop")]
 pub mod commands;
+mod costs;
 mod http;
 pub mod reader;
 pub mod roots;

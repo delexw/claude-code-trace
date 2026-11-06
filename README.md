@@ -57,7 +57,11 @@ it at a different brain directory in Settings.
 Enable **Codex** under Sources to browse Codex chats. It reads `$CODEX_HOME` (or `~/.codex`)
 and, on Windows, also detects Codex homes in installed WSL distributions. Set a Codex Home
 Directory in Settings to read one specific home instead. Messages, readable reasoning, tool
-calls and results, and recorded token totals are supported; encrypted reasoning stays hidden.
+calls and results, recorded token totals, and estimated USD costs are supported; encrypted
+reasoning stays hidden. Costs appear on session cards, in picker totals, and in an open chat's
+info bar. They are API-equivalent model-token estimates using [OpenAI's published rates](https://developers.openai.com/api/docs/pricing),
+including cached input, rather than subscription bills. Missing usage or unknown pricing shows
+as unavailable, and totals with unpriced chats are marked with `+`.
 The web and desktop viewers follow updates to an open chat; press `r` to refresh in the terminal
 UI. Chat files are read-only. All committed Codex test data is fabricated.
 

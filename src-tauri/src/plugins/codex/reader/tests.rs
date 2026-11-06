@@ -491,3 +491,81 @@ fn plugin_toggle_and_custom_root_keep_other_settings() {
     assert!(crate::plugins::is_enabled(&settings, super::super::ID));
     assert!(!settings.plugins["codex"].extra.contains_key("root"));
 }
+
+#[test]
+fn costs_are_shared_by_discovery_and_windows_and_update_without_new_messages() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("sessions/rollout-fictional-cost.jsonl");
+    let mut rows = vec![
+        row(
+            "session_meta",
+            json!({"id":"fictional-cost","cwd":"/example/cost"}),
+        ),
+        row("turn_context", json!({"model":"gpt-6.1-sol"})),
+        response("user", "A fabricated cost example"),
+        row(
+            "token_usage_record",
+            json!({"response_id":"fictional-response-1","usage":{
+                "input_tokens":100000,"cached_input_tokens":20000,"cache_write_input_tokens":10000,
+                "output_tokens":5000,"reasoning_output_tokens":1000,"total_tokens":105000
+            }}),
+        ),
+    ];
+    write_rows(&path, &rows);
+    let roots = [CodexRoot {
+        path: tmp.path().to_string_lossy().into_owned(),
+        source: "custom".into(),
+        exists: true,
+    }];
+    let index = load_window(&path, 0, Some(0)).unwrap();
+    // 70k ordinary input * $2/M + 20k cached * $.10/M + 10k writes * $2.50/M
+    // + 5k output * $10/M. Reasoning is already included in output.
+    let cost = serde_json::to_value(&index).unwrap()["cost_usd"]
+        .as_f64()
+        .unwrap();
+    assert!((cost - 0.217).abs() < 1e-10);
+    let sessions = discover_sessions(&roots);
+    let summary = serde_json::to_value(&sessions[0]).unwrap();
+    assert!((summary["cost_usd"].as_f64().unwrap() - cost).abs() < 1e-10);
+    assert_eq!(summary["total_tokens"], 105000);
+
+    rows.push(row(
+        "token_usage_record",
+        json!({"response_id":"fictional-response-2","usage":{
+            "input_tokens":10000,"cached_input_tokens":0,"cache_write_input_tokens":0,
+            "output_tokens":1000,"total_tokens":11000
+        }}),
+    ));
+    write_rows(&path, &rows);
+    let updated = load_window(&path, 0, Some(0)).unwrap();
+    assert_eq!(updated.count, index.count);
+    assert_ne!(updated.revision, index.revision);
+    let updated = serde_json::to_value(&updated).unwrap();
+    assert!((updated["cost_usd"].as_f64().unwrap() - 0.247).abs() < 1e-10);
+    let summary = serde_json::to_value(&discover_sessions(&roots)[0]).unwrap();
+    assert_eq!(summary["cost_usd"], updated["cost_usd"]);
+}
+
+#[test]
+fn unsupported_model_usage_is_unavailable_instead_of_a_free_or_partial_cost() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("rollout-unknown-cost.jsonl");
+    write_rows(
+        &path,
+        &[
+            row("turn_context", json!({"model":"gpt-6.1-sol"})),
+            row(
+                "token_usage_record",
+                json!({"response_id":"fictional-known","usage":{"input_tokens":100,"output_tokens":10}}),
+            ),
+            row("turn_context", json!({"model":"fictional-unpriced-model"})),
+            row(
+                "token_usage_record",
+                json!({"response_id":"fictional-unknown","usage":{"input_tokens":100,"output_tokens":10}}),
+            ),
+        ],
+    );
+    let window = serde_json::to_value(load_window(&path, 0, None).unwrap()).unwrap();
+    assert!(window.as_object().unwrap().contains_key("cost_usd"));
+    assert!(window["cost_usd"].is_null());
+}

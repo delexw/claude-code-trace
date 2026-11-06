@@ -9,7 +9,7 @@ import pytest
 import api
 from plugins import REGISTRY
 from plugins.base import enabled_plugin_ids
-from plugins.codex.models import CodexSession
+from plugins.codex.models import CodexSession, session_from_dict
 from plugins.codex.picker_rows import build_section
 from plugins.codex.plugin import CodexPlugin
 
@@ -46,6 +46,21 @@ def test_picker_error_is_literal_text():
     assert section.rows[0].render(0).plain == "unreadable [example]"
 
 
+@pytest.mark.parametrize(
+    "cost, expected", [(1.25, "~$1.25"), (0.0, "~$0.00"), (None, "Cost unavailable")]
+)
+def test_picker_displays_estimated_cost_without_treating_unknown_as_zero(cost, expected):
+    session = session_from_dict({"id": "fabricated", "cost_usd": cost, "total_tokens": 1200})
+    section = build_section([session], loading=False, error="")
+    assert expected in str(section.rows[1].render(0).renderables[0])
+
+
+def test_picker_total_marks_a_partial_estimate():
+    sessions = [session_from_dict({"cost_usd": 1.25}), session_from_dict({"cost_usd": None})]
+    section = build_section(sessions, loading=False, error="")
+    assert "~$1.25+" in section.rows[0].render(0).plain
+
+
 @pytest.mark.asyncio
 async def test_open_uses_codex_api_and_keeps_tools_and_token_totals(monkeypatch):
     host = Mock(view="picker", session_path="")
@@ -74,6 +89,7 @@ async def test_open_uses_codex_api_and_keeps_tools_and_token_totals(monkeypatch)
             "output_tokens": 10,
             "cache_read_tokens": 5,
             "total_tokens": 50,
+            "cost_usd": 1.25,
         }
     )
     monkeypatch.setattr(api, "post_json", post)
@@ -86,6 +102,7 @@ async def test_open_uses_codex_api_and_keeps_tools_and_token_totals(monkeypatch)
     assert opened.meta.cwd == "/example/calculator"
     assert opened.totals.total_tokens == 50
     assert opened.totals.cache_read_tokens == 5
+    assert opened.totals.cost_usd == 1.25
     assert [message.role_label for message in opened.messages] == ["User", "Codex"]
     assert opened.messages[1].items[0].tool_result == "example"
     assert host.view == "list"

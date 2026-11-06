@@ -26,6 +26,7 @@ async def load_conversation(session: CodexSession) -> OpenedSession:
             output_tokens=int(data.get("output_tokens", 0)),
             cache_read_tokens=int(data.get("cache_read_tokens", 0)),
             total_tokens=int(data.get("total_tokens", 0)),
+            cost_usd=float(data.get("cost_usd") or 0),
             model=session.model,
         ),
     )

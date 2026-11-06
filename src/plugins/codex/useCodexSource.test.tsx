@@ -63,7 +63,10 @@ function Harness({
           {source.views[view].infoBar}
         </>
       ) : (
-        source.picker.render({ selectedIndex: null, onHover: vi.fn() })
+        <>
+          {source.picker.headerStats}
+          {source.picker.render({ selectedIndex: null, onHover: vi.fn() })}
+        </>
       )}
     </>
   );
@@ -148,6 +151,25 @@ describe("useCodexSource", () => {
     expect(latest.picker.count).toBe(1);
     expect(screen.getByText("Add sample tests")).toBeInTheDocument();
     expect(screen.queryByText("Repair the sample build")).toBeNull();
+  });
+
+  it("totals only search-matched sessions in the shared picker header", async () => {
+    mockInvoke.mockResolvedValue([
+      makeSession({ cost_usd: 10, total_tokens: 1000 }),
+      makeSession({
+        id: "other",
+        path: "/sample/other.jsonl",
+        title: "Matched sample",
+        cost_usd: 2.5,
+        total_tokens: 500,
+      }),
+    ]);
+    const rendered = render(<Harness />);
+    await start();
+    expect(screen.getByLabelText("Estimated Codex API token cost")).toHaveTextContent("$12.50");
+    rendered.rerender(<Harness searchQuery="Matched" />);
+    expect(screen.getByLabelText("Estimated Codex API token cost")).toHaveTextContent("$2.50");
+    expect(screen.getByText("500 tok", { selector: ".picker__total-tokens" })).toBeInTheDocument();
   });
 
   it("reports discovery and opening failures in the picker", async () => {
@@ -247,6 +269,22 @@ describe("useCodexSource", () => {
       path: makeSession().path,
       limit: 0,
     });
+    expect(screen.getByText("The sample build now passes.")).toBeInTheDocument();
+  });
+
+  it("refreshes cost metadata even when the recorded message revision is unchanged", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    render(<Harness />);
+    await open();
+    expect(screen.getByLabelText("Estimated API token cost")).toHaveTextContent("$0.25");
+    mockInvoke.mockResolvedValue(makeWindow({ cost_usd: 1.5, total_tokens: 1500, messages: [] }));
+    mockInvoke.mockClear();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2100);
+    });
+    expect(screen.getByLabelText("Estimated API token cost")).toHaveTextContent("$1.50");
+    expect(screen.getByText("1.5k tokens")).toBeInTheDocument();
+    expect(mockInvoke).toHaveBeenCalledOnce();
     expect(screen.getByText("The sample build now passes.")).toBeInTheDocument();
   });
 

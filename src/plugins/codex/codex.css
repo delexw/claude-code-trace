@@ -39,3 +39,8 @@
 .codex-error {
   color: var(--text-error, #e57373);
 }
+
+.codex-cost-unavailable {
+  color: var(--text-muted);
+  font-weight: 400;
+}

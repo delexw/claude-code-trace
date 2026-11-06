@@ -13,6 +13,8 @@ class CodexSession:
     modified_at: str = ""
     archived: bool = False
     source: str = ""
+    total_tokens: int = 0
+    cost_usd: float | None = None
 
 
 def session_from_dict(data: dict) -> CodexSession:

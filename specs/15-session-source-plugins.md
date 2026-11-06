@@ -258,9 +258,11 @@ and points to a Codex home, rather than directly to its sessions folder.
 | `load_codex_session {path, start?, limit?}` | `POST /api/codex/session` | `CodexWindow`; limit 0 fetches metadata only              |
 
 `CodexSession` contains `id`, `path`, `title`, `cwd`, `model`, `modified_at` (ISO timestamp),
-`archived`, and `source`. `CodexWindow` contains shared `DisplayMessage` bodies plus `count`,
+`archived`, `source`, `total_tokens`, and nullable `cost_usd`. `CodexWindow` contains shared
+`DisplayMessage` bodies plus `count`,
 `start`, `roles`, `ongoing`, `revision`, and `input_tokens`, `output_tokens`, `cache_read_tokens`,
-`total_tokens`. The shared assistant role remains `claude` for renderer compatibility; each
+`total_tokens`, and nullable `cost_usd`. The shared assistant role remains `claude` for renderer
+compatibility; each
 Codex frontend labels it **Codex**. No Claude-only actions are attached to these sessions.
 
 The parser reconciles response items and duplicate event messages, matches tool results by call
@@ -268,6 +270,17 @@ ID, and omits encrypted reasoning. The web/desktop source polls the active conve
 its revision and loads bounded message windows. Terminal refresh uses `r`. Test transcripts
 and expected messages are fabricated; personal Windows and WSL chats may only be used for
 read-only local validation.
+
+Costs are estimated API-equivalent model-token USD, using bundled [official OpenAI rates](https://developers.openai.com/api/docs/pricing)
+checked on 2026-11-07. They appear on picker cards, in filtered picker totals, and in the open
+conversation bar, including live updates. Subscription charges and tool fees can differ.
+Cached input and cache writes are separated from uncached input; reasoning is already part of
+output usage. Repeated modern response IDs and legacy usage twins must not be billed twice,
+and legacy-only usage before modern records must remain included. Per-request model and
+recorded context size determine pricing; aggregate-only historical usage assumes standard
+rates when request sizes or speed tiers are unavailable. Incomplete usage or unknown pricing
+returns `null`, distinct from a known zero. An aggregate with unknown chats displays its known
+subtotal with `+`, rather than presenting that subtotal as a complete cost.
 
 ## Adding a plugin
 

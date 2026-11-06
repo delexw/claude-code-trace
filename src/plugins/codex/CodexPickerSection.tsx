@@ -1,6 +1,7 @@
 import { useScrollToSelected } from "../../hooks/useScrollToSelected";
-import { ForwardIcon } from "../../components/Icons";
-import { formatMsTimestamp, truncate } from "../../lib/format";
+import { ForwardIcon, TokensIcon } from "../../components/Icons";
+import { formatMsTimestamp, formatTokens, truncate } from "../../lib/format";
+import { CodexCost } from "./CodexCost";
 import { CodexIcon } from "./roleStyles";
 import type { CodexSession } from "./types";
 
@@ -99,6 +100,15 @@ export function CodexPickerSection({
             {session.cwd && <span>{session.cwd}</span>}
             {session.model && <span>{session.model}</span>}
             <span>{session.source}</span>
+            {session.total_tokens > 0 && (
+              <span className="picker__session-stat">
+                <TokensIcon /> {formatTokens(session.total_tokens)} tok
+              </span>
+            )}
+            <CodexCost
+              cost={session.cost_usd}
+              className="picker__session-stat picker__session-stat--cost"
+            />
             {session.archived && <span>Archived</span>}
             {Number.isFinite(Date.parse(session.modified_at)) && (
               <span className="picker__session-time">

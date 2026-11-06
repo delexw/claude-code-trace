@@ -7,6 +7,7 @@ import { MessageDetail } from "../../components/MessageDetail";
 import { BackIcon } from "../../components/Icons";
 import { BackToMessagesButton } from "../../components/BackToMessagesButton";
 import { CodexInfoBar } from "./CodexInfoBar";
+import { CodexHeaderStats } from "./CodexHeaderStats";
 import { CodexPickerSection, visibleSessions } from "./CodexPickerSection";
 import { roleLabel, roleStyle } from "./roleStyles";
 import type { CodexSession, CodexWindow } from "./types";
@@ -182,10 +183,25 @@ export function useCodexSource(ctx: SourceContext): SourceRuntime {
         )
           return;
         if (current.window.revision === index.revision) {
-          if (current.window.ongoing !== index.ongoing) {
+          if (
+            current.window.ongoing !== index.ongoing ||
+            current.window.cost_usd !== index.cost_usd ||
+            current.window.total_tokens !== index.total_tokens
+          ) {
             setChat((latest) =>
               latest?.window.revision === index.revision
-                ? { ...latest, window: { ...latest.window, ongoing: index.ongoing } }
+                ? {
+                    ...latest,
+                    window: {
+                      ...latest.window,
+                      ongoing: index.ongoing,
+                      cost_usd: index.cost_usd,
+                      total_tokens: index.total_tokens,
+                      input_tokens: index.input_tokens,
+                      output_tokens: index.output_tokens,
+                      cache_read_tokens: index.cache_read_tokens,
+                    },
+                  }
                 : latest,
             );
           }
@@ -356,6 +372,7 @@ export function useCodexSource(ctx: SourceContext): SourceRuntime {
   return {
     picker: {
       count: ctx.enabled ? conversations.length : 0,
+      headerStats: ctx.enabled ? <CodexHeaderStats sessions={conversations} /> : undefined,
       open: (index) => {
         const session = conversations[index];
         if (session) void openChat(session);

@@ -53,10 +53,14 @@ test("Codex source opens fabricated chats and follows appended output", async ({
     await page.getByRole("button", { name: "Save", exact: true }).click();
     const title = "Build a toy calculator for the fabricated Codex test";
     await expect(page.getByText(title, { exact: true })).toBeVisible();
+    await expect(page.locator(".codex-section__card").filter({ hasText: title })).toContainText(
+      "$2.62",
+    );
     await page.getByText(title, { exact: true }).click();
     await expect(
       page.getByText("The fabricated calculator is ready.", { exact: true }).first(),
     ).toBeVisible();
+    await expect(page.locator(".info-bar__cost")).toContainText("$2.62");
     await expect(page.getByText("Claude", { exact: true })).toHaveCount(0);
     const followup = {
       timestamp: new Date().toISOString(),
@@ -67,13 +71,29 @@ test("Codex source opens fabricated chats and follows appended output", async ({
         content: [{ type: "output_text", text: "Fabricated live update arrived." }],
       },
     };
+    const usage = {
+      timestamp: new Date().toISOString(),
+      type: "event_msg",
+      payload: {
+        type: "token_count",
+        info: {
+          total_token_usage: {
+            input_tokens: 1200000,
+            cached_input_tokens: 200000,
+            output_tokens: 150000,
+            total_tokens: 1350000,
+          },
+        },
+      },
+    };
     appendFileSync(
       resolve(codexRoot, "sessions/2026/01/01/rollout-fabricated.jsonl"),
-      `${JSON.stringify(followup)}\n`,
+      `${JSON.stringify(followup)}\n${JSON.stringify(usage)}\n`,
     );
     await expect(
       page.getByText("Fabricated live update arrived.", { exact: true }).first(),
     ).toBeVisible();
+    await expect(page.locator(".info-bar__cost")).toContainText("$3.52");
     await page.getByRole("button", { name: /Sessions/ }).click();
     await expect(page.getByText(title, { exact: true })).toBeVisible();
   } finally {

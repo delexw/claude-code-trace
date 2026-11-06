@@ -1,0 +1,28 @@
+import { CostIcon } from "../../components/Icons";
+import { formatCost } from "../../lib/format";
+
+export const COST_ESTIMATE_HINT =
+  "Estimated API-equivalent model token cost. Subscription charges and tool fees may differ.";
+
+export function knownCost(cost: number | null | undefined): cost is number {
+  return typeof cost === "number" && Number.isFinite(cost) && cost >= 0;
+}
+
+export function CodexCost({ cost, className }: { cost: number | null; className: string }) {
+  if (!knownCost(cost)) {
+    return (
+      <span
+        className="codex-cost-unavailable"
+        aria-label="API token cost unavailable"
+        title="API token cost is unavailable because usage or pricing is incomplete."
+      >
+        Cost unavailable
+      </span>
+    );
+  }
+  return (
+    <span className={className} aria-label="Estimated API token cost" title={COST_ESTIMATE_HINT}>
+      <CostIcon /> ≈ ${formatCost(cost)}
+    </span>
+  );
+}

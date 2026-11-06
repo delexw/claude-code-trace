@@ -50,4 +50,24 @@ describe("CodexPickerSection", () => {
     expect(onOpen).toHaveBeenCalledWith(session);
     expect(onRefresh).toHaveBeenCalledOnce();
   });
+
+  it("shows a session's estimated dollars and recorded tokens like Claude cards", () => {
+    render(
+      <CodexPickerSection
+        sessions={[makeSession({ cost_usd: 1.25, total_tokens: 1234 })]}
+        loading={false}
+        error={null}
+        searchQuery=""
+        selectedIndex={0}
+        onHover={vi.fn()}
+        onOpen={vi.fn()}
+        onRefresh={vi.fn()}
+      />,
+    );
+    expect(screen.getByLabelText("Estimated API token cost")).toHaveTextContent("$1.25");
+    expect(screen.getByLabelText("Estimated API token cost")).toHaveClass(
+      "picker__session-stat--cost",
+    );
+    expect(screen.getByText("1.2k tok")).toBeInTheDocument();
+  });
 });

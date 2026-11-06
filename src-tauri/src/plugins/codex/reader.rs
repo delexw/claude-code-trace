@@ -8,6 +8,7 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 use serde_json::Value;
 
+use super::costs::UsageTracker;
 use super::roots::CodexRoot;
 use crate::convert::{DisplayMessage, FrontendDisplayItem};
 
@@ -21,6 +22,8 @@ pub struct CodexSession {
     pub modified_at: String,
     pub archived: bool,
     pub source: String,
+    pub total_tokens: i64,
+    pub cost_usd: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -34,6 +37,7 @@ pub struct CodexWindow {
     pub output_tokens: i64,
     pub cache_read_tokens: i64,
     pub total_tokens: i64,
+    pub cost_usd: Option<f64>,
     pub revision: String,
 }
 
@@ -45,6 +49,7 @@ struct Parsed {
     output_tokens: i64,
     cache_read_tokens: i64,
     total_tokens: i64,
+    cost_usd: Option<f64>,
 }
 
 fn string(value: &Value, key: &str) -> String {
@@ -138,6 +143,8 @@ fn metadata(
             .unwrap_or_default(),
         source: source.to_owned(),
         archived,
+        total_tokens: 0,
+        cost_usd: None,
     };
     // The rollout filename remains authoritative when resumed/forked histories
     // contain metadata from more than one session.
@@ -202,6 +209,10 @@ fn metadata(
     }
     if session.title.is_empty() {
         session.title = session.id.clone();
+    }
+    if let Ok(usage) = super::costs::scan(path) {
+        session.total_tokens = usage.total_tokens;
+        session.cost_usd = usage.cost_usd;
     }
     Some(session)
 }
@@ -404,6 +415,7 @@ fn output_error(output: &Value) -> bool {
 fn parse(path: &Path) -> Result<Parsed, String> {
     let file = fs::File::open(path).map_err(|e| e.to_string())?;
     let mut parsed = Parsed::default();
+    let mut usage_tracker = UsageTracker::default();
     // The bool marks an event fallback. Only neighboring visible twins are
     // paired: matching text elsewhere can belong to a different user turn.
     let mut candidates: Vec<(DisplayMessage, bool)> = Vec::new();
@@ -419,6 +431,7 @@ fn parse(path: &Path) -> Result<Parsed, String> {
             continue;
         };
         let payload = &row["payload"];
+        usage_tracker.observe(&row);
         let ts = string(&row, "timestamp");
         let kind = row["type"].as_str().unwrap_or_default();
         if kind == "compacted" {
@@ -439,15 +452,6 @@ fn parse(path: &Path) -> Result<Parsed, String> {
             continue;
         }
         if kind == "token_usage_record" {
-            let usage = &payload["thread_token_usage"];
-            if usage.is_object() {
-                parsed.input_tokens = usage["input_tokens"].as_i64().unwrap_or(0);
-                parsed.output_tokens = usage["output_tokens"].as_i64().unwrap_or(0);
-                parsed.cache_read_tokens = usage["cached_input_tokens"].as_i64().unwrap_or(0);
-                parsed.total_tokens = usage["total_tokens"]
-                    .as_i64()
-                    .unwrap_or(parsed.input_tokens + parsed.output_tokens);
-            }
             continue;
         }
         if kind == "turn_context" {
@@ -468,18 +472,6 @@ fn parse(path: &Path) -> Result<Parsed, String> {
                 | "turn_aborted" => {
                     parsed.active = false;
                     dedup_boundaries.insert(candidates.len());
-                }
-                "token_count" => {
-                    let usage = &payload["info"]["total_token_usage"];
-                    if usage.is_object() {
-                        parsed.input_tokens = usage["input_tokens"].as_i64().unwrap_or(0);
-                        parsed.output_tokens = usage["output_tokens"].as_i64().unwrap_or(0);
-                        parsed.cache_read_tokens =
-                            usage["cached_input_tokens"].as_i64().unwrap_or(0);
-                        parsed.total_tokens = usage["total_tokens"]
-                            .as_i64()
-                            .unwrap_or(parsed.input_tokens + parsed.output_tokens);
-                    }
                 }
                 "user_message" | "agent_message" | "agent_reasoning" => {
                     let body = string(
@@ -693,6 +685,12 @@ fn parse(path: &Path) -> Result<Parsed, String> {
             parsed.messages.push(msg);
         }
     }
+    let usage = usage_tracker.summary();
+    parsed.input_tokens = usage.input_tokens;
+    parsed.output_tokens = usage.output_tokens;
+    parsed.cache_read_tokens = usage.cache_read_tokens;
+    parsed.total_tokens = usage.total_tokens;
+    parsed.cost_usd = usage.cost_usd;
     Ok(parsed)
 }
 
@@ -754,6 +752,7 @@ pub fn load_window(path: &Path, start: usize, limit: Option<usize>) -> Result<Co
         output_tokens: parsed.output_tokens,
         cache_read_tokens: parsed.cache_read_tokens,
         total_tokens: parsed.total_tokens,
+        cost_usd: parsed.cost_usd,
         revision: stamp,
     };
     *index_cache.lock().unwrap_or_else(|e| e.into_inner()) =

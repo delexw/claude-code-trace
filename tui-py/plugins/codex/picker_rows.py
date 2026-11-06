@@ -5,7 +5,7 @@ from rich.rule import Rule
 from rich.text import Text
 
 import theme
-from format_utils import time_ago
+from format_utils import format_cost, format_tokens, time_ago
 from plugins.base import PickerRow, PickerSection
 from plugins.codex.models import CodexSession
 
@@ -17,6 +17,14 @@ def _render(session: CodexSession) -> Group:
         metadata.append("  Archived", style=theme.TEXT_DIM)
     if session.cwd:
         metadata.append(f"  {session.cwd}", style=theme.TEXT_DIM)
+    if session.total_tokens > 0:
+        metadata.append(f"  {format_tokens(session.total_tokens)} tok", style=theme.TEXT_DIM)
+    metadata.append(
+        f"  ~{format_cost(session.cost_usd)}"
+        if session.cost_usd is not None
+        else "  Cost unavailable",
+        style=theme.TOKEN_HIGH if session.cost_usd is not None else theme.TEXT_DIM,
+    )
     if ago := time_ago(session.modified_at):
         metadata.append(f"  {ago}", style=theme.TEXT_DIM)
     return Group(Text.assemble(title, "\n", metadata), Rule(style=theme.TEXT_MUTED))
@@ -35,9 +43,12 @@ def build_section(sessions: list[CodexSession], loading: bool, error: str) -> Pi
                 )
             ]
         )
-    rows = [
-        PickerRow(render=lambda _f: Text(f"Codex ({len(sessions)})", style="bold"), header=True)
-    ]
+    known_costs = [session.cost_usd for session in sessions if session.cost_usd is not None]
+    heading = f"Codex ({len(sessions)})"
+    if known_costs:
+        partial = "+" if len(known_costs) < len(sessions) else ""
+        heading += f"  ~{format_cost(sum(known_costs))}{partial} estimated API cost"
+    rows = [PickerRow(render=lambda _f: Text(heading, style="bold"), header=True)]
     rows.extend(
         PickerRow(render=lambda _f, session=session: _render(session), item=session)
         for session in sorted(sessions, key=lambda session: session.modified_at, reverse=True)

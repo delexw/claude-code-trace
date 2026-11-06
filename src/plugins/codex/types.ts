@@ -9,6 +9,8 @@ export interface CodexSession {
   modified_at: string;
   archived: boolean;
   source: string;
+  total_tokens: number;
+  cost_usd: number | null;
 }
 
 export interface CodexWindow {
@@ -21,6 +23,7 @@ export interface CodexWindow {
   input_tokens: number;
   output_tokens: number;
   cache_read_tokens: number;
+  cost_usd: number | null;
   revision: string;
 }
 
