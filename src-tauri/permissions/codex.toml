@@ -1,0 +1,10 @@
+[[permission]]
+identifier = "allow-codex"
+description = "Allow listing and reading Codex chats and configuring their home directory"
+commands.allow = [
+  "list_codex_sessions",
+  "load_codex_session",
+  "prepare_codex_efficiency_payload",
+  "get_codex_settings",
+  "set_codex_root",
+]

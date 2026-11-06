@@ -29,6 +29,34 @@ function makeSession(overrides: Partial<SessionInfo> = {}): SessionInfo {
 }
 
 describe("ProjectTree", () => {
+  it("renders source-owned folder entries without Claude session paths", () => {
+    const onSelect = vi.fn();
+    render(
+      <ProjectTree
+        items={[
+          {
+            key: "opaque-folder-id",
+            name: "calculator",
+            path: "D:/example/calculator",
+            count: 2,
+            ongoing: false,
+            depth: 0,
+            isGroup: false,
+            hasChildren: false,
+            isExpanded: true,
+          },
+        ]}
+        heading="Codex Projects"
+        selectedProject={null}
+        onSelectProject={onSelect}
+        onRefresh={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Codex Projects")).toBeInTheDocument();
+    expect(screen.getByTitle("D:/example/calculator")).toHaveTextContent("calculator");
+    fireEvent.click(screen.getByText("calculator"));
+    expect(onSelect).toHaveBeenCalledWith("opaque-folder-id");
+  });
   it("shows All Projects with total count", () => {
     const sessions = [
       makeSession(),

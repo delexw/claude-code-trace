@@ -52,18 +52,42 @@ class InfoBar(Widget):
         self.session_path = ""
         self.ongoing = False
 
+    def _context_percent(self) -> int:
+        if self.meta.context_window is not None:
+            if self.meta.context_window > 0 and self.meta.context_tokens is not None:
+                return round(self.meta.context_tokens / self.meta.context_window * 100)
+            return -1
+        return context_percent(self.messages)
+
+    def _cost_label(self) -> str:
+        totals = self.session_totals
+        if totals.estimated_cost:
+            return (
+                f"~{format_cost(totals.cost_usd)}{'+' if totals.cost_partial else ''} estimated API cost"
+                if totals.cost_usd is not None
+                else "Cost unavailable"
+            )
+        return (
+            format_cost(totals.cost_usd)
+            if totals.cost_usd is not None and totals.cost_usd > 0
+            else ""
+        )
+
     def render(self) -> str:
         meta = self.meta
-        messages = self.messages
         totals = self.session_totals
         session_path = self.session_path
 
         project_name = short_path(meta.cwd)
-        session_id = session_path.split("/")[-1].replace(".jsonl", "") if session_path else ""
+        session_id = meta.session_id or (
+            session_path.replace("\\", "/").split("/")[-1].replace(".jsonl", "")
+            if session_path
+            else ""
+        )
         branch = meta.git_branch
         mode = meta.permission_mode
 
-        ctx_pct = context_percent(messages)
+        ctx_pct = self._context_percent()
 
         dot = f"[{TEXT_MUTED}] · [/]"
 
@@ -84,8 +108,8 @@ class InfoBar(Widget):
             parts_right.append(f"[{clr}]ctx {ctx_pct}%[/]")
         if totals.total_tokens > 0:
             parts_right.append(f"{dot}[{TEXT_DIM}]{format_tokens(totals.total_tokens)} tok[/]")
-        if totals.cost_usd > 0:
-            parts_right.append(f"{dot}[{TOKEN_HIGH}]{format_cost(totals.cost_usd)}[/]")
+        if cost := self._cost_label():
+            parts_right.append(f"{dot}[{TOKEN_HIGH}]{cost}[/]")
         if self.ongoing:
             parts_right.append(f"[{ACCENT}] ●[/]")
 
@@ -108,16 +132,19 @@ class InfoBar(Widget):
 
     def _build_content(self) -> str:
         meta = self.meta
-        messages = self.messages
         totals = self.session_totals
         session_path = self.session_path
 
         project_name = short_path(meta.cwd)
-        session_id = session_path.split("/")[-1].replace(".jsonl", "") if session_path else ""
+        session_id = meta.session_id or (
+            session_path.replace("\\", "/").split("/")[-1].replace(".jsonl", "")
+            if session_path
+            else ""
+        )
         branch = meta.git_branch
         mode = meta.permission_mode
 
-        ctx_pct = context_percent(messages)
+        ctx_pct = self._context_percent()
         dot = f"[{TEXT_MUTED}] · [/]"
 
         parts_left = []
@@ -137,8 +164,8 @@ class InfoBar(Widget):
             parts_right.append(f"[{clr}]ctx {ctx_pct}%[/]")
         if totals.total_tokens > 0:
             parts_right.append(f"{dot}[{TEXT_DIM}]{format_tokens(totals.total_tokens)} tok[/]")
-        if totals.cost_usd > 0:
-            parts_right.append(f"{dot}[{TOKEN_HIGH}]{format_cost(totals.cost_usd)}[/]")
+        if cost := self._cost_label():
+            parts_right.append(f"{dot}[{TOKEN_HIGH}]{cost}[/]")
         if self.ongoing:
             parts_right.append(f" [{ACCENT}]●[/]")
 

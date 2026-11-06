@@ -48,10 +48,32 @@ and settings show whatever the enabled plugins provide.
 | ----------- | ----------------------------------------------------------------------- | --------- |
 | Claude Code | `~/.claude/projects/` session logs                                      | Always on |
 | Antigravity | Google Antigravity "brain" conversations in `~/.gemini/<flavor>/brain/` | Off       |
+| Codex       | `~/.codex/sessions/` and `~/.codex/archived_sessions/` rollout logs     | Off       |
 
 Turn optional plugins on under **Settings → General → Sources**. With more than one on, the
 picker gets an All / per-source filter. Antigravity conversations are read-only, and you can point
 it at a different brain directory in Settings.
+
+Enable **Codex** under Sources to browse Codex chats. It reads `$CODEX_HOME` (or `~/.codex`)
+and, on Windows, also detects Codex homes in installed WSL distributions. Set a Codex Home
+Directory in Settings to read one specific home instead. Messages, readable reasoning, tool
+calls and results, recorded token totals, and estimated USD costs are supported; encrypted
+reasoning stays hidden. Costs appear on session cards, in picker totals, and in an open chat's
+info bar. They are API-equivalent model-token estimates using [OpenAI's published rates](https://developers.openai.com/api/docs/pricing),
+including cached input, rather than subscription bills. Missing usage or unknown pricing shows
+as unavailable, and totals with unpriced chats are marked with `+`.
+Verified linked worker usage is counted once, excluding inherited history. If worker usage
+cannot be attributed, the known subtotal remains visible with `+`.
+The picker shows user chats with their saved names or first meaningful prompt. Background-agent
+rollouts are excluded, and client page metadata is skipped when choosing a title.
+The project sidebar groups chats by their original working folder, with nested folders,
+collapse controls, search and date groups. Recorded model, Git branch, approval/sandbox policy,
+context usage, active status and turn timing appear when available. Resume and Fork buttons
+copy commands for the chat's Windows or WSL environment, including custom Codex homes.
+Efficiency analysis uses the same local redaction, payload preview and consent flow as Claude
+sessions; no transcript is sent merely by opening a chat.
+The web, desktop and terminal viewers follow updates to an open chat; `r` also refreshes the
+terminal UI manually. Chat files are read-only. All committed Codex test data is fabricated.
 
 To add a plugin, see [specs/15-session-source-plugins.md](specs/15-session-source-plugins.md).
 

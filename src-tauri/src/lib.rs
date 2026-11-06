@@ -120,6 +120,12 @@ fn run_desktop(args: &[String]) {
             plugins::antigravity::commands::get_antigravity_settings,
             plugins::antigravity::commands::set_antigravity_root,
             plugins::antigravity::commands::load_antigravity_session,
+            // Codex source plugin
+            plugins::codex::commands::list_codex_sessions,
+            plugins::codex::commands::load_codex_session,
+            plugins::codex::commands::prepare_codex_efficiency_payload,
+            plugins::codex::commands::get_codex_settings,
+            plugins::codex::commands::set_codex_root,
             // Core
             commands::settings::get_settings,
             commands::settings::set_plugin_enabled,

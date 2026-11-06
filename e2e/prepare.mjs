@@ -154,6 +154,7 @@ for (const shape of ["same", "web"]) {
   const projectsDir = resolve(tmp, shape, "projects");
   mkdirSync(configDir, { recursive: true });
   cpSync(fixtures, projectsDir, { recursive: true });
+  cpSync(resolve(root, "e2e/fixtures/codex"), resolve(tmp, shape, "codex"), { recursive: true });
   seedEfficiencyAnalysis(configDir, projectsDir);
 }
 

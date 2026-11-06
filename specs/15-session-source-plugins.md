@@ -243,6 +243,94 @@ interface AntigravityWindow {
 - Each transcript gets a byte-offset index cached in the app's config dir, so opening a large
   conversation does not re-parse it whole. Nothing is ever written under a brain root.
 
+## Plugin: `codex`
+
+Read-only Codex rollout viewer, off by default. It scans `sessions/` and
+`archived_sessions/` below `$CODEX_HOME` or `~/.codex`. On Windows it also discovers installed
+WSL distributions and their Codex homes. A custom `plugins.codex.root` replaces auto-detection
+and points to a Codex home, rather than directly to its sessions folder.
+
+The picker excludes rollouts whose first session metadata explicitly identifies a subagent
+source. Later inherited metadata does not change that classification. User-created forks and
+independent chats remain separate even when they share a title. Saved chat names take priority;
+client page-context blocks are skipped when selecting either a saved name or a prompt-derived
+fallback. A real prompt following a known page-context block is preserved.
+
+| Command                                                 | HTTP                                 | Returns                                                     |
+| ------------------------------------------------------- | ------------------------------------ | ----------------------------------------------------------- |
+| `list_codex_sessions`                                   | `GET /api/codex/sessions`            | `CodexSession[]`, newest first; empty while disabled        |
+| `get_codex_settings`                                    | `GET /api/codex/settings`            | `{root: string \| null, roots: [{path, source, exists}]}`   |
+| `set_codex_root {path}`                                 | `POST /api/codex/root`               | Updated Codex settings; null clears the override            |
+| `load_codex_session {path, start?, limit?}`             | `POST /api/codex/session`            | `CodexWindow`; limit 0 fetches metadata only                |
+| `prepare_codex_efficiency_payload {path, payloadMode?}` | `POST /api/codex/efficiency/prepare` | Locally normalized and redacted `PreparedEfficiencyPayload` |
+
+`CodexSession` contains `id`, `path`, `title`, `cwd`, `model`, `modified_at` (ISO timestamp),
+`archived`, `source`, `total_tokens`, and nullable `cost_usd`. `CodexWindow` contains shared
+`DisplayMessage` bodies plus `count`,
+`start`, `roles`, `ongoing`, `revision`, and `input_tokens`, `output_tokens`, `cache_read_tokens`,
+`total_tokens`, and nullable `cost_usd`. The shared assistant role remains `claude` for renderer
+compatibility; each
+Codex frontend labels it **Codex**. No Claude-only actions are attached to these sessions.
+
+The original `cwd` and recorded `dirs` drive the project tree, independently of Claude's
+encoded transcript paths. Windows paths compare without case; POSIX paths retain case and WSL
+distributions retain separate namespaces. Forks group with their known root. Source-owned
+precomputed tree items share the tree renderer; the shell stacks visible source sidebars in
+one resizable column and follows the picker source filter or open conversation. Project
+filters combine with search, and date headings preserve keyboard/card order.
+
+Additional session/window metadata includes recorded model, Git branch, approval and sandbox
+policy, start/activity timestamps, active turn duration (excluding idle gaps), turn count,
+context usage and context capacity. Missing timing/context remain null. The context gauge
+uses the latest request's total context usage, including cached input, rather than cumulative session usage.
+The session's original directory remains stable after later working-directory changes.
+
+Resume/Fork actions copy quoted Codex CLI commands; they do not execute the CLI. Commands
+preserve the transcript's Codex home, convert WSL-mounted Windows paths to native paths and
+name the target shell. Shared efficiency analysis accepts normalized Codex display messages,
+uses the existing redaction/preview/explicit-consent flow and shares jobs, cached reports and
+finding navigation. Merely browsing a chat does not send transcript data to Jev.
+
+Worker expansion requires a spawn result's `agent_id`, matching first child parent metadata,
+and an unambiguous assigned prompt boundary in the same Codex home. It excludes inherited
+history, follows at most four levels and counts each descendant's own usage once. Dependency
+revisions refresh open nested panels and picker totals when children change. Unresolved or
+unpriced workers preserve any known subtotal with `cost_partial: true`, rendered with `+`;
+fully unknown costs remain null. Ordinary tool/results remain visible when a link cannot be verified.
+
+The parser reconciles response items and duplicate event messages, matches tool results by call
+ID, and omits encrypted reasoning. The web/desktop source polls the active conversation using
+its revision and loads bounded message windows. The terminal polls a metadata-only index, reloading
+messages on a changed revision; `r` also refreshes manually. Test transcripts
+and expected messages are fabricated; personal Windows and WSL chats may only be used for
+read-only local validation.
+
+Costs are estimated API-equivalent model-token USD, using bundled [official OpenAI rates](https://developers.openai.com/api/docs/pricing)
+checked on 2026-11-07. They appear on picker cards, in filtered picker totals, and in the open
+conversation bar, including live updates. Subscription charges and tool fees can differ.
+Cached input and cache writes are separated from uncached input; reasoning is already part of
+output usage. Repeated modern response IDs and legacy usage twins must not be billed twice,
+and legacy-only usage before modern records must remain included. Per-request model and
+recorded context size determine pricing; aggregate-only historical usage assumes standard
+rates when request sizes or speed tiers are unavailable. Incomplete usage or unknown pricing
+returns `null`, distinct from a known zero. An aggregate with unknown chats displays its known
+subtotal with `+`, rather than presenting that subtotal as a complete cost.
+
+## Codex parity audit
+
+| Claude session feature                                                             | Codex support                                                                                    |
+| ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Project/folder tree, nesting, collapse and project filters                         | Web, desktop and terminal; original working folder and known fork ancestry                       |
+| Search and date groups                                                             | All viewers; displayed order matches keyboard selection                                          |
+| Messages, reasoning, tools/results, errors and compaction                          | Shared renderers; encrypted reasoning is omitted                                                 |
+| Token totals and estimated costs                                                   | All viewers; linked worker usage counted once; incomplete subtotals marked `+`                   |
+| Model, context gauge, branch, permission and timing metadata                       | Recorded when available; web/desktop also query current Git state                                |
+| Live updates                                                                       | Revision-aware polling, including worker dependencies                                            |
+| Resume and Fork                                                                    | Copy commands in web/desktop; Resume in terminal, matching its existing Claude action            |
+| Nested subagent browsing                                                           | Verified spawn links in shared nested-message panels                                             |
+| Efficiency analysis                                                                | All viewers; shared redaction, exact preview, explicit per-send consent, jobs and cached results |
+| Claude hook/debug logs, team/task board, terminal registry focus and recap records | Remain source-specific; Codex rollouts do not supply those Claude records                        |
+
 ## Adding a plugin
 
 1. Rust: `src-tauri/src/plugins/<id>/` implementing `SourcePlugin`; add it to `PLUGINS`; list its

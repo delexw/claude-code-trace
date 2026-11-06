@@ -15,6 +15,13 @@ describe("plugin registry", () => {
     const claude = PLUGINS.find((plugin) => plugin.id === "claude");
     expect(claude?.canDisable).toBe(false);
   });
+
+  it("registers Codex as an optional source", () => {
+    const codex = PLUGINS.find((plugin) => plugin.id === "codex");
+    expect(codex?.label).toBe("Codex");
+    expect(codex?.canDisable).toBe(true);
+    expect(isPluginEnabled(codex!, undefined)).toBe(false);
+  });
 });
 
 describe("isPluginEnabled", () => {

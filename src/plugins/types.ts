@@ -70,7 +70,7 @@ export interface SourceContext {
   activeView: string | null;
   openView(view: string): void;
   goToPicker(): void;
-  /** Move the shared picker selection (an index across every section). */
+  /** Select an item within this source's picker section. The shell adds its offset. */
   setPickerIndex(index: number): void;
   searchQuery: string;
   viewActionsRef: ViewActionsRef;

@@ -3,12 +3,14 @@ the shell composes and routes to them without knowing any of them by name."""
 
 from __future__ import annotations
 
+from unittest.mock import Mock
+
 import pytest
-from textual.widgets import Static
+from textual.widgets import Collapsible, ListView, Static
 
 import api
 import app as app_module
-from data_types import SessionInfo
+from data_types import DisplayItem, DisplayMessage, SessionInfo
 from plugins import REGISTRY
 from plugins.base import (
     PickerRow,
@@ -74,6 +76,30 @@ class TwoSourceApp(app_module.CCTraceApp):
     CSS_PATH = None
     PLUGIN_REGISTRY = (ClaudePlugin, FakePlugin)
     BINDINGS = [binding_for(FakePlugin.id, key) for key in FakePlugin.KEYS]
+
+
+class SidebarPlugin(FakePlugin):
+    def compose_sidebar(self):
+        yield Static("Fake Projects", id="fake-project-tree")
+
+
+class SidebarApp(TwoSourceApp):
+    PLUGIN_REGISTRY = (ClaudePlugin, SidebarPlugin)
+
+
+class ResumePlugin(FakePlugin):
+    KEYS = (PluginKey("y", "copy_resume", "Copy resume"),)
+
+    def action_copy_resume(self):
+        self.poked += 1
+
+    def check_action(self, action, view):
+        return view in ("list", "detail")
+
+
+class ResumeApp(TwoSourceApp):
+    PLUGIN_REGISTRY = (ClaudePlugin, ResumePlugin)
+    BINDINGS = [binding_for(plugin.id, key) for plugin in PLUGIN_REGISTRY for key in plugin.KEYS]
 
 
 class _RecordingSSE:
@@ -143,7 +169,7 @@ def _picker_entries(app) -> list[tuple[str, object]]:
 
 
 def test_the_registered_sources_in_picker_order():
-    assert [plugin.id for plugin in REGISTRY] == ["claude", "antigravity"]
+    assert [plugin.id for plugin in REGISTRY] == ["claude", "antigravity", "codex"]
 
 
 def test_a_backend_without_a_plugins_list_leaves_only_required_plugins_on():
@@ -199,6 +225,49 @@ async def test_an_enabled_plugin_adds_its_rows_after_claude_s(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_source_sidebars_stack_and_follow_the_open_view_owner(monkeypatch):
+    _settings(monkeypatch, fake_enabled=True)
+    async with SidebarApp().run_test() as pilot:
+        await _settle(pilot)
+        app = pilot.app
+        claude_tree = app.query_one("#project-tree")
+        fake_tree = app.query_one("#fake-project-tree")
+        assert claude_tree.parent.id == "source-sidebars"
+        assert fake_tree.parent is claude_tree.parent
+        assert claude_tree.display and fake_tree.display
+        app._session_plugin = app.plugins.get("fake")
+        app.view = "list"
+        await pilot.pause()
+        assert not claude_tree.display
+        assert fake_tree.display
+        app.view = "picker"
+        await pilot.pause()
+        assert claude_tree.display and fake_tree.display
+
+
+@pytest.mark.asyncio
+async def test_shared_resume_key_runs_only_for_the_active_source(monkeypatch):
+    _settings(monkeypatch, fake_enabled=True)
+    async with ResumeApp().run_test() as pilot:
+        await _settle(pilot)
+        app = pilot.app
+        claude = app.plugins.get("claude")
+        fake = app.plugins.get("fake")
+        claude.current_session = SESSION
+        copied = Mock()
+        monkeypatch.setattr(app, "copy_to_clipboard", copied)
+        app._session_plugin = fake
+        app.view = "list"
+        await pilot.press("y")
+        assert fake.poked == 1
+        copied.assert_not_called()
+        app._session_plugin = claude
+        await pilot.press("y")
+        copied.assert_called_once()
+        assert fake.poked == 1
+
+
+@pytest.mark.asyncio
 async def test_opening_a_row_goes_to_the_plugin_that_owns_it(monkeypatch):
     _settings(monkeypatch, fake_enabled=True)
     async with TwoSourceApp().run_test() as pilot:
@@ -210,6 +279,28 @@ async def test_opening_a_row_goes_to_the_plugin_that_owns_it(monkeypatch):
         await pilot.pause()
 
         assert pilot.app.plugins.get("fake").opened == ["fake-1"]
+
+
+@pytest.mark.asyncio
+async def test_enter_expands_the_first_detail_item(monkeypatch):
+    _settings(monkeypatch, fake_enabled=False)
+    async with TwoSourceApp().run_test() as pilot:
+        await _settle(pilot)
+        app = pilot.app
+        app._detail_full_message = DisplayMessage(
+            role="claude",
+            items=[DisplayItem(id="fabricated-tool", item_type="ToolCall", tool_name="Read")],
+        )
+        app.view = "detail"
+        app._sync_detail_view()
+        await pilot.pause()
+        items = app.query_one("#items-list", ListView)
+        items.index = 0
+        items.focus()
+        first = app.query_one("#item-0", Collapsible)
+        assert first.collapsed
+        await pilot.press("enter")
+        assert not first.collapsed
 
 
 @pytest.mark.asyncio

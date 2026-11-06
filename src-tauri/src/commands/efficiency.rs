@@ -48,11 +48,23 @@ pub fn prepare_session_efficiency_payload_impl(
     let mode = mode.unwrap_or_else(|| crate::efficiency::settings::load().default_payload_mode);
     let session =
         crate::session_load::build_session(path, crate::session_load::TimeFilter::default())?;
-    let input = crate::efficiency::extract::extract_input(
+    prepare_display_efficiency_payload(
+        path,
+        mode,
         &session.messages,
         session.session_totals.total_tokens,
-        mode,
-    );
+    )
+}
+
+/// Sources normalize their transcript locally before sharing the same redaction,
+/// preview, background-job and result-cache pipeline.
+pub fn prepare_display_efficiency_payload(
+    path: &str,
+    mode: PayloadMode,
+    messages: &[crate::convert::DisplayMessage],
+    total_tokens: i64,
+) -> Result<PreparedEfficiencyPayload, String> {
+    let input = crate::efficiency::extract::extract_input(messages, total_tokens, mode);
     let input = crate::efficiency::redact::redact_input(input);
     Ok(PreparedEfficiencyPayload {
         session_id: session_id(path),

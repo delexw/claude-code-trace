@@ -201,13 +201,15 @@ async def test_recommendation_provider(provider: RecommendationProvider) -> None
     await _post("/api/analytics/recommendation/test", {"provider": provider.to_dict()})
 
 
-async def prepare_efficiency_payload(path: str, payload_mode: str) -> PreparedPayload:
+async def prepare_efficiency_payload(
+    path: str, payload_mode: str, *, endpoint: str = "/api/efficiency/prepare"
+) -> PreparedPayload:
     """Build (and locally redact) the payload an analysis would send to Jev.
 
     Nothing leaves the machine until `start_efficiency_analysis` is called
     with it.
     """
-    data = await _post("/api/efficiency/prepare", {"path": path, "payloadMode": payload_mode})
+    data = await _post(endpoint, {"path": path, "payloadMode": payload_mode})
     return prepared_payload_from_dict(data)  # type: ignore[arg-type]
 
 

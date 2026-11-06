@@ -65,6 +65,45 @@ describe("App with session-source plugins", () => {
     expect(screen.getByText("beta stats")).toBeInTheDocument();
   });
 
+  it("keeps source project trees in one column and follows the source filter", async () => {
+    renderApp(true);
+    await screen.findByText("beta one");
+    expect(screen.getByText("alpha projects").closest("aside")).toBe(
+      screen.getByText("beta projects").closest("aside"),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "beta" }));
+    expect(screen.queryByText("alpha projects")).toBeNull();
+    expect(screen.getByText("beta projects")).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "h" });
+    expect(beta.focused).toHaveBeenCalledOnce();
+    expect(alpha.focused).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "All" }));
+    fireEvent.mouseEnter(screen.getByText("beta one"));
+    fireEvent.keyDown(window, { key: "h" });
+    expect(beta.focused).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows only the open conversation source's project tree", async () => {
+    renderApp(true);
+    await screen.findByText("beta one");
+    fireEvent.mouseEnter(screen.getByText("beta one"));
+    fireEvent.keyDown(window, { key: "Enter" });
+    expect(screen.queryByText("alpha projects")).toBeNull();
+    expect(screen.getByText("beta projects")).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "q" });
+    expect(screen.getByText("alpha projects")).toBeInTheDocument();
+  });
+
+  it("selects the owning source's first row after choosing its project in All", async () => {
+    renderApp(true);
+    await screen.findByText("beta one");
+    fireEvent.click(screen.getByText("beta projects"));
+    expect(selected().map((el) => el.textContent)).toEqual(["beta one"]);
+    fireEvent.keyDown(window, { key: "Enter" });
+    expect(beta.opened).toHaveBeenCalledWith(0);
+    expect(alpha.opened).not.toHaveBeenCalled();
+  });
+
   it("leaves out everything from a disabled plugin", async () => {
     renderApp(false);
 
