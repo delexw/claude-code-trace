@@ -51,11 +51,7 @@ describe("Docker Jev API-key setup", () => {
     const source = `
       docker() {
         printf '%s\\n' "$*" >> "$DOCKER_CALLS_FILE"
-        if [[ "$1" == "volume" ]]; then
-          printf '%s\\n' "$JEV_SECRET_VOLUME"
-        else
-          cat > "$SECRET_INPUT_FILE"
-        fi
+        cat > "$SECRET_INPUT_FILE"
       }
       store_docker_jev_api_key "test-jev-secret"
     `;
@@ -73,6 +69,7 @@ describe("Docker Jev API-key setup", () => {
     expect(result.status).toBe(0);
     expect(readFileSync(secretInputFile, "utf8")).toBe("test-jev-secret");
     expect(readFileSync(callsFile, "utf8")).not.toContain("test-jev-secret");
+    expect(readFileSync(callsFile, "utf8")).toContain("compose run");
   });
 
   it("loads the mounted secret before starting the headless server", () => {
@@ -113,11 +110,11 @@ describe("Docker Jev API-key setup", () => {
     expect(output).toBe("environment-jev-secret");
   });
 
-  it("mounts the Docker secret volume read-only", () => {
+  it("keeps the Jev key in the single config volume", () => {
     const compose = readFileSync(join(repoRoot, "docker-compose.yml"), "utf8");
 
-    expect(compose).toContain("JEV_API_KEY_FILE: /run/secrets/jev_api_key");
-    expect(compose).toContain("cctrace-secrets:/run/secrets:ro");
-    expect(compose).toContain("name: claude-code-trace-secrets");
+    expect(compose).toContain("JEV_API_KEY_FILE: /home/app/.config/claude-code-trace/jev_api_key");
+    expect(compose).toContain("cctrace-config:/home/app/.config");
+    expect(compose.match(/^ {2}\S+:$/gm)).toEqual(["  cctrace:", "  cctrace-config:"]);
   });
 });

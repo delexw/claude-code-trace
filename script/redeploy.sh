@@ -3,7 +3,6 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-JEV_SECRET_VOLUME="${CCTRACE_JEV_SECRET_VOLUME:-claude-code-trace-secrets}"
 
 ask_to_configure_jev_api_key() {
   local answer
@@ -24,13 +23,11 @@ read_jev_api_key() {
 
 store_docker_jev_api_key() {
   local api_key="$1"
-  docker volume create "$JEV_SECRET_VOLUME" >/dev/null
-  printf '%s' "$api_key" | docker run --rm -i --user 0 \
-    -v "${JEV_SECRET_VOLUME}:/run/secrets" \
+  printf '%s' "$api_key" | docker compose run --rm --no-deps -T \
     --entrypoint /bin/sh \
-    claude-code-trace:latest \
-    -c 'umask 077; cat > /run/secrets/jev_api_key; chown 1000:1000 /run/secrets/jev_api_key; chmod 600 /run/secrets/jev_api_key'
-  echo "==> Jev API key stored in Docker volume ${JEV_SECRET_VOLUME}."
+    cctrace \
+    -c 'umask 077; mkdir -p "$(dirname "$JEV_API_KEY_FILE")"; cat > "$JEV_API_KEY_FILE"'
+  echo "==> Jev API key stored in the Docker config volume."
 }
 
 main() {

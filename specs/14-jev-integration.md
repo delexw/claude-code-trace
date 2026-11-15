@@ -375,7 +375,7 @@ Tokens never enter `settings.json`, `analytics.json`, the analysis cache, or any
 `api_key_configured` before writing to disk.
 
 **Docker** has no OS keyring. `script/docker-entrypoint.sh` reads `JEV_API_KEY_FILE` (Compose
-mounts `/run/secrets/jev_api_key`) and exports it as `JEV_API_KEY`. `redeploy.sh` reads the key
+points it at `jev_api_key` in the config volume) and exports it as `JEV_API_KEY`. `redeploy.sh` reads the key
 from stdin without echoing and passes it through stdin rather than a Docker argument.
 
 **Web mode deliberately exposes no key-management endpoint.** `set_jev_api_key`,
