@@ -30,6 +30,12 @@ store_docker_jev_api_key() {
   echo "==> Jev API key stored in the Docker config volume."
 }
 
+container_ids_publishing_port() {
+  local port="$1"
+  docker ps --format '{{.ID}} {{.Ports}}' |
+    awk -v published=":${port}->" 'index($0, published) { print $1 }'
+}
+
 main() {
   cd "$ROOT_DIR"
 
@@ -41,7 +47,7 @@ main() {
   # Also stop any manually-started container occupying the target port
   local port="${CCTRACE_HOST_PORT:-1421}"
   local existing
-  existing=$(docker ps -q --filter "publish=${port}" 2>/dev/null)
+  existing=$(container_ids_publishing_port "$port")
   if [ -n "$existing" ]; then
     echo "    Stopping container(s) on port ${port}: $existing"
     docker stop $existing >/dev/null
