@@ -104,6 +104,35 @@ const indexed = {
 };
 
 describe("SessionPicker", () => {
+  it("numbers sessions continuously across date groups", () => {
+    const onSelectIndex = vi.fn();
+    const today = makeSession({ path: "/p/today.jsonl", first_message: "Today session" });
+    const older = makeSession({
+      path: "/p/older.jsonl",
+      first_message: "Older session",
+      mod_time: new Date(Date.now() - 90 * 86400000).toISOString(),
+    });
+    render(
+      <SessionPicker
+        index={indexed}
+        sessions={[today, older]}
+        loading={false}
+        searchQuery=""
+        selectedIndex={1}
+        onSelect={vi.fn()}
+        onSearchChange={vi.fn()}
+        onSelectIndex={onSelectIndex}
+      />,
+    );
+    const todayRow = screen.getByText("Today session").closest(".picker__session");
+    const olderRow = screen.getByText("Older session").closest(".picker__session");
+    expect(todayRow).not.toHaveClass("picker__session--selected");
+    expect(olderRow).toHaveClass("picker__session--selected");
+    fireEvent.mouseEnter(todayRow!);
+    fireEvent.mouseEnter(olderRow!);
+    expect(onSelectIndex.mock.calls).toEqual([[0], [1]]);
+  });
+
   it("starts analysis without opening the session card", () => {
     const session = makeSession();
     const onSelect = vi.fn();
