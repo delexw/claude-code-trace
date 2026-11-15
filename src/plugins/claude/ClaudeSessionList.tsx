@@ -120,8 +120,9 @@ export function ClaudeSessionList({
 
   const dateGroups = groupByDate(sessions);
 
-  // Build flat list for index tracking
-  let flatIndex = 0;
+  const groupStartIndexes = dateGroups.map((_, groupIdx) =>
+    dateGroups.slice(0, groupIdx).reduce((count, group) => count + group.items.length, 0),
+  );
 
   return (
     <>
@@ -138,11 +139,11 @@ export function ClaudeSessionList({
         </div>
       )}
 
-      {dateGroups.map((group) => (
+      {dateGroups.map((group, groupIdx) => (
         <div key={group.category}>
           <div className="picker__group-header">{group.category}</div>
-          {group.items.map((session) => {
-            const idx = flatIndex++;
+          {group.items.map((session, itemIdx) => {
+            const idx = groupStartIndexes[groupIdx] + itemIdx;
             const isSelected = idx === selectedIndex;
             const model = shortModel(session.model);
             const modelClr = getModelColor(session.model);
