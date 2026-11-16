@@ -1,10 +1,70 @@
 import { describe, it, expect, vi } from "vitest";
+import { StrictMode } from "react";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { CodexPickerSection, visibleSessions } from "./CodexPickerSection";
 import { makeSession } from "./testFixtures";
 import { codexProjectKey } from "./projects";
 
 describe("CodexPickerSection", () => {
+  it("keeps hover and selection indexes contiguous across groups and rerenders", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-10T12:00:00Z"));
+    try {
+      const sessions = visibleSessions(
+        ["2025-01-01", "2026-01-10", "2025-01-02", "2026-01-09"].map((date) =>
+          makeSession({
+            id: date,
+            path: `/example/${date}`,
+            title: date,
+            modified_at: `${date}T10:00:00Z`,
+          }),
+        ),
+        "",
+      );
+      const onHover = vi.fn();
+      const props = {
+        loading: false,
+        error: null,
+        searchQuery: "",
+        onHover,
+        onOpen: vi.fn(),
+        onRefresh: vi.fn(),
+      };
+      const { container, rerender } = render(
+        <StrictMode>
+          <CodexPickerSection {...props} sessions={sessions} selectedIndex={2} />
+        </StrictMode>,
+      );
+      const assertIndexes = (displayed: typeof sessions, selected: number) => {
+        onHover.mockClear();
+        const cards = container.querySelectorAll(".picker__session");
+        expect(cards).toHaveLength(displayed.length);
+        cards.forEach((card, index) => {
+          expect(card).toHaveTextContent(displayed[index].title);
+          expect(card.classList.contains("picker__session--selected")).toBe(index === selected);
+          fireEvent.mouseEnter(card);
+        });
+        expect(onHover.mock.calls).toEqual(displayed.map((_, index) => [index]));
+      };
+      assertIndexes(sessions, 2);
+      rerender(
+        <StrictMode>
+          <CodexPickerSection {...props} sessions={sessions} selectedIndex={3} />
+        </StrictMode>,
+      );
+      assertIndexes(sessions, 3);
+      const filtered = sessions.slice(1);
+      rerender(
+        <StrictMode>
+          <CodexPickerSection {...props} sessions={filtered} selectedIndex={1} />
+        </StrictMode>,
+      );
+      assertIndexes(filtered, 1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("combines the selected project with search", () => {
     const first = makeSession({ cwd: "/example/first" });
     const second = makeSession({ id: "second", cwd: "/example/second" });

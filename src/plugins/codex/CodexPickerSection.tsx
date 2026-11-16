@@ -61,8 +61,13 @@ export function CodexPickerSection({
   const selectedRef = useScrollToSelected(selectedIndex ?? -1);
   const dateGroups = groupByDate(
     sessions.map((session) => ({ session, mod_time: session.modified_at })),
-  );
-  let flatIndex = 0;
+  ).map((group, groupIndex, groups) => ({
+    category: group.category,
+    items: group.items,
+    startIndex: groups
+      .slice(0, groupIndex)
+      .reduce((total, previous) => total + previous.items.length, 0),
+  }));
   return (
     <div className="picker__section codex-section">
       <div className="picker__section-header">
@@ -93,8 +98,8 @@ export function CodexPickerSection({
       {dateGroups.map((group) => (
         <Fragment key={group.category}>
           <div className="picker__group-header">{group.category}</div>
-          {group.items.map(({ session }) => {
-            const index = flatIndex++;
+          {group.items.map(({ session }, itemIndex) => {
+            const index = group.startIndex + itemIndex;
             return (
               <div
                 key={session.path}
