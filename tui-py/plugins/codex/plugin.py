@@ -167,6 +167,7 @@ class CodexPlugin(EfficiencySourcePlugin):
                 view in (LIST_VIEW, DETAIL_VIEW)
                 and self._session is not None
                 and self.host.session_path == self._session.path
+                and resume_command(self._session) is not None
             )
         if action in ("analyse_session", "analytics_settings"):
             return view == PICKER_VIEW and (
@@ -176,8 +177,11 @@ class CodexPlugin(EfficiencySourcePlugin):
         return True
 
     def action_copy_resume(self) -> None:
-        if self._session is not None and self.host.session_path == self._session.path:
-            self.host.copy_to_clipboard(resume_command(self._session))
+        if self._session is None or self.host.session_path != self._session.path:
+            return
+        command = resume_command(self._session)
+        if command is not None:
+            self.host.copy_to_clipboard(command)
 
     def open(self, item: object) -> None:
         if isinstance(item, CodexSession):

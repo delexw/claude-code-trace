@@ -11,8 +11,12 @@ function quotePosix(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
+/** PowerShell reads U+2018, U+2019, U+201A and U+201B as single quotes, just
+ * like the straight one. A string is only closed by an undoubled quote of any
+ * of the five, so each must be doubled or a crafted cwd could end the string
+ * and run its own command. Keep in step with `tui-py/plugins/codex/resume_command.py`. */
 function quotePowerShell(value: string): string {
-  return `'${value.replace(/'/g, "''")}'`;
+  return `'${value.replace(/['\u2018\u2019\u201A\u201B]/g, "$&$&")}'`;
 }
 
 function windowsPath(path: string): string | null {

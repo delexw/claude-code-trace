@@ -363,13 +363,9 @@ async def test_live_poll_replaces_truncated_or_earlier_worker_messages(monkeypat
         assert messages[0].items[0].subagent_messages[0].role_label == "Codex"
 
 
-def test_resume_quotes_shell_arguments_and_applies_only_to_active_codex_session():
-    posix = replace(SESSION, cwd="/example/it's a demo", id="sample id")
-    assert resume_command(posix) == "cd '/example/it'\"'\"'s a demo' && codex resume 'sample id'"
-    windows = replace(SESSION, cwd="D:\\Example\\it's a demo")
-    assert (
-        resume_command(windows)
-        == "Set-Location -LiteralPath 'D:\\Example\\it''s a demo'; codex resume 'fabricated-codex'"
+def test_resume_command_applies_only_to_active_codex_session():
+    assert resume_command(SESSION) == (
+        "CODEX_HOME='/example/.codex' codex -C '/example/calculator' resume -- 'fabricated-codex'"
     )
     host = Mock(view="list", session_path=SESSION.path)
     plugin = CodexPlugin(host)
@@ -380,3 +376,15 @@ def test_resume_quotes_shell_arguments_and_applies_only_to_active_codex_session(
     host.copy_to_clipboard.assert_called_once_with(resume_command(SESSION))
     host.session_path = "/another/source"
     assert not plugin.check_action("copy_resume", "list")
+
+
+def test_copy_action_is_hidden_and_inert_when_no_safe_command_exists():
+    unsafe = replace(SESSION, id="first\nsecond")
+    assert resume_command(unsafe) is None
+    host = Mock(view="list", session_path=unsafe.path)
+    plugin = CodexPlugin(host)
+    plugin._session = unsafe
+    assert not plugin.check_action("copy_resume", "list")
+    assert not plugin.check_action("copy_resume", "detail")
+    plugin.action_copy_resume()
+    host.copy_to_clipboard.assert_not_called()

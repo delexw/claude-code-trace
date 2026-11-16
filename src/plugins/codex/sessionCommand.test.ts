@@ -50,6 +50,68 @@ describe("Codex session commands", () => {
     expect(generated?.command).toContain("finally { $env:CODEX_HOME = $codexTracePreviousHome }");
   });
 
+  it("produces the exact PowerShell command shared with the terminal UI", () => {
+    expect(
+      codexSessionCommand({
+        id,
+        cwd: "D:\\Toy Projects\\it's here",
+        path: "C:\\Users\\demo\\custom codex\\sessions\\rollout-fabricated.jsonl",
+      })?.command,
+    ).toBe(
+      `& { $codexTracePreviousHome = $env:CODEX_HOME; try { $env:CODEX_HOME = 'C:\\Users\\demo\\custom codex'; codex -C 'D:\\Toy Projects\\it''s here' resume -- '${id}' } finally { $env:CODEX_HOME = $codexTracePreviousHome } }`,
+    );
+  });
+
+  // PowerShell closes a single-quoted string at any of these, not only at '.
+  const powerShellQuotes = ["'", "\u2018", "\u2019", "\u201A", "\u201B"];
+
+  it.each(powerShellQuotes)(
+    "doubles the PowerShell quote %s so a crafted value cannot close the string",
+    (quote) => {
+      const generated = codexSessionCommand({
+        id: `${quote}; Write-Host id ${quote}`,
+        cwd: `D:\\a${quote}; Write-Host cwd ${quote}b`,
+        path: `C:\\h${quote}; Write-Host home ${quote}\\sessions\\rollout-fabricated.jsonl`,
+      });
+      const doubled = quote + quote;
+      expect(generated?.shell).toBe("PowerShell");
+      expect(generated?.command).toBe(
+        `& { $codexTracePreviousHome = $env:CODEX_HOME; try { $env:CODEX_HOME = 'C:\\h${doubled}; Write-Host home ${doubled}'; ` +
+          `codex -C 'D:\\a${doubled}; Write-Host cwd ${doubled}b' resume -- '${doubled}; Write-Host id ${doubled}' ` +
+          `} finally { $env:CODEX_HOME = $codexTracePreviousHome } }`,
+      );
+    },
+  );
+
+  it("doubles every quote in a run of mixed PowerShell quotes", () => {
+    const generated = codexSessionCommand({
+      id,
+      cwd: "D:\\a'\u2018\u2019\u201A\u201Bz",
+      path: "C:\\h\\sessions\\rollout-fabricated.jsonl",
+    });
+    expect(generated?.command).toContain(
+      "codex -C 'D:\\a''\u2018\u2018\u2019\u2019\u201A\u201A\u201B\u201Bz' resume",
+    );
+  });
+
+  it("leaves curly quotes alone in POSIX commands, where they are ordinary text", () => {
+    const generated = codexSessionCommand({
+      id,
+      cwd: "/work/it\u2019s",
+      path: "/custom/codex/sessions/rollout-fabricated.jsonl",
+    });
+    expect(generated?.command).toBe(
+      `CODEX_HOME='/custom/codex' codex -C '/work/it\u2019s' resume -- '${id}'`,
+    );
+  });
+
+  it("does not map a /mnt path that contains a line separator onto a drive", () => {
+    // JavaScript's `.` stops at U+2028 and U+2029; the terminal UI must agree.
+    expect(codexSessionCommand({ ...session, cwd: "/mnt/c/a\u2028b" })?.command).toBe(
+      `CODEX_HOME='/custom/codex' codex -C '/mnt/c/a\u2028b' resume -- '${id}'`,
+    );
+  });
+
   it("converts a Windows home read through WSL back to its native path", () => {
     const generated = codexSessionCommand({
       id,
@@ -80,6 +142,11 @@ describe("Codex session commands", () => {
     { ...session, cwd: "relative" },
     { ...session, cwd: "D:\\toy", path: "/unmapped/codex/sessions/rollout.jsonl" },
     { ...session, id: "first\nsecond" },
+    ...["\0", "\r", "\n"].flatMap((control) => [
+      { ...session, id: `abc${control}def` },
+      { ...session, cwd: `/work/a${control}b` },
+      { ...session, path: `/custom/codex/sessions/rollout-a${control}b.jsonl` },
+    ]),
   ])("does not build a command from an unusable location: %j", (value) => {
     expect(codexSessionCommand(value)).toBeNull();
   });
