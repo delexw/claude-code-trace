@@ -23,9 +23,9 @@ The recommended deployment command is interactive:
 ```
 
 After building the image, it asks whether to configure or update the Jev API key. If you answer
-**Yes**, the script reads the key without echoing it and writes it to the dedicated
-`claude-code-trace-secrets` Docker volume. The running container mounts that volume read-only and
-loads the key server-side; the browser never sends or receives it. Answer **No** to preserve an
+**Yes**, the script reads the key without echoing it and writes it to the config volume, next to
+`settings.json`. The running container loads the key server-side; the browser never sends or
+receives it. Answer **No** to preserve an
 existing key or to run without Jev analysis.
 
 The following manual commands do not prompt for an API key:
@@ -74,7 +74,7 @@ All runtime knobs are environment variables, so you can override them with
 | `CCTRACE_ALLOWED_ORIGINS` | (unset)     | Extra CORS origins, comma-separated (see below)                                          |
 | `CCTRACE_API_AUTH`        | (unset)     | `off` disables client verification (see "API access" below)                              |
 | `CCTRACE_CONFIG_DIR`      | (unset)     | Relocate `settings.json` + client secrets (default `$XDG_CONFIG_HOME/claude-code-trace`) |
-| `JEV_API_KEY_FILE`        | (unset)     | Server-side file containing the Jev API key; Compose uses `/run/secrets/jev_api_key`     |
+| `JEV_API_KEY_FILE`        | (unset)     | Server-side file containing the Jev API key; Compose keeps it in the config volume       |
 
 Outside Docker (i.e. the normal desktop/web app) these variables are not
 set, and the server falls back to the historical defaults
@@ -91,9 +91,9 @@ OpenAI-compatible providers are restricted to loopback HTTP(S) URLs (`localhost`
 `::1`) without URL credentials, query parameters, or fragments. Use the desktop app when a remote
 provider requires a securely stored API token.
 
-The shipped Compose configuration sets `JEV_API_KEY_FILE` and mounts the
-`claude-code-trace-secrets` volume at `/run/secrets`. Use `./script/redeploy.sh` to populate or
-update it. Docker administrators can still read container-managed secrets, so protect access to
+The shipped Compose configuration sets `JEV_API_KEY_FILE` to
+`/home/app/.config/claude-code-trace/jev_api_key`, inside the config volume. Use
+`./script/redeploy.sh` to populate or update it. Docker administrators can still read container-managed secrets, so protect access to
 the Docker daemon; the key is not exposed through the web API, browser storage, Compose
 environment, or tracked files.
 
@@ -144,10 +144,10 @@ Revoke or reissue any client from the same Settings section without affecting th
 
 ## Volumes
 
-| Container path      | Purpose                                                                                                                         |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `/home/app/.claude` | Source of session JSONL files (mount your host's `~/.claude` here)                                                              |
-| `/home/app/.config` | `settings.json`, `api-secret`, `clients.json`, `clients/*.jwt` — persisted read-write so settings and clients survive recreates |
+| Container path      | Purpose                                                                                                                                        |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/home/app/.claude` | Source of session JSONL files (mount your host's `~/.claude` here)                                                                             |
+| `/home/app/.config` | `settings.json`, `api-secret`, `clients.json`, `clients/*.jwt`, `jev_api_key` — persisted read-write so settings and clients survive recreates |
 
 The app only needs to **read** session logs, so mounting `/home/app/.claude`
 read-only (`:ro`) is recommended and is what the shipped `docker-compose.yml`

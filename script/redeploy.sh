@@ -3,7 +3,6 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-JEV_SECRET_VOLUME="${CCTRACE_JEV_SECRET_VOLUME:-claude-code-trace-secrets}"
 
 ask_to_configure_jev_api_key() {
   local answer
@@ -24,13 +23,17 @@ read_jev_api_key() {
 
 store_docker_jev_api_key() {
   local api_key="$1"
-  docker volume create "$JEV_SECRET_VOLUME" >/dev/null
-  printf '%s' "$api_key" | docker run --rm -i --user 0 \
-    -v "${JEV_SECRET_VOLUME}:/run/secrets" \
+  printf '%s' "$api_key" | docker compose run --rm --no-deps -T \
     --entrypoint /bin/sh \
-    claude-code-trace:latest \
-    -c 'umask 077; cat > /run/secrets/jev_api_key; chown 1000:1000 /run/secrets/jev_api_key; chmod 600 /run/secrets/jev_api_key'
-  echo "==> Jev API key stored in Docker volume ${JEV_SECRET_VOLUME}."
+    cctrace \
+    -c 'umask 077; mkdir -p "$(dirname "$JEV_API_KEY_FILE")"; cat > "$JEV_API_KEY_FILE"'
+  echo "==> Jev API key stored in the Docker config volume."
+}
+
+container_ids_publishing_port() {
+  local port="$1"
+  docker ps --format '{{.ID}} {{.Ports}}' |
+    awk -v published=":${port}->" 'index($0, published) { print $1 }'
 }
 
 main() {
@@ -44,7 +47,7 @@ main() {
   # Also stop any manually-started container occupying the target port
   local port="${CCTRACE_HOST_PORT:-1421}"
   local existing
-  existing=$(docker ps -q --filter "publish=${port}" 2>/dev/null)
+  existing=$(container_ids_publishing_port "$port")
   if [ -n "$existing" ]; then
     echo "    Stopping container(s) on port ${port}: $existing"
     docker stop $existing >/dev/null

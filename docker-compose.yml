@@ -16,17 +16,16 @@ services:
       CCTRACE_STATIC_DIR: /app/dist
       # Optional secret created by script/redeploy.sh. The entrypoint reads it
       # server-side; the browser never receives the API key.
-      JEV_API_KEY_FILE: /run/secrets/jev_api_key
+      JEV_API_KEY_FILE: /home/app/.config/claude-code-trace/jev_api_key
     volumes:
       # Claude Code writes sessions to ~/.claude/projects on the host.
       # Mount read-only — the app never needs to write here.
       - "${CLAUDE_HOME:-${HOME}/.claude}:/home/app/.claude:ro"
       # Persist settings.json (projects dir, WSL distros, allowed CORS
-      # origins) across container recreation — without this it only lives in
-      # the container's writable layer and resets to {} on every recreate.
+      # origins) and the optional Jev API key across container recreation —
+      # without this they only live in the container's writable layer and
+      # reset on every recreate.
       - cctrace-config:/home/app/.config
-      # Docker-managed secret storage, mounted read-only at runtime.
-      - cctrace-secrets:/run/secrets:ro
     healthcheck:
       # CMD-SHELL always runs via /bin/sh, which on this image is dash and
       # doesn't support the /dev/tcp redirect below — invoke bash explicitly.
@@ -38,5 +37,3 @@ services:
 
 volumes:
   cctrace-config:
-  cctrace-secrets:
-    name: claude-code-trace-secrets

@@ -16,6 +16,55 @@ function runRedeployFunction(source: string, input?: string) {
   });
 }
 
+function listContainersPublishingPort(port: string, dockerBody: string) {
+  return runRedeployFunction(`
+    docker() {
+      ${dockerBody}
+    }
+    container_ids_publishing_port ${port}
+  `);
+}
+
+describe("Docker redeploy port cleanup", () => {
+  it("finds containers publishing the port without the engine-specific publish filter", () => {
+    const result = listContainersPublishingPort(
+      "1421",
+      `
+        printf '%s\\n' "$*" >&2
+        printf '%s\\n' \\
+          'aaa111 0.0.0.0:1421->1421/tcp, [::]:1421->1421/tcp' \\
+          'bbb222 0.0.0.0:11421->80/tcp' \\
+          'ccc333 0.0.0.0:8080->1421/tcp' \\
+          'ddd444 '
+      `,
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe("aaa111\n");
+    expect(result.stderr).not.toContain("--filter");
+  });
+
+  it("returns nothing when no container publishes the port", () => {
+    const result = listContainersPublishingPort("1421", "printf '%s\\n' 'ddd444 '");
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe("");
+  });
+
+  it("fails loudly when the engine rejects the listing", () => {
+    const result = listContainersPublishingPort(
+      "1421",
+      `
+        echo 'Error response from daemon: boom' >&2
+        return 1
+      `,
+    );
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("Error response from daemon: boom");
+  });
+});
+
 describe("Docker Jev API-key setup", () => {
   it.each(["y", "Y", "yes", "YES"])("accepts %s as consent to configure", (answer) => {
     const result = runRedeployFunction("ask_to_configure_jev_api_key", `${answer}\n`);
@@ -51,11 +100,7 @@ describe("Docker Jev API-key setup", () => {
     const source = `
       docker() {
         printf '%s\\n' "$*" >> "$DOCKER_CALLS_FILE"
-        if [[ "$1" == "volume" ]]; then
-          printf '%s\\n' "$JEV_SECRET_VOLUME"
-        else
-          cat > "$SECRET_INPUT_FILE"
-        fi
+        cat > "$SECRET_INPUT_FILE"
       }
       store_docker_jev_api_key "test-jev-secret"
     `;
@@ -73,6 +118,7 @@ describe("Docker Jev API-key setup", () => {
     expect(result.status).toBe(0);
     expect(readFileSync(secretInputFile, "utf8")).toBe("test-jev-secret");
     expect(readFileSync(callsFile, "utf8")).not.toContain("test-jev-secret");
+    expect(readFileSync(callsFile, "utf8")).toContain("compose run");
   });
 
   it("loads the mounted secret before starting the headless server", () => {
@@ -113,11 +159,11 @@ describe("Docker Jev API-key setup", () => {
     expect(output).toBe("environment-jev-secret");
   });
 
-  it("mounts the Docker secret volume read-only", () => {
+  it("keeps the Jev key in the single config volume", () => {
     const compose = readFileSync(join(repoRoot, "docker-compose.yml"), "utf8");
 
-    expect(compose).toContain("JEV_API_KEY_FILE: /run/secrets/jev_api_key");
-    expect(compose).toContain("cctrace-secrets:/run/secrets:ro");
-    expect(compose).toContain("name: claude-code-trace-secrets");
+    expect(compose).toContain("JEV_API_KEY_FILE: /home/app/.config/claude-code-trace/jev_api_key");
+    expect(compose).toContain("cctrace-config:/home/app/.config");
+    expect(compose.match(/^ {2}\S+:$/gm)).toEqual(["  cctrace:", "  cctrace-config:"]);
   });
 });

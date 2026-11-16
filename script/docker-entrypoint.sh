@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-# Compose mounts the optional Jev token from a Docker-managed volume. Load it
+# Compose keeps the optional Jev token in the config volume. Load it
 # inside the container so it never crosses the browser or appears in the
 # Compose service environment shown by `docker inspect`.
 if [ -z "${JEV_API_KEY:-}" ] && [ -n "${JEV_API_KEY_FILE:-}" ] && [ -r "$JEV_API_KEY_FILE" ]; then
