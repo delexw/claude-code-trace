@@ -69,7 +69,12 @@ rollouts are excluded, and client page metadata is skipped when choosing a title
 The project sidebar groups chats by their original working folder, with nested folders,
 collapse controls, search and date groups. Recorded model, Git branch, approval/sandbox policy,
 context usage, active status and turn timing appear when available. Resume and Fork buttons
-copy commands for the chat's Windows or WSL environment, including custom Codex homes.
+copy commands for the chat's Windows or WSL environment, including custom Codex homes. The
+web and terminal viewers build the same command; when a value (such as a folder name with a
+line break) makes a safe command impossible, the web buttons are disabled and the terminal
+UI hides its copy action.
+Only `rollout-*.jsonl` files under a configured home's `sessions` or `archived_sessions` folder
+can be opened, after symlinks are resolved, and turning the source off blocks opening chats too.
 Efficiency analysis uses the same local redaction, payload preview and consent flow as Claude
 sessions; no transcript is sent merely by opening a chat.
 The web, desktop and terminal viewers follow updates to an open chat; `r` also refreshes the

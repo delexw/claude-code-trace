@@ -264,6 +264,21 @@ fallback. A real prompt following a known page-context block is preserved.
 | `load_codex_session {path, start?, limit?}`             | `POST /api/codex/session`            | `CodexWindow`; limit 0 fetches metadata only                |
 | `prepare_codex_efficiency_payload {path, payloadMode?}` | `POST /api/codex/efficiency/prepare` | Locally normalized and redacted `PreparedEfficiencyPayload` |
 
+Both commands that take a `path` (`load_codex_session`, `prepare_codex_efficiency_payload`) go
+through one shared gate in `plugins/codex/mod.rs`, so the HTTP routes and the desktop commands
+cannot differ. While the plugin is off they fail with `Codex source is disabled`. Otherwise
+the path is resolved to its real location (symlinks and `..` followed) and must be a
+`rollout-*.jsonl` file under the `sessions` or `archived_sessions` folder of a configured Codex
+home, the same rule the folder scan uses, so a chat that is listed is exactly a chat that can
+be opened. Anything else fails with one error that does not reveal whether the file exists.
+
+The copyable Resume and Fork commands are built by `src/plugins/codex/sessionCommand.ts` and
+`tui-py/plugins/codex/resume_command.py`, which must produce identical text for the same chat
+(each has tests with the same cases). Both reject NUL, CR and LF, put `--` before the session
+id, set `CODEX_HOME`, and double all five PowerShell quote characters (`'` and U+2018, U+2019,
+U+201A, U+201B). When no safe command can be built the web buttons are disabled and the
+terminal UI hides its copy action.
+
 `CodexSession` contains `id`, `path`, `title`, `cwd`, `model`, `modified_at` (ISO timestamp),
 `archived`, `source`, `total_tokens`, and nullable `cost_usd`. `CodexWindow` contains shared
 `DisplayMessage` bodies plus `count`,
