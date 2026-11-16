@@ -939,6 +939,7 @@ mod tests {
             (Method::GET, "/api/codex/settings"),
             (Method::POST, "/api/codex/root"),
             (Method::POST, "/api/codex/session"),
+            (Method::POST, "/api/codex/efficiency/prepare"),
         ] {
             let req = Request::builder()
                 .method(method)

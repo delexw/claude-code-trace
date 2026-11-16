@@ -539,6 +539,16 @@ fn metadata(
     })
 }
 
+/// The one rule for what a rollout file is called. The folder scan and the
+/// check on a caller-supplied path both use it, so a chat that can be listed
+/// is exactly a chat that can be opened.
+pub fn is_rollout_file_name(path: &Path) -> bool {
+    path.extension().is_some_and(|e| e == "jsonl")
+        && path
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().starts_with("rollout-"))
+}
+
 fn rollout_files(dir: &Path, files: &mut Vec<PathBuf>) {
     let Ok(entries) = fs::read_dir(dir) else {
         return;
@@ -550,10 +560,7 @@ fn rollout_files(dir: &Path, files: &mut Vec<PathBuf>) {
         // Do not follow symlink directories or scan unrelated Codex state.
         if kind.is_dir() {
             rollout_files(&entry.path(), files);
-        } else if kind.is_file()
-            && entry.path().extension().is_some_and(|e| e == "jsonl")
-            && entry.file_name().to_string_lossy().starts_with("rollout-")
-        {
+        } else if kind.is_file() && is_rollout_file_name(&entry.path()) {
             files.push(entry.path());
         }
     }

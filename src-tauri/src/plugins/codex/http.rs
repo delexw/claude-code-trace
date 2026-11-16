@@ -72,9 +72,13 @@ struct LoadBody {
     limit: Option<usize>,
 }
 
-async fn load_session(Json(body): Json<LoadBody>) -> Response {
+async fn load_session(State(state): State<Arc<HttpState>>, Json(body): Json<LoadBody>) -> Response {
+    let settings = match app_state(&state).settings.lock() {
+        Ok(guard) => guard.clone(),
+        Err(e) => return err_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    };
     match tokio::task::spawn_blocking(move || {
-        super::load_session(&body.path, body.start, body.limit)
+        super::load_session(&settings, &body.path, body.start, body.limit)
     })
     .await
     {
@@ -91,9 +95,16 @@ struct PrepareBody {
     payload_mode: Option<crate::efficiency::settings::PayloadMode>,
 }
 
-async fn prepare_efficiency(Json(body): Json<PrepareBody>) -> Response {
+async fn prepare_efficiency(
+    State(state): State<Arc<HttpState>>,
+    Json(body): Json<PrepareBody>,
+) -> Response {
+    let settings = match app_state(&state).settings.lock() {
+        Ok(guard) => guard.clone(),
+        Err(e) => return err_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+    };
     match tokio::task::spawn_blocking(move || {
-        super::prepare_efficiency_payload(&body.path, body.payload_mode)
+        super::prepare_efficiency_payload(&settings, &body.path, body.payload_mode)
     })
     .await
     {
@@ -110,15 +121,60 @@ mod tests {
     use axum::http::Request;
     use tower::ServiceExt;
 
-    #[tokio::test]
-    async fn routes_list_disabled_source_and_load_a_fabricated_rollout() {
-        let state = Arc::new(HttpState {
+    const USER_ROW: &str = r#"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Invent a small demo"}]}}"#;
+
+    fn test_state() -> Arc<HttpState> {
+        Arc::new(HttpState {
             app_state: Arc::new(crate::state::AppState::for_tests(
                 crate::auth::AuthMode::Disabled,
             )),
             app: None,
-        });
-        let router = routes().with_state(state);
+        })
+    }
+
+    /// Point the test state at `home` and turn Codex on or off.
+    fn configure(state: &HttpState, home: &std::path::Path, enabled: bool) {
+        let mut settings = state.app_state.settings.lock().unwrap();
+        crate::plugins::set_enabled(&mut settings, super::super::ID, enabled).unwrap();
+        super::super::set_root(&mut settings, Some(home.to_string_lossy().into_owned())).unwrap();
+    }
+
+    fn write_rollout(path: &std::path::Path, body: &str) -> String {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, body).unwrap();
+        path.to_string_lossy().into_owned()
+    }
+
+    async fn post(
+        router: &Router,
+        uri: &str,
+        body: serde_json::Value,
+    ) -> (StatusCode, serde_json::Value, Vec<u8>) {
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(uri)
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = response.status();
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec();
+        let json = serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
+        (status, json, bytes)
+    }
+
+    #[tokio::test]
+    async fn routes_list_disabled_source_and_load_a_fabricated_rollout() {
+        let state = test_state();
+        let router = routes().with_state(state.clone());
         let response = router
             .clone()
             .oneshot(
@@ -139,61 +195,88 @@ mod tests {
         );
 
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("rollout-fabricated.jsonl");
-        std::fs::write(&path, r#"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Invent a small demo"}]}}"#).unwrap();
-        let request = Request::builder()
-            .method("POST")
-            .uri("/api/codex/session")
-            .header("content-type", "application/json")
-            .body(Body::from(
-                serde_json::json!({"path":path,"start":0,"limit":1}).to_string(),
-            ))
-            .unwrap();
-        let response = router.oneshot(request).await.unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap();
-        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let path = write_rollout(
+            &dir.path()
+                .join("sessions/2026/01/01/rollout-fabricated.jsonl"),
+            USER_ROW,
+        );
+        configure(&state, dir.path(), true);
+        let (status, body, _) = post(
+            &router,
+            "/api/codex/session",
+            serde_json::json!({"path":path,"start":0,"limit":1}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
         assert_eq!(body["count"], 1);
         assert_eq!(body["messages"][0]["content"], "Invent a small demo");
     }
 
     #[tokio::test]
+    async fn read_routes_refuse_a_file_outside_a_codex_home() {
+        let state = test_state();
+        let router = routes().with_state(state.clone());
+        let home = tempfile::tempdir().unwrap();
+        configure(&state, home.path(), true);
+        let outside = tempfile::tempdir().unwrap();
+        let stray = write_rollout(&outside.path().join("rollout-fabricated.jsonl"), USER_ROW);
+        let index = write_rollout(&home.path().join("session_index.jsonl"), USER_ROW);
+        for path in [stray, index] {
+            for uri in ["/api/codex/session", "/api/codex/efficiency/prepare"] {
+                let (status, body, _) = post(&router, uri, serde_json::json!({"path":path})).await;
+                assert_eq!(status, StatusCode::BAD_REQUEST, "{uri} {path}");
+                assert!(
+                    body["error"]
+                        .as_str()
+                        .is_some_and(|e| e.contains("configured Codex home")),
+                    "{uri}: {body}"
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn read_routes_refuse_every_chat_while_the_source_is_off() {
+        let state = test_state();
+        let router = routes().with_state(state.clone());
+        let home = tempfile::tempdir().unwrap();
+        let path = write_rollout(
+            &home.path().join("sessions/rollout-fabricated.jsonl"),
+            USER_ROW,
+        );
+        configure(&state, home.path(), false);
+        for uri in ["/api/codex/session", "/api/codex/efficiency/prepare"] {
+            let (status, body, _) = post(&router, uri, serde_json::json!({"path":path})).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{uri}");
+            assert_eq!(body["error"], "Codex source is disabled", "{uri}");
+        }
+        configure(&state, home.path(), true);
+        let (status, _, _) = post(
+            &router,
+            "/api/codex/session",
+            serde_json::json!({"path":path}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    #[tokio::test]
     async fn efficiency_preview_uses_codex_messages_and_redacts_locally() {
-        let state = Arc::new(HttpState {
-            app_state: Arc::new(crate::state::AppState::for_tests(
-                crate::auth::AuthMode::Disabled,
-            )),
-            app: None,
-        });
+        let state = test_state();
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("rollout-invented.jsonl");
-        std::fs::write(&path, concat!(
+        let path = write_rollout(&dir.path().join("sessions/rollout-invented.jsonl"), concat!(
             "{\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"Build a fictional calculator API_KEY=pretend-secret-value\"}]}}\n",
             "{\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"exec_command\",\"call_id\":\"sample-call\",\"arguments\":\"{\\\"cmd\\\":\\\"echo fictional\\\"}\"}}\n",
             "{\"type\":\"response_item\",\"payload\":{\"type\":\"function_call_output\",\"call_id\":\"sample-call\",\"output\":\"fictional\"}}\n"
-        )).unwrap();
-        let response = routes()
-            .with_state(state)
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/api/codex/efficiency/prepare")
-                    .header("content-type", "application/json")
-                    .body(Body::from(
-                        serde_json::json!({"path":path,"payloadMode":"full-transcript"})
-                            .to_string(),
-                    ))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap();
-        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        ));
+        configure(&state, dir.path(), true);
+        let (status, body, bytes) = post(
+            &routes().with_state(state),
+            "/api/codex/efficiency/prepare",
+            serde_json::json!({"path":path,"payloadMode":"full-transcript"}),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
         assert_eq!(body["input"]["task"]["turns"], 2);
         assert_eq!(body["input"]["signals"]["toolCalls"], 1);
         assert_eq!(body["input"]["actions"][0]["tool"], "exec_command");
@@ -201,7 +284,7 @@ mod tests {
             .as_str()
             .unwrap()
             .starts_with("Build a fictional calculator"));
-        assert!(!String::from_utf8(bytes.to_vec())
+        assert!(!String::from_utf8(bytes)
             .unwrap()
             .contains("pretend-secret-value"));
     }

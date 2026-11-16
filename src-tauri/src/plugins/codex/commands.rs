@@ -45,8 +45,10 @@ pub async fn load_codex_session(
     path: String,
     start: Option<usize>,
     limit: Option<usize>,
+    state: State<'_, Arc<AppState>>,
 ) -> Result<super::reader::CodexWindow, String> {
-    tokio::task::spawn_blocking(move || super::load_session(&path, start, limit))
+    let settings = state.settings.lock().map_err(|e| e.to_string())?.clone();
+    tokio::task::spawn_blocking(move || super::load_session(&settings, &path, start, limit))
         .await
         .map_err(|e| e.to_string())?
 }
@@ -55,8 +57,12 @@ pub async fn load_codex_session(
 pub async fn prepare_codex_efficiency_payload(
     path: String,
     payload_mode: Option<crate::efficiency::settings::PayloadMode>,
+    state: State<'_, Arc<AppState>>,
 ) -> Result<crate::efficiency::PreparedEfficiencyPayload, String> {
-    tokio::task::spawn_blocking(move || super::prepare_efficiency_payload(&path, payload_mode))
-        .await
-        .map_err(|e| e.to_string())?
+    let settings = state.settings.lock().map_err(|e| e.to_string())?.clone();
+    tokio::task::spawn_blocking(move || {
+        super::prepare_efficiency_payload(&settings, &path, payload_mode)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }

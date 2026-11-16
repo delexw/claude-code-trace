@@ -150,6 +150,7 @@ fn plugin_permission_files_are_granted_by_default() {
         "load_antigravity_session",
         "list_codex_sessions",
         "load_codex_session",
+        "prepare_codex_efficiency_payload",
         "get_codex_settings",
         "set_codex_root",
     ] {
