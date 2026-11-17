@@ -86,7 +86,7 @@ describe("CodexPickerSection", () => {
         id: "today",
         path: "/example/today",
         title: "Today task",
-        modified_at: "2026-01-10T10:00:00Z",
+        modified_at: "2026-01-10T12:00:00Z",
       });
       const onOpen = vi.fn();
       const sessions = visibleSessions([old, today], "");
