@@ -121,9 +121,8 @@ fn scan_returns_empty_when_root_missing() {
 
 #[test]
 fn scan_finds_folders_sorted_newest_first_with_task_title() {
-    let tmp = std::env::temp_dir().join("cctrace-antig-scan");
-    let _ = fs::remove_dir_all(&tmp);
-    fs::create_dir_all(&tmp).unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    let tmp = temp.path();
 
     let older = tmp.join("00000000-0000-0000-0000-000000000001");
     let newer = tmp.join("00000000-0000-0000-0000-000000000002");
@@ -131,17 +130,19 @@ fn scan_finds_folders_sorted_newest_first_with_task_title() {
     fs::create_dir_all(&newer).unwrap();
     fs::write(older.join("task.md"), "First older task\nmore lines").unwrap();
     fs::write(newer.join("task.md"), "Second newer task").unwrap();
-    // Sleep so the newer folder has a strictly later mtime.
-    std::thread::sleep(std::time::Duration::from_millis(10));
+    // Set distinct folder mtimes after writing their contents. Fast writes can
+    // share a timestamp, and sleeping afterwards does not change either mtime.
+    filetime::set_file_mtime(&older, filetime::FileTime::from_unix_time(1_700_000_000, 0)).unwrap();
+    filetime::set_file_mtime(&newer, filetime::FileTime::from_unix_time(1_700_000_060, 0)).unwrap();
 
-    let results = scan_antigravity_brain(&tmp, "antigravity-ide");
+    let results = scan_antigravity_brain(tmp, "antigravity-ide");
     assert_eq!(results.len(), 2);
     assert_eq!(results[0].uuid, "00000000-0000-0000-0000-000000000002");
     assert_eq!(results[1].uuid, "00000000-0000-0000-0000-000000000001");
     assert_eq!(results[0].title.as_deref(), Some("Second newer task"));
     assert_eq!(results[1].title.as_deref(), Some("First older task"));
-    assert!(results[0].mod_time_ms > 0);
-    assert!(results[0].mod_time_ms >= results[1].mod_time_ms);
+    assert_eq!(results[0].mod_time_ms, 1_700_000_060_000);
+    assert_eq!(results[1].mod_time_ms, 1_700_000_000_000);
 }
 
 #[test]

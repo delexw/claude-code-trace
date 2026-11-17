@@ -1,0 +1,46 @@
+.codex__icon {
+  width: 16px;
+  height: 16px;
+  color: #10a37f;
+}
+
+.codex-section__badge {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  background: #10a37f;
+  color: #fff;
+}
+
+.codex-section__card,
+.message--codex {
+  border-left-color: #10a37f;
+}
+
+.codex-section__card:hover {
+  background: rgba(16, 163, 127, 0.06);
+}
+
+.message__role--codex {
+  color: #10a37f;
+}
+
+.codex-empty,
+.codex-error {
+  padding: 16px;
+  color: var(--text-muted);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.codex-error {
+  color: var(--text-error, #e57373);
+}
+
+.codex-cost-unavailable {
+  color: var(--text-muted);
+  font-weight: 400;
+}

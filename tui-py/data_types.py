@@ -170,6 +170,12 @@ class SessionMeta:
     cwd: str = ""
     git_branch: str = ""
     permission_mode: str = ""
+    session_id: str = ""
+    sandbox_policy: str = ""
+    duration_ms: int | None = None
+    context_tokens: int | None = None
+    # None uses legacy message context; 0 means the source cannot report its limit.
+    context_window: int | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -184,7 +190,9 @@ class SessionTotals:
     output_tokens: int = 0
     cache_read_tokens: int = 0
     cache_creation_tokens: int = 0
-    cost_usd: float = 0.0
+    cost_usd: float | None = 0.0
+    estimated_cost: bool = False
+    cost_partial: bool = False
     model: str = ""
 
 

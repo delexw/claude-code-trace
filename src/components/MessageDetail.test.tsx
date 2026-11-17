@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { DisplayItem, DisplayMessage } from "../types";
 import type { ViewActionsRef } from "../hooks/useViewActions";
 import { MessageDetail } from "./MessageDetail";
+import type { RoleStyle } from "./MessageItem";
 
 vi.mock("react-syntax-highlighter", () => ({
   Prism: ({ children }: { children: React.ReactNode }) => <pre>{children}</pre>,
@@ -118,7 +119,73 @@ function makeRootMessage(nestedItems: DisplayItem[]): DisplayMessage {
   });
 }
 
+function toyRoleStyle(message: DisplayMessage): RoleStyle | undefined {
+  return message.role === "claude"
+    ? {
+        className: "message--toy-source",
+        modifier: "toy-source",
+        label: "Toy Assistant",
+        icon: <span data-testid="toy-agent-icon" />,
+      }
+    : undefined;
+}
+
 describe("MessageDetail", () => {
+  it("keeps source labels and agent icons throughout nested agent panels", () => {
+    const inner = makeSubagent("inner-agent", "Toy Inner Worker");
+    const root = makeRootMessage([inner]);
+    root.items[0].subagent_messages.unshift(
+      makeMessage({ role: "user", content: "Fabricated worker request" }),
+    );
+    const { container } = render(
+      <MessageDetail
+        message={root}
+        messageRoleStyle={toyRoleStyle}
+        onBack={vi.fn()}
+        viewActionsRef={makeViewActionsRef()}
+      />,
+    );
+    expect(container.querySelector(".message-detail__title")).toHaveTextContent("Toy Assistant");
+    expect(
+      container.querySelector(".detail-item__icon [data-testid=toy-agent-icon]"),
+    ).not.toBeNull();
+    fireEvent.click(screen.getByText("Explore"));
+    expect(
+      container.querySelector(".agent-panel__icon [data-testid=toy-agent-icon]"),
+    ).not.toBeNull();
+    expect(container.querySelector(".agent-panel .message--toy-source")).not.toBeNull();
+    expect(screen.getByText("User", { exact: true })).toBeInTheDocument();
+    expect(screen.queryByText("Claude", { exact: true })).toBeNull();
+    fireEvent.doubleClick(screen.getByText("worker output"));
+    const titles = container.querySelectorAll(".message-detail__title");
+    expect(titles).toHaveLength(2);
+    expect(titles[1]).toHaveTextContent("Toy Assistant");
+    expect(
+      container.querySelector(".agent-panel .detail-item__icon [data-testid=toy-agent-icon]"),
+    ).not.toBeNull();
+    fireEvent.click(screen.getByText("Toy Inner Worker"));
+    expect(
+      container.querySelectorAll(".agent-panel__icon [data-testid=toy-agent-icon]"),
+    ).toHaveLength(2);
+    expect(screen.queryByText("Claude", { exact: true })).toBeNull();
+  });
+
+  it("preserves Claude defaults when a source supplies no role styling", () => {
+    const { container } = render(
+      <MessageDetail
+        message={makeRootMessage([])}
+        onBack={vi.fn()}
+        viewActionsRef={makeViewActionsRef()}
+      />,
+    );
+    fireEvent.click(screen.getByText("Explore"));
+    expect(container.querySelector(".message-detail__title")).toHaveTextContent("Claude");
+    expect(container.querySelector(".agent-panel .message--claude")).not.toBeNull();
+    expect(container.querySelector(".agent-panel__icon svg")).not.toBeNull();
+    fireEvent.doubleClick(screen.getByText("worker output"));
+    expect(container.querySelectorAll(".message-detail__title")[1]).toHaveTextContent("Claude");
+  });
+
   // Vivado log excerpt from #328: indented hashes must not become Markdown headings.
   const userLog = `Vivado% report_route_status
 Design Route Status

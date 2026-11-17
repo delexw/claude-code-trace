@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import { DetailItem, getItemName, getItemSummary } from "./DetailItem";
+import { DetailItem, getItemIcon, getItemName, getItemSummary } from "./DetailItem";
 import type { DisplayItem } from "../types";
 
 function makeItem(overrides: Partial<DisplayItem> = {}): DisplayItem {
@@ -41,6 +41,16 @@ function makeItem(overrides: Partial<DisplayItem> = {}): DisplayItem {
 }
 
 describe("getItemName", () => {
+  it("uses a source's agent icon while preserving tool error warnings", () => {
+    const customIcon = <span data-testid="toy-source-icon" />;
+    const { rerender } = render(
+      <>{getItemIcon(makeItem({ item_type: "Subagent" }), customIcon)}</>,
+    );
+    expect(screen.getByTestId("toy-source-icon")).toBeInTheDocument();
+    rerender(<>{getItemIcon(makeItem({ item_type: "Subagent", tool_error: true }), customIcon)}</>);
+    expect(screen.queryByTestId("toy-source-icon")).toBeNull();
+  });
+
   it("returns 'Thinking' for Thinking items", () => {
     expect(getItemName(makeItem({ item_type: "Thinking" }))).toBe("Thinking");
   });

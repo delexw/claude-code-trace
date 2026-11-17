@@ -14,12 +14,6 @@ from data_types import (
     SessionInfo,
     index_progress_from_dict,
 )
-from efficiency import (
-    EfficiencyJob,
-    EfficiencySummary,
-    job_from_dict,
-    latest_jobs_by_session,
-)
 from format_utils import project_key as _project_key
 from plugins.base import (
     LIST_VIEW,
@@ -27,37 +21,28 @@ from plugins.base import (
     OpenedSession,
     PickerSection,
     PluginKey,
-    SourcePlugin,
     SseHandler,
 )
 from plugins.claude.picker_rows import build_section
 from plugins.claude.sidebar import ClaudeProjectTree
+from plugins.efficiency import EfficiencySourcePlugin
 from project_tree import resolve_fork_root
 from resume_command import resume_command
-from widgets.analytics_settings import AnalyticsSettingsScreen
 from widgets.debug_viewer import DebugViewer
-from widgets.efficiency_privacy import EfficiencyPrivacyScreen
 from widgets.index_progress import IndexProgressBar
 from widgets.team_board import TeamBoard
-
-# A failed analysis is worth reading; the default 5s toast is not enough.
-FAILURE_NOTICE_SECONDS = 30
-
-JEV_KEY_REQUIRED = (
-    "Set JEV_API_KEY before starting the backend, or store the key with the desktop "
-    "app, then reopen the analytics settings to confirm it."
-)
 
 TEAM_VIEW = "team"
 DEBUG_VIEW = "debug"
 
 
-class ClaudePlugin(SourcePlugin):
+class ClaudePlugin(EfficiencySourcePlugin):
     """Sessions from Claude Code's JSONL transcripts."""
 
     id = "claude"
     label = "Claude"
     can_disable = False
+    efficiency_source_label = "Claude Code"
     KEYS = (
         # Per-view: only relevant (and shown) once a session is in context —
         # see check_action. Deliberately NOT shown in the picker footer, which
@@ -76,10 +61,6 @@ class ClaudePlugin(SourcePlugin):
         self.selected_project: str | None = None
         # How far the backend's walk of the project directories has got.
         self.index_progress: IndexProgress | None = None
-        # Jev efficiency analysis, keyed by session path. Includes analyses
-        # started from the desktop app or a browser against the same backend.
-        self.efficiency_jobs: dict[str, EfficiencyJob] = {}
-        self.efficiency_summaries: dict[str, EfficiencySummary] = {}
         # The SessionInfo backing the currently open session (list/detail
         # views) — needed for copy_resume (cwd + session_id). None in the
         # picker, where no session is selected yet.
@@ -212,122 +193,8 @@ class ClaudePlugin(SourcePlugin):
         if self._progress_bar is not None:
             self._progress_bar.progress = self.index_progress
 
-    async def on_efficiency_update(self, payload) -> None:
-        """`efficiency-analysis-update`: one job's progress, from any client."""
-        job = job_from_dict(payload or {})
-        if not job.session_path:
-            return
-        self._set_jobs({**self.efficiency_jobs, job.session_path: job})
-        if job.status == "completed":
-            # The score lands in the summaries, not in the job.
-            await self._refresh_efficiency_summaries()
-        elif job.status == "failed":
-            # Raised as well as written into the row: an analysis takes minutes,
-            # by which time the user is usually looking at something else.
-            name = job.session_name or job.session_id or job.session_path
-            self.host.notify(
-                f"{name}: {job.error or job.message}",
-                title="Jev analysis failed",
-                severity="error",
-                timeout=FAILURE_NOTICE_SECONDS,
-                markup=False,
-            )
-
-    # ----------------------------------------------------------------
-    # Jev efficiency analysis
-    # ----------------------------------------------------------------
-
-    async def load_efficiency_state(self) -> None:
-        """Pick up analyses already run against this backend — from the
-        desktop app, a browser, or an earlier TUI run — so the picker shows
-        their scores and any analysis still in flight."""
-        try:
-            jobs = await api_client.list_efficiency_jobs()
-            summaries = await api_client.list_efficiency_summaries()
-        except Exception:
-            return
-        self._set_jobs(latest_jobs_by_session(jobs))
-        self._set_summaries({s.session_path: s for s in summaries})
-
-    async def _refresh_efficiency_summaries(self) -> None:
-        try:
-            summaries = await api_client.list_efficiency_summaries()
-        except Exception:
-            return
-        self._set_summaries({s.session_path: s for s in summaries})
-
-    def _set_jobs(self, jobs: dict[str, EfficiencyJob]) -> None:
-        if jobs == self.efficiency_jobs:
-            return
-        self.efficiency_jobs = jobs
-        self._sync_picker_analysis()
-
-    def _set_summaries(self, summaries: dict[str, EfficiencySummary]) -> None:
-        if summaries == self.efficiency_summaries:
-            return
-        self.efficiency_summaries = summaries
-        self._sync_picker_analysis()
-
-    def _sync_picker_analysis(self) -> None:
-        """Re-render only the analysed rows. A full rebuild would clear the
-        list and drop the cursor, and a running job reports progress often."""
-        analysed = [
-            s
-            for s in self.all_sessions
-            if s.path in self.efficiency_jobs or s.path in self.efficiency_summaries
-        ]
-        self.host.refresh_picker_rows(self.id, analysed)
-
-    async def analyse_session(self, session: SessionInfo) -> None:
-        """Prepare, confirm, then send one session to Jev.
-
-        The payload is built and redacted locally first; nothing leaves the
-        machine until the privacy notice is accepted, which is asked again
-        for every analysis and re-analysis.
-        """
-        try:
-            settings = await api_client.get_analytics_settings()
-        except Exception as error:
-            self.host.notify(
-                str(error), title="Analytics settings unavailable", severity="error", markup=False
-            )
-            return
-        if not settings.jev.configured:
-            self.host.notify(
-                JEV_KEY_REQUIRED, title="Jev API key required", severity="warning", markup=False
-            )
-            return
-        try:
-            payload = await api_client.prepare_efficiency_payload(
-                session.path, settings.default_payload_mode
-            )
-        except Exception as error:
-            self.host.notify(
-                str(error), title="Could not prepare the analysis", severity="error", markup=False
-            )
-            return
-
-        if not await self.host.push_screen_wait(EfficiencyPrivacyScreen(payload)):
-            return
-
-        try:
-            job = await api_client.start_efficiency_analysis(payload)
-        except Exception as error:
-            self.host.notify(
-                str(error), title="Could not start the analysis", severity="error", markup=False
-            )
-            return
-        self._set_jobs({**self.efficiency_jobs, job.session_path: job})
-
-    async def _open_analytics_settings(self) -> None:
-        try:
-            settings = await api_client.get_analytics_settings()
-        except Exception as error:
-            self.host.notify(
-                str(error), title="Analytics settings unavailable", severity="error", markup=False
-            )
-            return
-        self.host.push_screen(AnalyticsSettingsScreen(settings))
+    def efficiency_sessions(self):
+        return self.all_sessions
 
     # ----------------------------------------------------------------
     # Picker
@@ -466,7 +333,11 @@ class ClaudePlugin(SourcePlugin):
         narrow terminals."""
         if action == "copy_resume":
             return view in ("list", "detail") and self.current_session is not None
-        if action in ("analyse_session", "analytics_settings"):
+        if action == "analyse_session":
+            return view == PICKER_VIEW and isinstance(
+                self.host.highlighted_picker_item(self.id), SessionInfo
+            )
+        if action == "analytics_settings":
             return view == PICKER_VIEW
         return True
 
@@ -476,19 +347,6 @@ class ClaudePlugin(SourcePlugin):
         if sel is None:
             return
         self.host.copy_to_clipboard(resume_command(sel.cwd, sel.session_id))
-
-    def action_analyse_session(self) -> None:
-        """a: analyse the highlighted session's efficiency with Jev."""
-        session = self.host.highlighted_picker_item(self.id)
-        if not isinstance(session, SessionInfo):
-            return
-        self.host.run_worker(self.analyse_session(session), exclusive=True, group="analyse")
-
-    def action_analytics_settings(self) -> None:
-        """,: open the Jev and recommendation-provider settings."""
-        self.host.run_worker(
-            self._open_analytics_settings(), exclusive=True, group="analytics-settings"
-        )
 
     def action_show_teams(self) -> None:
         if self.host.view == LIST_VIEW and self.teams:

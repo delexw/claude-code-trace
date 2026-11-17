@@ -2,9 +2,10 @@ import type { PluginStatus } from "../types";
 import type { SourceContext, SourcePlugin, SourceRuntime } from "./types";
 import { antigravityPlugin } from "./antigravity";
 import { claudePlugin } from "./claude";
+import { codexPlugin } from "./codex";
 
 /** Every session-source plugin, in display order. Adding a plugin = adding it here. */
-export const PLUGINS: readonly SourcePlugin[] = [claudePlugin, antigravityPlugin];
+export const PLUGINS: readonly SourcePlugin[] = [claudePlugin, antigravityPlugin, codexPlugin];
 
 /**
  * Whether `plugin` is on. A plugin that cannot be disabled is always on; any other

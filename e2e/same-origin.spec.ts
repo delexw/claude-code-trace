@@ -5,6 +5,8 @@
  * HTML shell, gated on an allowlisted `Host`.
  */
 import { expect, test } from "@playwright/test";
+import { appendFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { E2E } from "../playwright.config";
 import {
   addClient,
@@ -28,6 +30,109 @@ import {
 
 const { port, configDir, projectsDir } = E2E.sameOrigin;
 const api = `http://127.0.0.1:${port}`;
+
+test("Codex source opens fabricated chats and follows appended output", async ({
+  page,
+  request,
+}) => {
+  await ensureWebUiActive(request, api, configDir);
+  const headers = { "X-CCTrace-Token": readCredential(configDir, "tui") };
+  const codexRoot = resolve(E2E.tmp, "same/codex");
+  expect(
+    (await request.post(`${api}/api/codex/root`, { headers, data: { path: codexRoot } })).status(),
+  ).toBe(200);
+  try {
+    await page.goto("/");
+    await expect(page.getByText(FIXTURE_FIRST_MESSAGE)).toBeVisible();
+    await page.getByTitle("Settings").click();
+    await page.getByRole("tab", { name: "General", exact: true }).click();
+    const toggle = page.getByRole("switch", { name: "Show Codex sessions" });
+    await expect(toggle).toHaveAttribute("aria-checked", "false");
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-checked", "true");
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    const title = "Build a toy calculator for the fabricated Codex test";
+    await expect(page.getByText(title, { exact: true })).toBeVisible();
+    await expect(page.locator(".codex-section__card")).toHaveCount(2);
+    await expect(
+      page.locator(".codex-section__card").filter({ hasText: "external_codex_apps_open_page" }),
+    ).toHaveCount(0);
+    await expect(page.locator(".codex-section__card").filter({ hasText: title })).toContainText(
+      "$2.62",
+    );
+    await page.getByRole("button", { name: "Codex", exact: true }).click();
+    await expect(page.getByText("Codex Projects", { exact: true })).toBeVisible();
+    await expect(page.getByText("Projects", { exact: true })).toHaveCount(0);
+    await page.locator(".project-tree__item").filter({ hasText: "toy-calculator" }).click();
+    await expect(page.locator(".codex-section__card")).toHaveCount(1);
+    await expect(
+      page.getByText("Invent a toy calendar in a second folder", { exact: true }),
+    ).toHaveCount(0);
+    await page.getByText(title, { exact: true }).click();
+    await expect(
+      page.getByText("The fabricated calculator is ready.", { exact: true }).first(),
+    ).toBeVisible();
+    await expect(page.locator(".info-bar__cost")).toContainText("$2.62");
+    await expect(page.getByRole("button", { name: "Copy Codex resume command" })).toBeVisible();
+    await expect(page.getByText("Claude", { exact: true })).toHaveCount(0);
+    const followup = {
+      timestamp: new Date().toISOString(),
+      type: "response_item",
+      payload: {
+        type: "message",
+        role: "assistant",
+        content: [{ type: "output_text", text: "Fabricated live update arrived." }],
+      },
+    };
+    const usage = {
+      timestamp: new Date().toISOString(),
+      type: "event_msg",
+      payload: {
+        type: "token_count",
+        info: {
+          total_token_usage: {
+            input_tokens: 1200000,
+            cached_input_tokens: 200000,
+            output_tokens: 150000,
+            total_tokens: 1350000,
+          },
+        },
+      },
+    };
+    appendFileSync(
+      resolve(codexRoot, "sessions/2026/01/01/rollout-fabricated.jsonl"),
+      `${JSON.stringify(followup)}\n${JSON.stringify(usage)}\n`,
+    );
+    await expect(
+      page.getByText("Fabricated live update arrived.", { exact: true }).first(),
+    ).toBeVisible();
+    await expect(page.locator(".info-bar__cost")).toContainText("$3.52");
+    await page
+      .locator(".message-list .message")
+      .filter({ hasText: "spawn_agent" })
+      .locator(".message__detail-btn")
+      .click();
+    await page
+      .locator(".detail-item__summary")
+      .filter({ hasText: "Check the fictional calculator arithmetic" })
+      .click();
+    await expect(
+      page.getByText("A fictional background worker checked arithmetic.", { exact: true }),
+    ).toBeVisible();
+    await expect(page.getByText("Claude", { exact: true })).toHaveCount(0);
+    await page.getByRole("button", { name: /Back to Messages/ }).click();
+    await page.getByRole("button", { name: /Sessions/ }).click();
+    await expect(page.getByText(title, { exact: true })).toBeVisible();
+    await expect(page.locator(".codex-section__card")).toHaveCount(1);
+    await page.locator(".project-tree__item").filter({ hasText: "All Projects" }).click();
+    await expect(page.locator(".codex-section__card")).toHaveCount(2);
+  } finally {
+    await request.post(`${api}/api/plugins/enabled`, {
+      headers,
+      data: { id: "codex", enabled: false },
+    });
+  }
+});
 
 test.describe("HTTP API without a browser", () => {
   test("keeps every secret on the test path, never the real config dir", () => {

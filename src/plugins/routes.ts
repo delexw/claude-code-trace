@@ -1,6 +1,7 @@
 import type { RouteTable } from "../lib/routeTypes";
 import { antigravityRoutes } from "./antigravity/routes";
 import { claudeRoutes } from "./claude/routes";
+import { codexRoutes } from "./codex/routes";
 
 /**
  * Each plugin's web-mode routes, keyed by plugin id. Kept apart from the plugin
@@ -9,4 +10,5 @@ import { claudeRoutes } from "./claude/routes";
 export const PLUGIN_ROUTES: Record<string, RouteTable> = {
   claude: claudeRoutes,
   antigravity: antigravityRoutes,
+  codex: codexRoutes,
 };

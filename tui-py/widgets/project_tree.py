@@ -49,16 +49,18 @@ class ProjectTree(Widget):
             super().__init__()
             self.project_key = project_key
 
-    def __init__(self, **kwargs):
+    def __init__(self, heading: str = "Projects", **kwargs):
         super().__init__(**kwargs)
+        self._heading = heading
         self._sessions: list[SessionInfo] = []
+        self._items: list[FlatItem] | None = None
         self._selected_project: str | None = None
         self._collapsed_keys: set[str] = set()
         self._anim_frame: int = 0
         self._ongoing_nodes: list[tuple[TreeNode[FlatItem], FlatItem]] = []
 
     def compose(self) -> ComposeResult:
-        tree: _VimTree = _VimTree("Projects", id="tree-inner")
+        tree: _VimTree = _VimTree(self._heading, id="tree-inner")
         tree.show_root = False
         tree.guide_depth = 2
         yield tree
@@ -94,10 +96,35 @@ class ProjectTree(Widget):
             or collapsed_keys != self._collapsed_keys
         )
         self._sessions = sessions
+        self._items = None
         self._selected_project = selected_project
         self._collapsed_keys = collapsed_keys
         if changed:
             self._rebuild()
+
+    def update_items(self, items: list[FlatItem], selected_project: str | None) -> None:
+        """Accept a source-owned tree without manufacturing Claude session records."""
+        if items == self._items and selected_project == self._selected_project:
+            return
+        try:
+            tree = self.query_one("#tree-inner", _VimTree)
+
+            def remember(node: TreeNode[FlatItem]) -> None:
+                data = node.data
+                if data is not None and data.has_children and data.key is not None:
+                    if node.is_expanded:
+                        self._collapsed_keys.discard(data.key)
+                    else:
+                        self._collapsed_keys.add(data.key)
+                for child in node.children:
+                    remember(child)
+
+            remember(tree.root)
+        except Exception:
+            pass
+        self._items = items
+        self._selected_project = selected_project
+        self._rebuild()
 
     # ----------------------------------------------------------------
     # Internal rebuild
@@ -116,7 +143,11 @@ class ProjectTree(Widget):
 
         tree.clear()
         self._ongoing_nodes = []
-        entries = build_flat_items(self._sessions, self._collapsed_keys)
+        entries = (
+            self._items
+            if self._items is not None
+            else build_flat_items(self._sessions, self._collapsed_keys)
+        )
 
         # Build a flat list of nodes; track parent stack by depth
         parent_stack: list[TreeNode[FlatItem]] = []
@@ -130,7 +161,11 @@ class ProjectTree(Widget):
             parent = parent_stack[-1] if parent_stack else tree.root
 
             if item.has_children:
-                node = parent.add(label, data=item, expand=item.is_expanded)
+                node = parent.add(
+                    label,
+                    data=item,
+                    expand=item.is_expanded and item.key not in self._collapsed_keys,
+                )
             else:
                 node = parent.add_leaf(label, data=item)
 

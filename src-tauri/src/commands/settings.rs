@@ -214,6 +214,12 @@ mod tests {
                     "enabled": false,
                     "can_disable": true,
                 },
+                {
+                    "id": "codex",
+                    "label": "Codex",
+                    "enabled": false,
+                    "can_disable": true,
+                },
             ])
         );
     }

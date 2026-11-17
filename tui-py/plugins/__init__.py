@@ -7,5 +7,6 @@ order here is the order of the sections in the picker.
 from plugins.antigravity import AntigravityPlugin
 from plugins.base import SourcePlugin
 from plugins.claude import ClaudePlugin
+from plugins.codex import CodexPlugin
 
-REGISTRY: tuple[type[SourcePlugin], ...] = (ClaudePlugin, AntigravityPlugin)
+REGISTRY: tuple[type[SourcePlugin], ...] = (ClaudePlugin, AntigravityPlugin, CodexPlugin)

@@ -26,6 +26,7 @@ permissions = [
   "allow-focus-session-window",
   "allow-set-plugin-enabled",
   "allow-antigravity",
+  "allow-codex",
 ]
 
 [[permission]]

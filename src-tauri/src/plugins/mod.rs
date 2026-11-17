@@ -3,6 +3,7 @@
 
 pub mod antigravity;
 pub mod claude;
+pub mod codex;
 pub mod config;
 
 use std::sync::Arc;
@@ -28,8 +29,11 @@ pub trait SourcePlugin: Sync {
     fn http_routes(&self) -> Router<Arc<HttpState>>;
 }
 
-pub static PLUGINS: &[&dyn SourcePlugin] =
-    &[&claude::ClaudePlugin, &antigravity::AntigravityPlugin];
+pub static PLUGINS: &[&dyn SourcePlugin] = &[
+    &claude::ClaudePlugin,
+    &antigravity::AntigravityPlugin,
+    &codex::CodexPlugin,
+];
 
 /// What the frontends need to know about each plugin, in registry order.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]

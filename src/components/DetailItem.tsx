@@ -119,6 +119,8 @@ interface DetailItemProps {
   isSelected: boolean;
   isExpanded: boolean;
   isAgentActive?: boolean;
+  /** The source's agent icon; errors retain their warning icon. */
+  agentIcon?: React.ReactNode;
   onToggle: (index: number, item: DisplayItem) => void;
   onToggleExpand: (index: number) => void;
   onSelect: (index: number) => void;
@@ -132,11 +134,12 @@ export function DetailItem({
   isSelected,
   isExpanded,
   isAgentActive,
+  agentIcon,
   onToggle,
   onToggleExpand,
   onSelect,
 }: DetailItemProps) {
-  const icon = getItemIcon(item);
+  const icon = getItemIcon(item, agentIcon);
   const name = getItemName(item);
   const summary = getItemSummary(item);
   const teamClr = item.team_color ? getTeamColor(item.team_color) : undefined;
@@ -478,7 +481,7 @@ function DetailItemBody({ item }: { item: DisplayItem }) {
   }
 }
 
-export function getItemIcon(item: DisplayItem): React.ReactNode {
+export function getItemIcon(item: DisplayItem, agentIcon?: React.ReactNode): React.ReactNode {
   switch (item.item_type) {
     case "Thinking":
       return <ThinkingIcon />;
@@ -494,10 +497,10 @@ export function getItemIcon(item: DisplayItem): React.ReactNode {
       return item.tool_error ? (
         <WarningIcon />
       ) : (
-        <ClaudeIcon className="detail-item__claude-icon" />
+        (agentIcon ?? <ClaudeIcon className="detail-item__claude-icon" />)
       );
     case "TeammateMessage":
-      return <ClaudeIcon className="detail-item__claude-icon" />;
+      return agentIcon ?? <ClaudeIcon className="detail-item__claude-icon" />;
     case "HookEvent":
       return <HookIcon />;
     default:

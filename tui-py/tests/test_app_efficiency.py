@@ -290,10 +290,10 @@ async def test_a_backend_refusal_is_reported_verbatim(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_the_jev_keys_are_offered_in_the_picker_only():
+async def test_the_jev_keys_require_the_picker_and_an_applicable_session():
     async with app_module.CCTraceApp().run_test() as pilot:
         app = pilot.app
-        assert app.check_action("plugin", ("claude", "analyse_session")) is True
+        assert app.check_action("plugin", ("claude", "analyse_session")) is False
         assert app.check_action("plugin", ("claude", "analytics_settings")) is True
 
         app.view = "list"

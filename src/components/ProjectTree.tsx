@@ -10,7 +10,10 @@ import type { FlatItem } from "../../shared/projectTree";
 const noop = () => {};
 
 interface ProjectTreeProps {
-  sessions: SessionInfo[];
+  sessions?: SessionInfo[];
+  /** Source-owned tree entries; bypasses Claude's transcript-folder adapter. */
+  items?: FlatItem[];
+  heading?: string;
   selectedProject: string | null;
   highlightedIndex?: number;
   isFocused?: boolean;
@@ -88,6 +91,8 @@ function GuideLines({ depth }: { depth: number }) {
 
 export function ProjectTree({
   sessions,
+  items,
+  heading = "Projects",
   selectedProject,
   highlightedIndex = 0,
   isFocused = false,
@@ -100,8 +105,8 @@ export function ProjectTree({
   style,
 }: ProjectTreeProps) {
   const allItems = useMemo(
-    () => buildFlatItems(sessions, collapsedKeys),
-    [sessions, collapsedKeys],
+    () => items ?? buildFlatItems(sessions ?? [], collapsedKeys),
+    [items, sessions, collapsedKeys],
   );
 
   const scrollRef = useScrollToSelected(highlightedIndex);
@@ -113,7 +118,7 @@ export function ProjectTree({
       onClick={onFocus}
     >
       <div className="project-tree__header">
-        <span>Projects</span>
+        <span>{heading}</span>
         <button
           className={`project-tree__refresh${refreshing ? " project-tree__refresh--spinning" : ""}`}
           onClick={(e) => {
@@ -145,7 +150,14 @@ export function ProjectTree({
                 .filter(Boolean)
                 .join(" ")}
               style={itemStyle(item.depth)}
-              onClick={item.isGroup ? undefined : () => onSelectProject(item.key)}
+              onClick={
+                item.isGroup
+                  ? undefined
+                  : (event) => {
+                      event.stopPropagation();
+                      onSelectProject(item.key);
+                    }
+              }
             >
               {/* Ancestor guide rails + L-connector to the toggle. */}
               <GuideLines depth={item.depth} />
@@ -170,7 +182,7 @@ export function ProjectTree({
 
               <span
                 className="project-tree__name"
-                title={item.isGroup ? undefined : (item.key ?? undefined)}
+                title={item.isGroup ? undefined : (item.path ?? item.key ?? undefined)}
               >
                 {item.isGroup && (
                   <span className="project-tree__group-icon">

@@ -40,6 +40,19 @@ const payload: PreparedEfficiencyPayload = {
 };
 
 describe("EfficiencyPrivacyModal", () => {
+  it("names the selected source in the consent notice", () => {
+    render(
+      <EfficiencyPrivacyModal
+        payload={payload}
+        busy={false}
+        onCancel={vi.fn()}
+        onConfirm={vi.fn()}
+        sourceLabel="Codex"
+      />,
+    );
+    expect(screen.getByText(/selected data from this Codex session/)).toBeInTheDocument();
+    expect(screen.queryByText(/this Claude Code session/)).toBeNull();
+  });
   it("shows the exact final payload and requires consent before confirmation", () => {
     const onCancel = vi.fn();
     const onConfirm = vi.fn();

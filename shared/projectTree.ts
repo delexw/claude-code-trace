@@ -253,6 +253,8 @@ export function worktreeLeafName(parentKey: string, childKey: string, kind: Work
 export interface FlatItem {
   key: string | null;
   name: string;
+  /** Optional human-readable location when the stable key is opaque. */
+  path?: string;
   count: number;
   ongoing: boolean;
   depth: number;
