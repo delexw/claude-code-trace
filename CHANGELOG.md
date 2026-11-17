@@ -3,6 +3,59 @@
 All notable changes to claude-code-trace are documented here. Versions follow
 [semantic versioning](https://semver.org/).
 
+## [0.20.0] — 2026-11-17
+
+Codex chats now sit next to your Claude Code sessions. Turn the new source on and you can browse,
+open and cost your Codex work in the desktop app, the web app and the terminal UI. This release
+also keeps up with newer Claude Code transcripts and fixes two Docker redeploy problems.
+
+### Added
+
+- **Codex chats** ([`74e0102`](https://github.com/delexw/claude-code-trace/commit/74e0102), @RobotHanzo). Turn on **Settings → General → Sources →
+  Codex** to list the chats in your Codex home, including archived ones and Codex homes inside
+  Windows WSL distributions, or point it at a custom home. Chats are grouped by the folder they
+  started in, with nested folders, counts and date groups, and open in the same message view with
+  reasoning, tools, results and worker chats shown in nested panels. It is read-only and off by
+  default.
+- **Estimated Codex costs** ([`74e0102`](https://github.com/delexw/claude-code-trace/commit/74e0102), @RobotHanzo). Each chat card, the picker total and
+  the open chat show an estimated cost in US dollars, with worker chats counted once. A `+` marks a
+  total that is known to be incomplete. These are API-rate estimates from the recorded token
+  counts, not your subscription bill.
+- **Resume and fork commands for Codex** ([`74e0102`](https://github.com/delexw/claude-code-trace/commit/74e0102), @RobotHanzo). Copy a ready-to-paste
+  command that resumes or forks a chat in its own folder and Codex home, quoted for PowerShell or
+  a POSIX shell. The terminal UI copies the same resume command.
+- **Efficiency analysis for Codex chats** ([`74e0102`](https://github.com/delexw/claude-code-trace/commit/74e0102), @RobotHanzo). The Jev analysis works
+  on Codex chats too, with the same preview of exactly what will be sent and the same consent step
+  before anything leaves your machine.
+
+### Fixed
+
+- **Sessions rewritten in place no longer break the live view** ([`fb32bb9`](https://github.com/delexw/claude-code-trace/commit/fb32bb9)). When Claude Code
+  shrinks a transcript file while it is open (`CLAUDE_CODE_TRANSCRIPT_LOCAL_GC`), the viewer now
+  reads it again from the start, so messages and token totals stay correct.
+- **Unknown content blocks are shown instead of dropped** ([`cfd2b1a`](https://github.com/delexw/claude-code-trace/commit/cfd2b1a)). Server-run tools such
+  as web search and code execution write block types the viewer did not know. They now appear as
+  a plain output item rather than vanishing from the message.
+- **Compaction summaries keep their tool list** ([`c6b0824`](https://github.com/delexw/claude-code-trace/commit/c6b0824)). Newer Claude Code versions list
+  the tools used before a compaction. That list now shows as a "Tools used before summary" line
+  instead of being stripped out.
+- **In-process teammates link to their own session again** ([`04a8b69`](https://github.com/delexw/claude-code-trace/commit/04a8b69)). Claude Code v2.1.290
+  moved a teammate's address to a new field, which left its Agent call without a link to the
+  teammate's messages.
+- **MCP server names containing `__`** ([`5a2df92`](https://github.com/delexw/claude-code-trace/commit/5a2df92)). A tool name is now split on the last `__`,
+  so a server whose own name contains `__` keeps its full name and the tool is labelled
+  correctly.
+- **Docker redeploy no longer stops silently** ([`5879423`](https://github.com/delexw/claude-code-trace/commit/5879423)). On Docker-compatible engines
+  that reject the `publish` filter, `script/redeploy.sh` quit right after "Stopping existing
+  containers" with no error. It now finds the container holding the port itself and prints any
+  failure.
+
+### Changed
+
+- **The Jev API key lives in the config volume in Docker** ([`0702d2c`](https://github.com/delexw/claude-code-trace/commit/0702d2c)). A Docker deployment
+  now has one volume instead of two. Existing deployments need to enter the key again on the next
+  redeploy, because the old `claude-code-trace-secrets` volume is no longer mounted.
+
 ## [0.19.0] — 2026-10-24
 
 Claude Code Trace is no longer only about Claude Code. Each place sessions come from is now a
@@ -143,6 +196,7 @@ said yes. The whole feature is optional, marked beta, and off until you configur
 > in Claude Code Trace, which is an independent open-source project and not an official TypeSafe AI
 > integration.
 
+[0.20.0]: https://github.com/delexw/claude-code-trace/releases/tag/v0.20.0
 [0.19.0]: https://github.com/delexw/claude-code-trace/releases/tag/v0.19.0
 [0.18.0]: https://github.com/delexw/claude-code-trace/releases/tag/v0.18.0
 
