@@ -682,6 +682,7 @@ fn costs_are_shared_by_discovery_and_windows_and_update_without_new_messages() {
     assert!((summary["cost_usd"].as_f64().unwrap() - cost).abs() < 1e-10);
     assert_eq!(summary["total_tokens"], 105000);
 
+    rows.push(row("turn_context", json!({"model":"gpt-6.2-astra"})));
     rows.push(row(
         "token_usage_record",
         json!({"response_id":"fictional-response-2","usage":{
@@ -694,7 +695,7 @@ fn costs_are_shared_by_discovery_and_windows_and_update_without_new_messages() {
     assert_eq!(updated.count, index.count);
     assert_ne!(updated.revision, index.revision);
     let updated = serde_json::to_value(&updated).unwrap();
-    assert!((updated["cost_usd"].as_f64().unwrap() - 0.247).abs() < 1e-10);
+    assert!((updated["cost_usd"].as_f64().unwrap() - 0.337).abs() < 1e-10);
     let summary = serde_json::to_value(&discover_sessions(&roots)[0]).unwrap();
     assert_eq!(summary["cost_usd"], updated["cost_usd"]);
 }
