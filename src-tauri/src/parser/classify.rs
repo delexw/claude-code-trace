@@ -935,6 +935,10 @@ fn extract_assistant_details(
                 });
             }
             _ => {
+                // Keep the whole raw block so merge_ai_buffer can render it as JSON when
+                // there is no `text` field to fall back on (issue #398: a future block shape
+                // — e.g. a JS-driven tool call — may carry its payload under some other key
+                // entirely).
                 content_blocks.push(ContentBlock {
                     block_type: bt.to_string(),
                     text: b
@@ -942,6 +946,7 @@ fn extract_assistant_details(
                         .and_then(|v| v.as_str())
                         .unwrap_or("")
                         .to_string(),
+                    content_json: Some(b.clone()),
                     ..Default::default()
                 });
             }
@@ -1013,7 +1018,10 @@ fn extract_meta_blocks(
                 // server-executed tool's result shape delivered as its own meta entry,
                 // rather than paired within the same assistant turn like the advisor tool).
                 // Keep it as a generic block instead of dropping it so merge_ai_buffer can
-                // still surface it, rather than losing it silently.
+                // still surface it, rather than losing it silently. content_json keeps the
+                // whole raw block so merge_ai_buffer can render it as JSON when there is no
+                // `text` field to fall back on (e.g. a block whose payload lives under some
+                // other key entirely, such as a JS-driven tool call's source/arguments).
                 return Some(ContentBlock {
                     block_type: bt.to_string(),
                     text: b
@@ -1021,6 +1029,7 @@ fn extract_meta_blocks(
                         .and_then(|v| v.as_str())
                         .unwrap_or("")
                         .to_string(),
+                    content_json: Some(b.clone()),
                     ..Default::default()
                 });
             }
@@ -2694,6 +2703,87 @@ mod tests {
                         && b.text == "extra server activity"));
             }
             other => panic!("Expected meta AI message, got {other:?}"),
+        }
+    }
+
+    // --- Issue #398: a future block shape (e.g. a JS-driven "Code Mode" tool call) may carry
+    // no `text` field at all. The generic fallback must keep the whole raw block in
+    // content_json so merge_ai_buffer can still render its payload instead of a bare
+    // placeholder. ---
+
+    #[test]
+    fn classify_meta_unrecognized_block_without_text_keeps_raw_json() {
+        let e = Entry {
+            entry_type: "user".to_string(),
+            uuid: "uuid-meta-raw-json".to_string(),
+            timestamp: "2026-11-12T10:00:00Z".to_string(),
+            message: EntryMessage {
+                role: "user".to_string(),
+                content: Some(json!([
+                    {"type": "tool_result", "tool_use_id": "toolu_1", "content": "done"},
+                    {"type": "js_tool_result", "results": [1, 2, 3]}
+                ])),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::AI(ai)) => {
+                let b = ai
+                    .blocks
+                    .iter()
+                    .find(|b| b.block_type == "js_tool_result")
+                    .expect("unrecognized block must survive extraction");
+                assert!(
+                    b.text.is_empty(),
+                    "no text field was present on the raw block"
+                );
+                let raw = b
+                    .content_json
+                    .as_ref()
+                    .expect("raw block must be kept in content_json");
+                assert_eq!(
+                    raw.get("results")
+                        .and_then(|v| v.as_array())
+                        .map(|a| a.len()),
+                    Some(3)
+                );
+            }
+            other => panic!("Expected meta AI message, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_assistant_unrecognized_block_without_text_keeps_raw_json() {
+        let e = Entry {
+            entry_type: "assistant".to_string(),
+            uuid: "uuid-assistant-raw-json".to_string(),
+            timestamp: "2026-11-12T10:00:00Z".to_string(),
+            message: EntryMessage {
+                role: "assistant".to_string(),
+                content: Some(json!([
+                    {"type": "js_tool_call", "script": "await tools.Bash({command: 'ls'})"}
+                ])),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::AI(ai)) => {
+                assert_eq!(ai.blocks.len(), 1);
+                let b = &ai.blocks[0];
+                assert_eq!(b.block_type, "js_tool_call");
+                assert!(b.text.is_empty());
+                let raw = b
+                    .content_json
+                    .as_ref()
+                    .expect("raw block must be kept in content_json");
+                assert_eq!(
+                    raw.get("script").and_then(|v| v.as_str()),
+                    Some("await tools.Bash({command: 'ls'})")
+                );
+            }
+            other => panic!("Expected AI message, got {other:?}"),
         }
     }
 
