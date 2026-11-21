@@ -4774,4 +4774,54 @@ mod tests {
             "queued_command attachment bookkeeping must remain noise"
         );
     }
+
+    // --- Issue #405: claimed that a mod's `prompt.submit` (UserPromptSubmit) hook attachment
+    // moved from a separate system-role message into the same type:"user" entry's content array,
+    // alongside the user's own typed text. Empirically disproved by running a real UserPromptSubmit
+    // hook against the installed v2.1.330 CLI — see the matching comment block in entry.rs for the
+    // exact captured shapes. The hook_additional_context attachment needs no new classify() branch:
+    // the existing generic attachment+hookEvent rescue (added for PreToolUse/PostToolUse/
+    // UserPromptSubmit hook results, see classify_rescues_attachment_hook_success above) keys only
+    // on a non-empty top-level attachment.hookEvent, not on the specific attachment.type string, so
+    // this new shape is already rescued into a Hook message exactly like hook_success/
+    // hook_blocking_error are. ---
+
+    #[test]
+    fn classify_rescues_attachment_hook_additional_context_for_user_prompt_submit_v2_1_330() {
+        let e = Entry {
+            entry_type: "attachment".to_string(),
+            uuid: "uuid-hook-additional-context-405".to_string(),
+            timestamp: "2026-11-21T21:21:44.779Z".to_string(),
+            attachment: Some(serde_json::json!({
+                "type": "hook_additional_context",
+                "content": ["INJECTED_MOD_CONTEXT_MARKER: this text was attached by a mod at prompt submission time"],
+                "hookName": "UserPromptSubmit",
+                "hookEvent": "UserPromptSubmit",
+                "toolUseID": "hook-e68aa0b2-6de8-4e29-8a61-5f786069c7e2"
+            })),
+            ..Default::default()
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::Hook(h)) => {
+                assert_eq!(h.hook_event, "UserPromptSubmit");
+                assert_eq!(h.hook_name, "UserPromptSubmit");
+            }
+            other => {
+                panic!("Expected Hook for attachment/hook_additional_context entry, got {other:?}")
+            }
+        }
+    }
+
+    #[test]
+    fn classify_user_entry_unaffected_by_sibling_prompt_submit_hook_attachment_v2_1_330() {
+        // The actually-captured type:"user" entry for the same turn renders as a plain UserMsg
+        // with the user's own unmodified text — no mod content mixed in.
+        let e = make_entry("user", Some(serde_json::json!("say hello")));
+        match classify(e) {
+            Some(ClassifiedMsg::User(u)) => {
+                assert_eq!(u.text, "say hello");
+            }
+            other => panic!("Expected plain UserMsg, got {other:?}"),
+        }
+    }
 }
