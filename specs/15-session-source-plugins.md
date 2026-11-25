@@ -173,11 +173,11 @@ selection to the first item.
 
 ## Plugin: `antigravity`
 
-Read-only viewer for Google Antigravity (Gemini IDE) "brain" conversations,
+Read-only viewer for Google Antigravity (IDE and CLI) "brain" conversations,
 `<root>/<uuid>/.system_generated/logs/transcript.jsonl`. Off by default; can be disabled.
 
 Brain roots, in order: the user's override (`plugins.antigravity.root`), `$GEMINI_HOME/<flavor>/brain`,
-then `~/.gemini/<flavor>/brain` for each flavor in `["antigravity-ide", "antigravity"]`. Folders
+then `~/.gemini/<flavor>/brain` for each flavor in `["antigravity-ide", "antigravity", "antigravity-cli"]`. Folders
 from every existing root are merged and de-duplicated by `uuid`.
 
 | Command (Tauri)                                     | HTTP                            | Returns                                                                        |

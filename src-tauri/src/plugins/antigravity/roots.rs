@@ -2,10 +2,11 @@
 //!
 //! Each `<root>/<uuid>/` directory under a brain root is one Antigravity
 //! conversation. Antigravity ships under more than one flavor directory
-//! (`antigravity-ide` on current installs, `antigravity` on older ones), and
-//! a migration copies old conversations into the new root — so the same
-//! conversation UUID can be present under two flavors. This module resolves
-//! every known flavor, merges them and de-duplicates by UUID.
+//! (`antigravity-ide` on current installs, `antigravity` on older ones, and
+//! `antigravity-cli` for the command-line tool), and a migration copies old
+//! conversations into the new root — so the same conversation UUID can be
+//! present under two flavors. This module resolves every known flavor, merges
+//! them and de-duplicates by UUID.
 
 use serde::Serialize;
 use std::collections::HashMap;
@@ -13,16 +14,18 @@ use std::path::{Path, PathBuf};
 
 use super::transcript::TRANSCRIPT_SUBPATH;
 
-/// The Antigravity "brain" subpath lives under `.gemini/<flavor>/`. Antigravity
+/// The Antigravity "brain" subpath lives under `.gemini/<flavor>/`. The IDE
 /// has shipped under two flavor directory names: `antigravity-ide` on current
-/// installs, `antigravity` on older ones. Ordered newest-first — the first
+/// installs, `antigravity` on older ones. The command-line tool is a separate
+/// install under `antigravity-cli`, with the same brain layout, so it comes
+/// after both IDE flavors. Ordered newest-first — the first
 /// entry that exists on disk is the primary root the picker reports as
 /// "Active", but every entry that exists is scanned and merged.
 ///
 /// `antigravity-backup` is deliberately absent: it is a snapshot of the old
 /// flavor, not an independent install, and scanning it would re-list every
 /// old conversation a second time.
-pub const ANTIGRAVITY_FLAVORS: &[&str] = &["antigravity-ide", "antigravity"];
+pub const ANTIGRAVITY_FLAVORS: &[&str] = &["antigravity-ide", "antigravity", "antigravity-cli"];
 
 /// Env var that relocates the whole `.gemini` directory. Mirrors how
 /// `dirs::home_dir()` is used elsewhere in the app.

@@ -150,12 +150,12 @@ Revoke or reissue any client from the same Settings section without affecting th
 
 ## Volumes
 
-| Container path                                                                   | Purpose                                                                                                                                        |
-| -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/home/app/.claude`                                                              | Source of session JSONL files (mount your host's `~/.claude` here)                                                                             |
-| `/home/app/.codex/sessions`, `/home/app/.codex/archived_sessions`                | Codex rollouts for the Codex plugin (read-only)                                                                                                |
-| `/home/app/.gemini/antigravity-ide/brain`, `/home/app/.gemini/antigravity/brain` | Antigravity conversations for the Antigravity plugin (read-only)                                                                               |
-| `/home/app/.config`                                                              | `settings.json`, `api-secret`, `clients.json`, `clients/*.jwt`, `jev_api_key` — persisted read-write so settings and clients survive recreates |
+| Container path                                                                                                              | Purpose                                                                                                                                        |
+| --------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/home/app/.claude`                                                                                                         | Source of session JSONL files (mount your host's `~/.claude` here)                                                                             |
+| `/home/app/.codex/sessions`, `/home/app/.codex/archived_sessions`                                                           | Codex rollouts for the Codex plugin (read-only)                                                                                                |
+| `/home/app/.gemini/antigravity-ide/brain`, `/home/app/.gemini/antigravity/brain`, `/home/app/.gemini/antigravity-cli/brain` | Antigravity conversations for the Antigravity plugin (read-only)                                                                               |
+| `/home/app/.config`                                                                                                         | `settings.json`, `api-secret`, `clients.json`, `clients/*.jwt`, `jev_api_key` — persisted read-write so settings and clients survive recreates |
 
 The app only needs to **read** session logs, so the shipped `docker-compose.yml`
 mounts every session folder read-only (`:ro`). For Codex and Antigravity it

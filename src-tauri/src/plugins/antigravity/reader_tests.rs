@@ -54,13 +54,15 @@ fn root_is_none_without_any_home() {
 // ---- flavor candidates ------------------------------------------------
 
 #[test]
-fn candidates_cover_both_flavors_newest_first() {
+fn candidates_cover_every_flavor_ide_first() {
     let c = candidate_roots(Path::new("/home/u"));
-    assert_eq!(c.len(), 2, "got {c:#?}");
+    assert_eq!(c.len(), 3, "got {c:#?}");
     assert_eq!(c[0].flavor, "antigravity-ide");
     assert_eq!(c[1].flavor, "antigravity");
+    assert_eq!(c[2].flavor, "antigravity-cli");
     assert_eq!(c[0].path, "/home/u/.gemini/antigravity-ide/brain");
     assert_eq!(c[1].path, "/home/u/.gemini/antigravity/brain");
+    assert_eq!(c[2].path, "/home/u/.gemini/antigravity-cli/brain");
 }
 
 #[test]
@@ -71,7 +73,10 @@ fn candidates_exclude_the_backup_snapshot() {
     let roots = candidate_roots(Path::new("/home/u"));
     let flavors: Vec<&str> = roots.iter().map(|r| r.flavor.as_str()).collect();
     assert!(!flavors.iter().any(|f| f.contains("backup")), "{flavors:?}");
-    assert_eq!(ANTIGRAVITY_FLAVORS, &["antigravity-ide", "antigravity"]);
+    assert_eq!(
+        ANTIGRAVITY_FLAVORS,
+        &["antigravity-ide", "antigravity", "antigravity-cli"]
+    );
 }
 
 #[test]
@@ -792,6 +797,34 @@ fn merge_lists_each_conversation_once_across_flavors() {
     // Newest flavor wins the tie.
     assert_eq!(shared_entry.flavor, "antigravity-ide");
     assert_eq!(shared_entry.title.as_deref(), Some("Migrated conversation"));
+}
+
+#[test]
+fn merge_lists_cli_conversations_alongside_the_ide() {
+    let tmp = tmpdir("cctrace-antig-merge-cli");
+    let gemini = tmp.join(".gemini");
+    let ide = gemini.join("antigravity-ide/brain");
+    let cli = gemini.join("antigravity-cli/brain");
+    fs::create_dir_all(&ide).unwrap();
+    fs::create_dir_all(&cli).unwrap();
+    make_folder(
+        &ide,
+        "bbbbbbbb-0000-0000-0000-000000000001",
+        "IDE conversation",
+    );
+    make_folder(
+        &cli,
+        "bbbbbbbb-0000-0000-0000-000000000002",
+        "CLI conversation",
+    );
+
+    let v = merge_brain_roots(&candidate_roots(&tmp));
+    assert_eq!(v.len(), 2, "got {v:#?}");
+    let cli_entry = v
+        .iter()
+        .find(|f| f.title.as_deref() == Some("CLI conversation"))
+        .expect("CLI conversation listed");
+    assert_eq!(cli_entry.flavor, "antigravity-cli");
 }
 
 #[test]

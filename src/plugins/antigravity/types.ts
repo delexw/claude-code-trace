@@ -1,6 +1,6 @@
 /** Mirrors `plugins::antigravity::BrainRoot`. */
 export interface BrainRoot {
-  /** `"antigravity-ide"`, `"antigravity"`, or `"custom"` for the user's own directory. */
+  /** `"antigravity-ide"`, `"antigravity"`, `"antigravity-cli"`, or `"custom"` for the user's own directory. */
   flavor: string;
   path: string;
   exists: boolean;
