@@ -327,6 +327,12 @@ pub struct Entry {
 pub struct EntryMessage {
     #[serde(default, deserialize_with = "null_as_default")]
     pub role: String,
+    // v2.1.292+ (issue #399): MCP servers negotiating protocol version 2026-07-28 add
+    // `resultType`, `ttlMs`, and `cacheScope` fields to a `tool_result` content block (used
+    // client-side for typing/caching MCP results). `content` is a raw `Value`, not a struct, so
+    // these are just extra sibling keys on that block's object — they deserialize fine with no
+    // code change and are never read, since every block-field accessor downstream (classify.rs)
+    // looks up specific known keys (type/tool_use_id/content/is_error) and ignores the rest.
     #[serde(default)]
     pub content: Option<Value>,
     #[serde(default, deserialize_with = "null_as_default")]
@@ -2821,6 +2827,49 @@ mod tests {
         assert_eq!(entry.tool_denial_kind, "");
     }
 
+    // --- Issue #399: v2.1.292 rolled out MCP protocol version 2026-07-28 for local (stdio)
+    // servers by default, extended to claude.ai connectors in v2.1.295 and cloud session/Remote
+    // Control connectors in v2.1.299. A v2.1.299 bug-fix note confirms this protocol version adds
+    // `resultType`, `ttlMs`, and `cacheScope` fields to tool call results. `message.content` is
+    // `Option<Value>`, not a struct deserialized field-by-field, so a `tool_result` block carrying
+    // these extra sibling keys parses without any code change — serde never rejects unknown keys
+    // inside a `Value`. ---
+
+    #[test]
+    fn parse_entry_tool_result_with_mcp_protocol_2026_07_28_fields_succeeds() {
+        let line = json!({
+            "type": "user",
+            "uuid": "mcp-protocol-result-uuid-399",
+            "timestamp": "2026-10-10T10:00:00Z",
+            "message": {
+                "role": "user",
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_mcp_399",
+                    "content": "mcp tool output",
+                    "is_error": false,
+                    "resultType": "structured",
+                    "ttlMs": 60000,
+                    "cacheScope": "session"
+                }]
+            }
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes)
+            .expect("tool_result with MCP protocol 2026-07-28 fields must still parse");
+        let content = entry.message.content.expect("content must be captured");
+        let block = content
+            .as_array()
+            .and_then(|arr| arr.first())
+            .expect("must have a content block");
+        assert_eq!(
+            block.get("tool_use_id").and_then(|v| v.as_str()),
+            Some("toolu_mcp_399"),
+            "known fields must still be readable alongside the new MCP metadata"
+        );
+        assert_eq!(block.get("ttlMs").and_then(|v| v.as_i64()), Some(60000));
+    }
+
     // --- Issue #336: v2.1.283 added a `path` field to `--plugin-dir` load-failure entries in
     // the stream-json `system`/`init` entry's `plugin_errors` array. `Entry` does not model
     // `plugin_errors` at all, so this is unknown-field territory; `parse_entry` must not
@@ -3004,5 +3053,61 @@ mod tests {
             parse_entry(&bytes).is_none(),
             "api-request has no uuid/leafUuid and must be dropped"
         );
+    }
+
+    // --- Issue #405: claimed that a mod's `prompt.submit` (UserPromptSubmit) hook attachment
+    // moved from a separate system-role message into the same type:"user" entry's content array,
+    // alongside the user's own typed text. Empirically disproved by running a real UserPromptSubmit
+    // hook (returning hookSpecificOutput.additionalContext) against the installed v2.1.330 CLI and
+    // inspecting the resulting session JSONL directly: the type:"user" entry stays exactly
+    // {"message":{"role":"user","content":"say hello"}} with no mod content mixed in. The hook's
+    // additional context instead lands in its own attachment entry, now also carrying two new
+    // top-level fields this capture didn't have before (`rendered`, `renderedRole`) that Entry
+    // has no field for and silently ignores (no deny_unknown_fields). ---
+
+    #[test]
+    fn parse_entry_attachment_hook_additional_context_with_rendered_fields_v2_1_330() {
+        let line = json!({
+            "type": "attachment",
+            "uuid": "uuid-hook-additional-context-405",
+            "timestamp": "2026-11-21T21:21:44.779Z",
+            "attachment": {
+                "type": "hook_additional_context",
+                "content": ["INJECTED_MOD_CONTEXT_MARKER: this text was attached by a mod at prompt submission time"],
+                "hookName": "UserPromptSubmit",
+                "hookEvent": "UserPromptSubmit",
+                "toolUseID": "hook-e68aa0b2-6de8-4e29-8a61-5f786069c7e2"
+            },
+            "rendered": [{
+                "content": "<system-reminder>\nUserPromptSubmit hook additional context: INJECTED_MOD_CONTEXT_MARKER: this text was attached by a mod at prompt submission time\n</system-reminder>"
+            }],
+            "renderedRole": "system"
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect(
+            "must parse hook_additional_context attachment with rendered/renderedRole fields",
+        );
+        assert_eq!(entry.entry_type, "attachment");
+        let att = entry.attachment.expect("attachment must be captured");
+        assert_eq!(
+            att.get("hookEvent").and_then(|v| v.as_str()),
+            Some("UserPromptSubmit")
+        );
+    }
+
+    #[test]
+    fn parse_entry_user_entry_unaffected_by_sibling_prompt_submit_hook_attachment_v2_1_330() {
+        // The actually-captured type:"user" entry for the same turn: plain, unmodified text,
+        // with no mod-injected block mixed into its content.
+        let line = json!({
+            "type": "user",
+            "uuid": "uuid-user-405",
+            "timestamp": "2026-11-21T21:21:43.895Z",
+            "message": {"role": "user", "content": "say hello"},
+            "promptSource": "sdk"
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("must parse plain user entry");
+        assert_eq!(entry.message.content, Some(json!("say hello")));
     }
 }

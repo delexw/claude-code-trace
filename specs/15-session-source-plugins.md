@@ -320,13 +320,14 @@ messages on a changed revision; `r` also refreshes manually. Test transcripts
 and expected messages are fabricated; personal Windows and WSL chats may only be used for
 read-only local validation.
 
-Costs are estimated API-equivalent model-token USD, using bundled [official OpenAI rates](https://developers.openai.com/api/docs/pricing)
-checked on 2026-11-07. They appear on picker cards, in filtered picker totals, and in the open
+Costs are estimated API-equivalent model-token USD, using bundled [official OpenAI rates](https://developers.openai.com/api/docs/pricing).
+They appear on picker cards, in filtered picker totals, and in the open
 conversation bar, including live updates. Subscription charges and tool fees can differ.
 Cached input and cache writes are separated from uncached input; reasoning is already part of
 output usage. Repeated modern response IDs and legacy usage twins must not be billed twice,
 and legacy-only usage before modern records must remain included. Per-request model and
-recorded context size determine pricing; aggregate-only historical usage assumes standard
+recorded context size determine pricing. GPT-6.2 Astra and Sol Ultrafast estimates use the
+usage record's timestamp to select the applicable rate. Aggregate-only historical usage assumes standard
 rates when request sizes or speed tiers are unavailable. Incomplete usage or unknown pricing
 returns `null`, distinct from a known zero. An aggregate with unknown chats displays its known
 subtotal with `+`, rather than presenting that subtotal as a complete cost.
