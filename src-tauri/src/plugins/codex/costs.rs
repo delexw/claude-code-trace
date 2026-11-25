@@ -1,9 +1,12 @@
 //! API-equivalent model-token estimates, not a Codex subscription invoice.
 //!
-//! Rates verified 2026-11-07 against official OpenAI pricing and model pages:
+//! Rates based on official OpenAI pricing and model pages:
 //! https://developers.openai.com/api/docs/pricing
 //! https://developers.openai.com/api/docs/models/gpt-6.1-sol
 //! https://developers.openai.com/api/docs/models/gpt-6-astra
+//! GPT-6.2 rates verified 2026-11-20:
+//! https://developers.openai.com/api/docs/models/gpt-6.2-astra
+//! https://developers.openai.com/api/docs/models/gpt-6.2-sol
 //! Cached reads and cache writes are included in input tokens. Reasoning is
 //! already included in output tokens. Unrecorded cache retention uses the
 //! standard 30-minute write rate. Legacy aggregate-only usage uses short-context
@@ -11,6 +14,7 @@
 
 use std::collections::HashMap;
 
+use chrono::{DateTime, FixedOffset, TimeZone, Utc};
 use serde_json::Value;
 
 #[derive(Clone, Copy, Default, PartialEq)]
@@ -104,6 +108,7 @@ struct Charge {
     usage: Usage,
     context: Context,
     request_input: Option<i64>,
+    recorded_at: Option<DateTime<FixedOffset>>,
     suppressed: bool,
 }
 
@@ -163,6 +168,7 @@ impl UsageTracker {
                     self.invalid = true;
                     return;
                 };
+                let recorded_at = usage_timestamp(row);
                 // Some resumed logs begin with a thread snapshot that includes
                 // earlier requests. Only add a historical gap not already
                 // represented by the legacy prefix or previous responses.
@@ -172,7 +178,7 @@ impl UsageTracker {
                     {
                         if let Some(gap) = prefix.subtract(self.accounted()) {
                             if gap.material() {
-                                self.push_legacy(gap, None);
+                                self.push_legacy(gap, None, recorded_at);
                             }
                         }
                     }
@@ -195,6 +201,7 @@ impl UsageTracker {
                             usage,
                             context: context.clone(),
                             request_input: Some(usage.input),
+                            recorded_at,
                             suppressed: false,
                         },
                     );
@@ -255,10 +262,11 @@ impl UsageTracker {
                         Some((prefix, last)) => (prefix, last, Some(last.input)),
                         None => (Usage::default(), delta, last.map(|last| last.input)),
                     };
+                let recorded_at = usage_timestamp(row);
                 if prefix.material() {
-                    self.push_legacy(prefix, None);
+                    self.push_legacy(prefix, None, recorded_at);
                 }
-                let index = self.push_legacy(current, request_input);
+                let index = self.push_legacy(current, request_input, recorded_at);
                 self.pending = Some(Pending {
                     usage: last.unwrap_or(current),
                     context: self.context.clone(),
@@ -289,12 +297,18 @@ impl UsageTracker {
         self.accounted_usage
     }
 
-    fn push_legacy(&mut self, usage: Usage, request_input: Option<i64>) -> usize {
+    fn push_legacy(
+        &mut self,
+        usage: Usage,
+        request_input: Option<i64>,
+        recorded_at: Option<DateTime<FixedOffset>>,
+    ) -> usize {
         let index = self.legacy.len();
         self.legacy.push(Charge {
             usage,
             context: self.context.clone(),
             request_input,
+            recorded_at,
             suppressed: false,
         });
         self.accounted_usage.add(usage);
@@ -331,12 +345,18 @@ impl UsageTracker {
     }
 }
 
+fn usage_timestamp(row: &Value) -> Option<DateTime<FixedOffset>> {
+    DateTime::parse_from_rfc3339(row["timestamp"].as_str()?).ok()
+}
+
 fn estimate(charge: &Charge) -> Option<f64> {
     if !charge.usage.material() {
         return Some(0.0);
     }
-    let (input, cached, output, long_context) = match charge.context.model.as_str() {
-        "gpt-6.1-sol" => (2.0, 0.1, 10.0, true),
+    let model = charge.context.model.as_str();
+    let (input, cached, output, long_context) = match model {
+        "gpt-6.2-astra" => (8.0, 0.4, 40.0, true),
+        "gpt-6.2-sol" | "gpt-6.1-sol" => (2.0, 0.1, 10.0, true),
         "gpt-6.1-terra" => (1.0, 0.05, 5.0, true),
         "gpt-6-astra" => (10.0, 1.0, 50.0, true),
         "gpt-6-luna" => (0.1, 0.01, 0.5, true),
@@ -346,10 +366,25 @@ fn estimate(charge: &Charge) -> Option<f64> {
     let speed = match charge.context.tier.as_str() {
         "" | "default" | "standard" | "auto" => 1.0,
         "priority" | "fast" => 2.0,
-        "ultrafast" if matches!(charge.context.model.as_str(), "gpt-6.1-sol" | "gpt-6-astra") => {
-            6.0
+        "ultrafast" if matches!(model, "gpt-6.2-astra" | "gpt-6.2-sol") => {
+            // List rates start at midnight Pacific Standard Time on March 1.
+            let list_rate_start = Utc.with_ymd_and_hms(2027, 3, 1, 8, 0, 0).unwrap();
+            if charge.recorded_at? < list_rate_start {
+                3.0
+            } else {
+                6.0
+            }
         }
-        "flex" | "batch" if long_context => 0.5,
+        "ultrafast" if matches!(model, "gpt-6.1-sol" | "gpt-6-astra") => 6.0,
+        "batch" if long_context => 0.5,
+        "flex"
+            if matches!(
+                model,
+                "gpt-6.1-sol" | "gpt-6.1-terra" | "gpt-6-astra" | "gpt-6-luna"
+            ) =>
+        {
+            0.5
+        }
         _ => return None,
     };
     let long = long_context && charge.request_input.is_some_and(|input| input > 272_000);
@@ -518,6 +553,67 @@ mod tests {
                 summary(&[context(model), modern("invented", tokens(1000, 0, 100))]),
                 expected,
             );
+        }
+    }
+
+    #[test]
+    fn gpt_6_2_standard_and_batch_rates_include_cache_reads_and_writes() {
+        let mut usage = tokens(100_000, 20_000, 5_000);
+        usage["cache_write_input_tokens"] = json!(10_000);
+        for (model, tier, expected) in [
+            ("gpt-6.2-astra", "standard", 0.868),
+            ("gpt-6.2-sol", "standard", 0.217),
+            ("gpt-6.2-sol", "batch", 0.1085),
+        ] {
+            let mut turn = context(model);
+            turn["payload"]["service_tier"] = json!(tier);
+            assert_cost(
+                summary(&[turn, modern("invented", usage.clone())]),
+                expected,
+            );
+        }
+    }
+
+    #[test]
+    fn gpt_6_2_fast_rates_apply_to_long_context_with_12_hour_cache_writes() {
+        let mut turn = context("gpt-6.2-astra");
+        turn["payload"]["service_tier"] = json!("fast");
+        turn["payload"]["prompt_cache_retention"] = json!("12h");
+        let mut usage = tokens(300_000, 100_000, 20_000);
+        usage["cache_write_input_tokens"] = json!(10_000);
+        assert_cost(summary(&[turn, modern("invented", usage)]), 9.44);
+    }
+
+    #[test]
+    fn gpt_6_2_ultrafast_rates_change_at_midnight_pacific() {
+        for (model, timestamp, expected) in [
+            ("gpt-6.2-astra", "2027-03-01T07:59:59.999Z", 0.036),
+            ("gpt-6.2-astra", "2027-02-28T23:59:59-08:00", 0.036),
+            ("gpt-6.2-astra", "2027-03-01T08:00:00Z", 0.072),
+            ("gpt-6.2-sol", "2027-03-01T07:59:59Z", 0.009),
+            ("gpt-6.2-sol", "2027-03-01T00:00:00-08:00", 0.018),
+        ] {
+            let mut turn = context(model);
+            turn["payload"]["service_tier"] = json!("ultrafast");
+            let usage = tokens(1_000, 0, 100);
+            for mut record in [
+                modern("invented", usage.clone()),
+                legacy(usage.clone(), usage),
+            ] {
+                record["timestamp"] = json!(timestamp);
+                assert_cost(summary(&[turn.clone(), record]), expected);
+            }
+        }
+    }
+
+    #[test]
+    fn gpt_6_2_cost_is_unavailable_without_a_published_tier_or_ultrafast_timestamp() {
+        for tier in ["flex", "ultrafast"] {
+            let mut turn = context("gpt-6.2-astra");
+            turn["payload"]["service_tier"] = json!(tier);
+            let result = summary(&[turn, modern("invented", tokens(1_000, 0, 100))]);
+            assert_eq!(result.total_tokens, 1_100);
+            assert!(result.cost_usd.is_none());
         }
     }
 
