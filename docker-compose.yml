@@ -25,10 +25,11 @@ services:
       # config.toml stay out of the container.
       - "${CODEX_HOME:-${HOME}/.codex}/sessions:/home/app/.codex/sessions:ro"
       - "${CODEX_HOME:-${HOME}/.codex}/archived_sessions:/home/app/.codex/archived_sessions:ro"
-      # Antigravity plugin: only the brain folder of each flavor it scans, so
-      # the Gemini OAuth credentials stay out of the container.
+      # Antigravity plugin: only the brain folder of each flavor it scans (IDE
+      # and CLI), so the Gemini OAuth credentials stay out of the container.
       - "${CCTRACE_GEMINI_DIR:-${HOME}/.gemini}/antigravity-ide/brain:/home/app/.gemini/antigravity-ide/brain:ro"
       - "${CCTRACE_GEMINI_DIR:-${HOME}/.gemini}/antigravity/brain:/home/app/.gemini/antigravity/brain:ro"
+      - "${CCTRACE_GEMINI_DIR:-${HOME}/.gemini}/antigravity-cli/brain:/home/app/.gemini/antigravity-cli/brain:ro"
       # Persist settings.json (projects dir, WSL distros, allowed CORS
       # origins) and the optional Jev API key across container recreation —
       # without this they only live in the container's writable layer and
