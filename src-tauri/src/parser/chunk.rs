@@ -317,14 +317,28 @@ const KNOWN_CONTENT_BLOCK_TYPES: &[&str] = &[
 /// discarding them, so this is the last point before the UI where that data must not vanish.
 /// Blocks with no `type` at all (`block_type` empty), or a type already known and handled
 /// elsewhere, stay dropped, matching prior behavior.
+///
+/// When the block has no `text` field, classify.rs still kept the whole raw block in
+/// `content_json` (issue #398: a future block shape — e.g. a JS-driven tool call — may carry
+/// its payload under some other key entirely). Render that as a fenced JSON block instead of
+/// a bare placeholder, so the data stays inspectable rather than just naming the type.
 fn push_unrecognized_block_item(items: &mut Vec<DisplayItem>, b: &ContentBlock) {
     if b.block_type.is_empty() || KNOWN_CONTENT_BLOCK_TYPES.contains(&b.block_type.as_str()) {
         return;
     }
-    let text = if b.text.is_empty() {
-        format!("[Unrecognized content: {}]", b.block_type)
-    } else {
+    let text = if !b.text.is_empty() {
         b.text.clone()
+    } else if let Some(raw) = b
+        .content_json
+        .as_ref()
+        .and_then(|v| serde_json::to_string_pretty(v).ok())
+    {
+        format!(
+            "[Unrecognized content: {}]\n```json\n{raw}\n```",
+            b.block_type
+        )
+    } else {
+        format!("[Unrecognized content: {}]", b.block_type)
     };
     items.push(DisplayItem {
         item_type: DisplayItemType::Output,
@@ -799,6 +813,64 @@ mod tests {
             items[0].text,
             "[Unrecognized content: code_execution_tool_result]"
         );
+    }
+
+    // --- Issue #398: a future block shape (e.g. a JS-driven "Code Mode" tool call) may have
+    // no `text` field at all, carrying its payload under some other key entirely. When
+    // classify.rs has preserved the raw block in content_json, it must render as inspectable
+    // JSON instead of a bare "[Unrecognized content: ...]" placeholder. ---
+
+    #[test]
+    fn unrecognized_non_meta_block_with_content_json_renders_raw_json() {
+        let block = ContentBlock {
+            block_type: "js_tool_call".to_string(),
+            content_json: Some(serde_json::json!({
+                "type": "js_tool_call",
+                "script": "await tools.Bash({command: \"ls\"})"
+            })),
+            ..Default::default()
+        };
+        let msgs = vec![ClassifiedMsg::AI(make_ai_msg(vec![block], false))];
+        let chunks = build_chunks(&msgs);
+        let items = &chunks[0].items;
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].item_type, DisplayItemType::Output);
+        assert!(items[0]
+            .text
+            .starts_with("[Unrecognized content: js_tool_call]\n```json\n"));
+        assert!(items[0].text.contains("\"script\""));
+        assert!(items[0].text.contains("await tools.Bash"));
+        assert!(items[0].text.ends_with("```"));
+    }
+
+    #[test]
+    fn unrecognized_meta_block_with_content_json_renders_raw_json() {
+        let block = ContentBlock {
+            block_type: "js_tool_result".to_string(),
+            content_json: Some(serde_json::json!({"results": [1, 2, 3]})),
+            ..Default::default()
+        };
+        let msgs = vec![ClassifiedMsg::AI(make_ai_msg(vec![block], true))];
+        let chunks = build_chunks(&msgs);
+        let items = &chunks[0].items;
+        assert_eq!(items.len(), 1);
+        assert!(items[0].text.contains("\"results\""));
+    }
+
+    #[test]
+    fn unrecognized_block_with_text_ignores_content_json() {
+        // When both text and content_json are present, the plain text still wins — matching
+        // the pre-existing "text takes priority" behavior for unrecognized blocks.
+        let block = ContentBlock {
+            block_type: "server_tool_use_delta".to_string(),
+            text: "partial server tool activity".to_string(),
+            content_json: Some(serde_json::json!({"ignored": true})),
+            ..Default::default()
+        };
+        let msgs = vec![ClassifiedMsg::AI(make_ai_msg(vec![block], false))];
+        let chunks = build_chunks(&msgs);
+        let items = &chunks[0].items;
+        assert_eq!(items[0].text, "partial server tool activity");
     }
 
     #[test]
