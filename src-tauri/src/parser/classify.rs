@@ -1024,6 +1024,10 @@ fn extract_meta_blocks(
                     ..Default::default()
                 });
             }
+            // v2.1.292+ (issue #399): MCP protocol version 2026-07-28 adds `resultType`,
+            // `ttlMs`, and `cacheScope` sibling fields on this block for MCP-originated results.
+            // They're simply never read here — only tool_use_id/content/is_error are — so they
+            // pass through harmlessly on both old and new transcripts.
             let tool_id = b
                 .get("tool_use_id")
                 .and_then(|v| v.as_str())
@@ -2829,6 +2833,47 @@ mod tests {
                     ai.blocks[0].tool_denial_kind, "",
                     "a normal tool_result must not carry a denial kind"
                 );
+            }
+            other => panic!("Expected meta AI, got {other:?}"),
+        }
+    }
+
+    // --- Issue #399: MCP protocol version 2026-07-28 (v2.1.292+ for local stdio servers,
+    // v2.1.295 for claude.ai connectors, v2.1.299 for cloud/Remote Control connectors) adds
+    // `resultType`, `ttlMs`, and `cacheScope` fields to a `tool_result` content block. These are
+    // just extra sibling keys next to `tool_use_id`/`content`/`is_error` — extract_meta_blocks
+    // only reads those three known keys off the block, so the new MCP metadata is silently and
+    // safely ignored rather than breaking extraction. ---
+
+    #[test]
+    fn classify_tool_result_ignores_mcp_protocol_2026_07_28_fields() {
+        let e = Entry {
+            entry_type: "user".to_string(),
+            uuid: "uuid-mcp-399".to_string(),
+            timestamp: "2026-10-10T10:00:00Z".to_string(),
+            message: super::super::entry::EntryMessage {
+                role: "user".to_string(),
+                content: Some(json!([{
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_mcp_399",
+                    "content": "mcp tool output",
+                    "is_error": false,
+                    "resultType": "structured",
+                    "ttlMs": 60000,
+                    "cacheScope": "session"
+                }])),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        match classify(e) {
+            Some(ClassifiedMsg::AI(ai)) => {
+                assert_eq!(ai.blocks.len(), 1);
+                let b = &ai.blocks[0];
+                assert_eq!(b.tool_id, "toolu_mcp_399");
+                assert_eq!(b.content, "mcp tool output");
+                assert!(!b.is_error);
             }
             other => panic!("Expected meta AI, got {other:?}"),
         }
@@ -4804,5 +4849,55 @@ mod tests {
             classify(e).is_none(),
             "queued_command attachment bookkeeping must remain noise"
         );
+    }
+
+    // --- Issue #405: claimed that a mod's `prompt.submit` (UserPromptSubmit) hook attachment
+    // moved from a separate system-role message into the same type:"user" entry's content array,
+    // alongside the user's own typed text. Empirically disproved by running a real UserPromptSubmit
+    // hook against the installed v2.1.330 CLI — see the matching comment block in entry.rs for the
+    // exact captured shapes. The hook_additional_context attachment needs no new classify() branch:
+    // the existing generic attachment+hookEvent rescue (added for PreToolUse/PostToolUse/
+    // UserPromptSubmit hook results, see classify_rescues_attachment_hook_success above) keys only
+    // on a non-empty top-level attachment.hookEvent, not on the specific attachment.type string, so
+    // this new shape is already rescued into a Hook message exactly like hook_success/
+    // hook_blocking_error are. ---
+
+    #[test]
+    fn classify_rescues_attachment_hook_additional_context_for_user_prompt_submit_v2_1_330() {
+        let e = Entry {
+            entry_type: "attachment".to_string(),
+            uuid: "uuid-hook-additional-context-405".to_string(),
+            timestamp: "2026-11-21T21:21:44.779Z".to_string(),
+            attachment: Some(serde_json::json!({
+                "type": "hook_additional_context",
+                "content": ["INJECTED_MOD_CONTEXT_MARKER: this text was attached by a mod at prompt submission time"],
+                "hookName": "UserPromptSubmit",
+                "hookEvent": "UserPromptSubmit",
+                "toolUseID": "hook-e68aa0b2-6de8-4e29-8a61-5f786069c7e2"
+            })),
+            ..Default::default()
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::Hook(h)) => {
+                assert_eq!(h.hook_event, "UserPromptSubmit");
+                assert_eq!(h.hook_name, "UserPromptSubmit");
+            }
+            other => {
+                panic!("Expected Hook for attachment/hook_additional_context entry, got {other:?}")
+            }
+        }
+    }
+
+    #[test]
+    fn classify_user_entry_unaffected_by_sibling_prompt_submit_hook_attachment_v2_1_330() {
+        // The actually-captured type:"user" entry for the same turn renders as a plain UserMsg
+        // with the user's own unmodified text — no mod content mixed in.
+        let e = make_entry("user", Some(serde_json::json!("say hello")));
+        match classify(e) {
+            Some(ClassifiedMsg::User(u)) => {
+                assert_eq!(u.text, "say hello");
+            }
+            other => panic!("Expected plain UserMsg, got {other:?}"),
+        }
     }
 }
