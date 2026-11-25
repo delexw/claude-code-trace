@@ -346,9 +346,20 @@ impl<'a> OngoingChecker<'a> {
     }
 
     /// Check for Bash commands launched with run_in_background that haven't
-    /// received a terminal task notification yet (completed/failed/killed).
-    /// Counts background launches vs terminal notifications — if launches
-    /// exceed notifications, some commands are still running.
+    /// received a terminal task notification yet (completed/failed/killed),
+    /// or an MCP tool call still awaiting a deferred result.
+    ///
+    /// Claude Code v2.1.319+ lets an MCP server run a tool call as a
+    /// server-side "task": Claude Code backgrounds it immediately and only
+    /// learns the result later, possibly after a long, otherwise-quiet gap in
+    /// the transcript (issue #400). Unlike a backgrounded Bash command, there
+    /// is no "running in background" stub to count — the tool_use's
+    /// tool_result is simply absent until the task resolves — so any
+    /// unresolved `mcp__`-prefixed tool call reports pending activity on its
+    /// own, regardless of how long the session file has sat untouched.
+    ///
+    /// For Bash, counts background launches vs terminal notifications — if
+    /// launches exceed notifications, some commands are still running.
     fn has_pending_background_commands(chunks: &[Chunk]) -> bool {
         let mut bg_launched: usize = 0;
         let mut bg_resolved: usize = 0;
@@ -357,10 +368,14 @@ impl<'a> OngoingChecker<'a> {
             match chunk.chunk_type {
                 ChunkType::AI => {
                     for item in &chunk.items {
-                        if item.item_type == DisplayItemType::ToolCall
-                            && item.tool_result.contains("running in background")
-                        {
+                        if item.is_orphan || item.item_type != DisplayItemType::ToolCall {
+                            continue;
+                        }
+                        if item.tool_result.contains("running in background") {
                             bg_launched += 1;
+                        } else if item.tool_result.is_empty() && item.tool_name.starts_with("mcp__")
+                        {
+                            return true;
                         }
                     }
                 }
@@ -1107,6 +1122,90 @@ mod tests {
         assert!(!OngoingChecker::has_pending_background_commands(&[
             ai_chunk
         ]));
+    }
+
+    // --- MCP task backgrounding tests (issue #400) ---
+
+    #[test]
+    fn mcp_tool_call_with_no_result_yet_is_pending() {
+        let mut ai_chunk = make_chunk(ChunkType::AI);
+        ai_chunk.items.push(DisplayItem {
+            item_type: DisplayItemType::ToolCall,
+            tool_name: "mcp__some-server__long_task".to_string(),
+            tool_result: String::new(),
+            ..Default::default()
+        });
+        assert!(OngoingChecker::has_pending_background_commands(&[ai_chunk]));
+    }
+
+    #[test]
+    fn mcp_tool_call_with_result_not_pending() {
+        let mut ai_chunk = make_chunk(ChunkType::AI);
+        ai_chunk.items.push(DisplayItem {
+            item_type: DisplayItemType::ToolCall,
+            tool_name: "mcp__some-server__long_task".to_string(),
+            tool_result: "done".to_string(),
+            ..Default::default()
+        });
+        assert!(!OngoingChecker::has_pending_background_commands(&[
+            ai_chunk
+        ]));
+    }
+
+    #[test]
+    fn non_mcp_tool_call_with_no_result_is_not_pending_background() {
+        // A plain unresolved tool_use (e.g. a crashed mid-tool-call session)
+        // must not be mistaken for a backgrounded task — only `mcp__`-prefixed
+        // tools get the open-ended bypass.
+        let mut ai_chunk = make_chunk(ChunkType::AI);
+        ai_chunk.items.push(DisplayItem {
+            item_type: DisplayItemType::ToolCall,
+            tool_name: "Read".to_string(),
+            tool_result: String::new(),
+            ..Default::default()
+        });
+        assert!(!OngoingChecker::has_pending_background_commands(&[
+            ai_chunk
+        ]));
+    }
+
+    #[test]
+    fn orphan_pending_mcp_tool_call_is_not_pending_background() {
+        let mut ai_chunk = make_chunk(ChunkType::AI);
+        ai_chunk.items.push(DisplayItem {
+            item_type: DisplayItemType::ToolCall,
+            tool_name: "mcp__some-server__long_task".to_string(),
+            tool_result: String::new(),
+            is_orphan: true,
+            ..Default::default()
+        });
+        assert!(!OngoingChecker::has_pending_background_commands(&[
+            ai_chunk
+        ]));
+    }
+
+    #[test]
+    fn session_ongoing_with_pending_mcp_task_despite_stale_file() {
+        // The MCP server is still running the task server-side (issue #400):
+        // the session file hasn't been touched in well over the staleness
+        // threshold, yet the session must still be reported as ongoing.
+        let mut ai_chunk = make_chunk(ChunkType::AI);
+        ai_chunk.items.push(DisplayItem {
+            item_type: DisplayItemType::ToolCall,
+            tool_name: "mcp__some-server__long_task".to_string(),
+            tool_result: String::new(),
+            ..Default::default()
+        });
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("session.jsonl");
+        std::fs::write(&path, "data").unwrap();
+        let stale_time = std::time::SystemTime::now() - std::time::Duration::from_secs(300);
+        filetime::set_file_mtime(&path, filetime::FileTime::from_system_time(stale_time)).unwrap();
+
+        let chunks = vec![ai_chunk];
+        let checker = OngoingChecker::new(&chunks, &[], path.to_str().unwrap());
+        assert!(checker.is_ongoing());
     }
 
     #[test]
