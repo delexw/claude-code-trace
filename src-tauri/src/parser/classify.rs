@@ -1024,6 +1024,10 @@ fn extract_meta_blocks(
                     ..Default::default()
                 });
             }
+            // v2.1.292+ (issue #399): MCP protocol version 2026-07-28 adds `resultType`,
+            // `ttlMs`, and `cacheScope` sibling fields on this block for MCP-originated results.
+            // They're simply never read here — only tool_use_id/content/is_error are — so they
+            // pass through harmlessly on both old and new transcripts.
             let tool_id = b
                 .get("tool_use_id")
                 .and_then(|v| v.as_str())
@@ -2798,6 +2802,47 @@ mod tests {
                     ai.blocks[0].tool_denial_kind, "",
                     "a normal tool_result must not carry a denial kind"
                 );
+            }
+            other => panic!("Expected meta AI, got {other:?}"),
+        }
+    }
+
+    // --- Issue #399: MCP protocol version 2026-07-28 (v2.1.292+ for local stdio servers,
+    // v2.1.295 for claude.ai connectors, v2.1.299 for cloud/Remote Control connectors) adds
+    // `resultType`, `ttlMs`, and `cacheScope` fields to a `tool_result` content block. These are
+    // just extra sibling keys next to `tool_use_id`/`content`/`is_error` — extract_meta_blocks
+    // only reads those three known keys off the block, so the new MCP metadata is silently and
+    // safely ignored rather than breaking extraction. ---
+
+    #[test]
+    fn classify_tool_result_ignores_mcp_protocol_2026_07_28_fields() {
+        let e = Entry {
+            entry_type: "user".to_string(),
+            uuid: "uuid-mcp-399".to_string(),
+            timestamp: "2026-10-10T10:00:00Z".to_string(),
+            message: super::super::entry::EntryMessage {
+                role: "user".to_string(),
+                content: Some(json!([{
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_mcp_399",
+                    "content": "mcp tool output",
+                    "is_error": false,
+                    "resultType": "structured",
+                    "ttlMs": 60000,
+                    "cacheScope": "session"
+                }])),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        match classify(e) {
+            Some(ClassifiedMsg::AI(ai)) => {
+                assert_eq!(ai.blocks.len(), 1);
+                let b = &ai.blocks[0];
+                assert_eq!(b.tool_id, "toolu_mcp_399");
+                assert_eq!(b.content, "mcp tool output");
+                assert!(!b.is_error);
             }
             other => panic!("Expected meta AI, got {other:?}"),
         }

@@ -327,6 +327,12 @@ pub struct Entry {
 pub struct EntryMessage {
     #[serde(default, deserialize_with = "null_as_default")]
     pub role: String,
+    // v2.1.292+ (issue #399): MCP servers negotiating protocol version 2026-07-28 add
+    // `resultType`, `ttlMs`, and `cacheScope` fields to a `tool_result` content block (used
+    // client-side for typing/caching MCP results). `content` is a raw `Value`, not a struct, so
+    // these are just extra sibling keys on that block's object — they deserialize fine with no
+    // code change and are never read, since every block-field accessor downstream (classify.rs)
+    // looks up specific known keys (type/tool_use_id/content/is_error) and ignores the rest.
     #[serde(default)]
     pub content: Option<Value>,
     #[serde(default, deserialize_with = "null_as_default")]
@@ -2819,6 +2825,49 @@ mod tests {
         let bytes = serde_json::to_vec(&line).unwrap();
         let entry = parse_entry(&bytes).expect("must parse regular tool_result entry");
         assert_eq!(entry.tool_denial_kind, "");
+    }
+
+    // --- Issue #399: v2.1.292 rolled out MCP protocol version 2026-07-28 for local (stdio)
+    // servers by default, extended to claude.ai connectors in v2.1.295 and cloud session/Remote
+    // Control connectors in v2.1.299. A v2.1.299 bug-fix note confirms this protocol version adds
+    // `resultType`, `ttlMs`, and `cacheScope` fields to tool call results. `message.content` is
+    // `Option<Value>`, not a struct deserialized field-by-field, so a `tool_result` block carrying
+    // these extra sibling keys parses without any code change — serde never rejects unknown keys
+    // inside a `Value`. ---
+
+    #[test]
+    fn parse_entry_tool_result_with_mcp_protocol_2026_07_28_fields_succeeds() {
+        let line = json!({
+            "type": "user",
+            "uuid": "mcp-protocol-result-uuid-399",
+            "timestamp": "2026-10-10T10:00:00Z",
+            "message": {
+                "role": "user",
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_mcp_399",
+                    "content": "mcp tool output",
+                    "is_error": false,
+                    "resultType": "structured",
+                    "ttlMs": 60000,
+                    "cacheScope": "session"
+                }]
+            }
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes)
+            .expect("tool_result with MCP protocol 2026-07-28 fields must still parse");
+        let content = entry.message.content.expect("content must be captured");
+        let block = content
+            .as_array()
+            .and_then(|arr| arr.first())
+            .expect("must have a content block");
+        assert_eq!(
+            block.get("tool_use_id").and_then(|v| v.as_str()),
+            Some("toolu_mcp_399"),
+            "known fields must still be readable alongside the new MCP metadata"
+        );
+        assert_eq!(block.get("ttlMs").and_then(|v| v.as_i64()), Some(60000));
     }
 
     // --- Issue #336: v2.1.283 added a `path` field to `--plugin-dir` load-failure entries in
