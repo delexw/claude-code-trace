@@ -3054,4 +3054,60 @@ mod tests {
             "api-request has no uuid/leafUuid and must be dropped"
         );
     }
+
+    // --- Issue #405: claimed that a mod's `prompt.submit` (UserPromptSubmit) hook attachment
+    // moved from a separate system-role message into the same type:"user" entry's content array,
+    // alongside the user's own typed text. Empirically disproved by running a real UserPromptSubmit
+    // hook (returning hookSpecificOutput.additionalContext) against the installed v2.1.330 CLI and
+    // inspecting the resulting session JSONL directly: the type:"user" entry stays exactly
+    // {"message":{"role":"user","content":"say hello"}} with no mod content mixed in. The hook's
+    // additional context instead lands in its own attachment entry, now also carrying two new
+    // top-level fields this capture didn't have before (`rendered`, `renderedRole`) that Entry
+    // has no field for and silently ignores (no deny_unknown_fields). ---
+
+    #[test]
+    fn parse_entry_attachment_hook_additional_context_with_rendered_fields_v2_1_330() {
+        let line = json!({
+            "type": "attachment",
+            "uuid": "uuid-hook-additional-context-405",
+            "timestamp": "2026-11-21T21:21:44.779Z",
+            "attachment": {
+                "type": "hook_additional_context",
+                "content": ["INJECTED_MOD_CONTEXT_MARKER: this text was attached by a mod at prompt submission time"],
+                "hookName": "UserPromptSubmit",
+                "hookEvent": "UserPromptSubmit",
+                "toolUseID": "hook-e68aa0b2-6de8-4e29-8a61-5f786069c7e2"
+            },
+            "rendered": [{
+                "content": "<system-reminder>\nUserPromptSubmit hook additional context: INJECTED_MOD_CONTEXT_MARKER: this text was attached by a mod at prompt submission time\n</system-reminder>"
+            }],
+            "renderedRole": "system"
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect(
+            "must parse hook_additional_context attachment with rendered/renderedRole fields",
+        );
+        assert_eq!(entry.entry_type, "attachment");
+        let att = entry.attachment.expect("attachment must be captured");
+        assert_eq!(
+            att.get("hookEvent").and_then(|v| v.as_str()),
+            Some("UserPromptSubmit")
+        );
+    }
+
+    #[test]
+    fn parse_entry_user_entry_unaffected_by_sibling_prompt_submit_hook_attachment_v2_1_330() {
+        // The actually-captured type:"user" entry for the same turn: plain, unmodified text,
+        // with no mod-injected block mixed into its content.
+        let line = json!({
+            "type": "user",
+            "uuid": "uuid-user-405",
+            "timestamp": "2026-11-21T21:21:43.895Z",
+            "message": {"role": "user", "content": "say hello"},
+            "promptSource": "sdk"
+        });
+        let bytes = serde_json::to_vec(&line).unwrap();
+        let entry = parse_entry(&bytes).expect("must parse plain user entry");
+        assert_eq!(entry.message.content, Some(json!("say hello")));
+    }
 }
