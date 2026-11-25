@@ -34,3 +34,7 @@ After every code change (src, tests, config that affects build), always add enou
 ```bash
 npx oxfmt && npx oxlint && npx tsc --noEmit && npx vitest run && cargo fmt --manifest-path src-tauri/Cargo.toml && cargo clippy --manifest-path src-tauri/Cargo.toml && cargo test --manifest-path src-tauri/Cargo.toml
 ```
+
+## Session source plugins
+
+When adding a plugin under `src-tauri/src/plugins/`, also mount its session folder in `docker-compose.yml`, read-only, at the path the plugin looks for under `/home/app`. Without the mount the plugin lists nothing in Docker. Mount only the folders the plugin reads, not the tool's whole home folder, so credential files stay on the host. Add the mount to the Volumes table in `docs/docker.md`.

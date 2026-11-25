@@ -355,7 +355,11 @@ subtotal with `+`, rather than presenting that subtotal as a complete cost.
    its `routes.ts` to `src/plugins/routes.ts`. Styles go in `src/plugins/<id>/<id>.css`, imported
    by the plugin.
 3. TUI: `tui-py/plugins/<id>/`; add it to the registry in `tui-py/plugins/__init__.py`.
-4. No other file changes. A shared file that needs a new `if id === ...` means the contract is
+4. Docker: mount the plugin's session folders read-only in `docker-compose.yml`, at the paths the
+   plugin reads under `/home/app`, and list them in the Volumes table of `docs/docker.md`. Mount
+   only those folders, not the tool's whole home, so its credential files stay on the host.
+   Without the mount the plugin lists nothing in Docker.
+5. No other file changes. A shared file that needs a new `if id === ...` means the contract is
    missing an extension point — extend the contract instead.
 
 ## Open concerns
