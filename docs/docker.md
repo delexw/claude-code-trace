@@ -54,11 +54,17 @@ A `docker-compose.yml` is included for convenience:
 docker compose up --build
 ```
 
-To change the host port or the Claude data location, set env vars:
+To change the host port or a data location, set env vars:
 
 ```bash
 CCTRACE_HOST_PORT=9090 CLAUDE_HOME=/srv/claude docker compose up
 ```
+
+| Variable             | Default     | Host folder it points at                                   |
+| -------------------- | ----------- | ---------------------------------------------------------- |
+| `CLAUDE_HOME`        | `~/.claude` | Claude Code data                                           |
+| `CODEX_HOME`         | `~/.codex`  | Codex home (`sessions`, `archived_sessions`)               |
+| `CCTRACE_GEMINI_DIR` | `~/.gemini` | The `.gemini` folder holding Antigravity's `brain` folders |
 
 ## Runtime configuration
 
@@ -144,14 +150,18 @@ Revoke or reissue any client from the same Settings section without affecting th
 
 ## Volumes
 
-| Container path      | Purpose                                                                                                                                        |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/home/app/.claude` | Source of session JSONL files (mount your host's `~/.claude` here)                                                                             |
-| `/home/app/.config` | `settings.json`, `api-secret`, `clients.json`, `clients/*.jwt`, `jev_api_key` — persisted read-write so settings and clients survive recreates |
+| Container path                                                                   | Purpose                                                                                                                                        |
+| -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/home/app/.claude`                                                              | Source of session JSONL files (mount your host's `~/.claude` here)                                                                             |
+| `/home/app/.codex/sessions`, `/home/app/.codex/archived_sessions`                | Codex rollouts for the Codex plugin (read-only)                                                                                                |
+| `/home/app/.gemini/antigravity-ide/brain`, `/home/app/.gemini/antigravity/brain` | Antigravity conversations for the Antigravity plugin (read-only)                                                                               |
+| `/home/app/.config`                                                              | `settings.json`, `api-secret`, `clients.json`, `clients/*.jwt`, `jev_api_key` — persisted read-write so settings and clients survive recreates |
 
-The app only needs to **read** session logs, so mounting `/home/app/.claude`
-read-only (`:ro`) is recommended and is what the shipped `docker-compose.yml`
-does. `/home/app/.config` needs to stay read-write since the app saves to it.
+The app only needs to **read** session logs, so the shipped `docker-compose.yml`
+mounts every session folder read-only (`:ro`). For Codex and Antigravity it
+mounts only the session folders, not the whole home, so their credential files
+stay on the host. Docker creates any of these host folders that don't exist yet
+as empty folders. `/home/app/.config` needs to stay read-write since the app saves to it.
 
 If you keep session logs somewhere other than `~/.claude/projects` — e.g.
 `/srv/claude` — mount that directory instead, or point the app at a
