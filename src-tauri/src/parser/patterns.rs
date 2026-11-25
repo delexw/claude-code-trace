@@ -62,6 +62,21 @@ lazy_static! {
     pub static ref RE_PERSISTED_OUTPUT_PATH: Regex =
         Regex::new(r"(?m)Full output saved to:\s*(.+)$").unwrap();
 
+    // v2.1.328+ (issue #404): Claude Code wraps pasted text inside a user turn in
+    // <pasted_content id="...">...</pasted_content id="...">, previously only observed on the
+    // default Anthropic API with telemetry on. v2.1.328 extends this marking to third-party
+    // providers (Bedrock, Vertex, Foundry) and to telemetry/feature-flag-off sessions, so
+    // transcripts from those configurations can now carry the tag too. Confirmed against real
+    // session JSONL on disk: unlike ordinary HTML/XML, the *closing* tag repeats the same id
+    // attribute as the opening tag (e.g. `</pasted_content id="9e3d">`), not a bare
+    // `</pasted_content>`. The `regex` crate has no backreferences to require the two ids
+    // match, so the id on the closing tag is matched but not compared; it's also made optional
+    // there in case some other provider/telemetry configuration ever emits a bare closing tag.
+    pub static ref RE_PASTED_CONTENT: Regex = Regex::new(
+        r#"(?is)<pasted_content\s+id="[^"]*">(.*?)</pasted_content(?:\s+id="[^"]*")?>"#
+    )
+    .unwrap();
+
     // Noise tag patterns - system-generated metadata stripped from display content.
     pub static ref NOISE_TAG_PATTERNS: Vec<Regex> = vec![
         Regex::new(r"(?is)<local-command-caveat>.*?</local-command-caveat>").unwrap(),

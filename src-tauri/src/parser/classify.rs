@@ -1734,6 +1734,37 @@ mod tests {
         }
     }
 
+    // v2.1.328+ (issue #404): pasted text is now wrapped in <pasted_content id="..."> on
+    // third-party providers and telemetry/feature-flag-off sessions too, not just the
+    // default Anthropic API config. The entry must still classify as a normal UserMsg, with
+    // the wrapper tag stripped and the pasted text preserved. Shape (including the closing
+    // tag repeating the id attribute) confirmed against real session JSONL on disk.
+    #[test]
+    fn classify_v2_1_328_pasted_content_becomes_user_msg() {
+        let content = "Please review this:\n<pasted_content id=\"abc123\">fn main() {}</pasted_content id=\"abc123\">\nThanks!";
+        let e = make_entry("user", Some(json!(content)));
+        match classify(e) {
+            Some(ClassifiedMsg::User(u)) => {
+                assert!(
+                    !u.text.contains("<pasted_content"),
+                    "pasted_content wrapper tag must be stripped: {:?}",
+                    u.text
+                );
+                assert!(
+                    u.text.contains("fn main() {}"),
+                    "pasted text must be preserved: {:?}",
+                    u.text
+                );
+                assert!(
+                    u.text.contains("Please review this:") && u.text.contains("Thanks!"),
+                    "surrounding typed text must be preserved: {:?}",
+                    u.text
+                );
+            }
+            other => panic!("Expected User, got {other:?}"),
+        }
+    }
+
     #[test]
     fn classify_returns_none_for_empty_stdout() {
         let content = "<local-command-stdout></local-command-stdout>";

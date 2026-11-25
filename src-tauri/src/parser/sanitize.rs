@@ -130,6 +130,11 @@ pub fn sanitize_content(s: &str) -> String {
     // Strip bash-input tags but keep inner content (the command text).
     result = RE_BASH_INPUT.replace_all(&result, "$1").to_string();
 
+    // v2.1.328+ (issue #404): strip <pasted_content id="...">...</pasted_content> wrapper
+    // tags but keep the inner pasted text, so the raw marker tag never leaks into the
+    // displayed message.
+    result = RE_PASTED_CONTENT.replace_all(&result, "$1").to_string();
+
     result.trim().to_string()
 }
 
@@ -602,6 +607,41 @@ mod tests {
             sanitize_content(s),
             "[desktop-a]: Deploy finished on my end."
         );
+    }
+
+    // ---- Issue #404: v2.1.328+ pasted-content tag compat ----
+
+    #[test]
+    fn sanitize_pasted_content_tag_stripped_keeps_inner_text() {
+        // Real shape captured from a live session's JSONL: the closing tag repeats the same
+        // id attribute as the opening tag, unlike ordinary HTML/XML closing tags.
+        let s = r#"<pasted_content id="abc123">some pasted text</pasted_content id="abc123">"#;
+        assert_eq!(sanitize_content(s), "some pasted text");
+    }
+
+    #[test]
+    fn sanitize_pasted_content_surrounded_by_typed_text() {
+        // Real shape captured live: pasted text lands between the user's typed sentences,
+        // exactly as it appeared in an actual sso-server session transcript.
+        let s = "Check this out: <pasted_content id=\"xyz\">line one\nline two</pasted_content id=\"xyz\"> what do you think?";
+        assert_eq!(
+            sanitize_content(s),
+            "Check this out: line one\nline two what do you think?"
+        );
+    }
+
+    #[test]
+    fn sanitize_pasted_content_multiple_pastes() {
+        let s = r#"<pasted_content id="a1">first</pasted_content id="a1"> and <pasted_content id="b2">second</pasted_content id="b2">"#;
+        assert_eq!(sanitize_content(s), "first and second");
+    }
+
+    #[test]
+    fn sanitize_pasted_content_tolerates_bare_closing_tag() {
+        // Defensive: in case a provider/telemetry config not yet captured emits a plain
+        // </pasted_content> closing tag (no id attribute), it must still be recognized.
+        let s = r#"<pasted_content id="abc123">some pasted text</pasted_content>"#;
+        assert_eq!(sanitize_content(s), "some pasted text");
     }
 
     // ---- extract_bash_output tests ----
