@@ -935,6 +935,10 @@ fn extract_assistant_details(
                 });
             }
             _ => {
+                // Keep the whole raw block so merge_ai_buffer can render it as JSON when
+                // there is no `text` field to fall back on (issue #398: a future block shape
+                // — e.g. a JS-driven tool call — may carry its payload under some other key
+                // entirely).
                 content_blocks.push(ContentBlock {
                     block_type: bt.to_string(),
                     text: b
@@ -942,6 +946,7 @@ fn extract_assistant_details(
                         .and_then(|v| v.as_str())
                         .unwrap_or("")
                         .to_string(),
+                    content_json: Some(b.clone()),
                     ..Default::default()
                 });
             }
@@ -1013,7 +1018,10 @@ fn extract_meta_blocks(
                 // server-executed tool's result shape delivered as its own meta entry,
                 // rather than paired within the same assistant turn like the advisor tool).
                 // Keep it as a generic block instead of dropping it so merge_ai_buffer can
-                // still surface it, rather than losing it silently.
+                // still surface it, rather than losing it silently. content_json keeps the
+                // whole raw block so merge_ai_buffer can render it as JSON when there is no
+                // `text` field to fall back on (e.g. a block whose payload lives under some
+                // other key entirely, such as a JS-driven tool call's source/arguments).
                 return Some(ContentBlock {
                     block_type: bt.to_string(),
                     text: b
@@ -1021,9 +1029,14 @@ fn extract_meta_blocks(
                         .and_then(|v| v.as_str())
                         .unwrap_or("")
                         .to_string(),
+                    content_json: Some(b.clone()),
                     ..Default::default()
                 });
             }
+            // v2.1.292+ (issue #399): MCP protocol version 2026-07-28 adds `resultType`,
+            // `ttlMs`, and `cacheScope` sibling fields on this block for MCP-originated results.
+            // They're simply never read here — only tool_use_id/content/is_error are — so they
+            // pass through harmlessly on both old and new transcripts.
             let tool_id = b
                 .get("tool_use_id")
                 .and_then(|v| v.as_str())
@@ -1723,6 +1736,37 @@ mod tests {
                 assert!(
                     u.text.contains("Explain recursion."),
                     "user question must be preserved: {:?}",
+                    u.text
+                );
+            }
+            other => panic!("Expected User, got {other:?}"),
+        }
+    }
+
+    // v2.1.328+ (issue #404): pasted text is now wrapped in <pasted_content id="..."> on
+    // third-party providers and telemetry/feature-flag-off sessions too, not just the
+    // default Anthropic API config. The entry must still classify as a normal UserMsg, with
+    // the wrapper tag stripped and the pasted text preserved. Shape (including the closing
+    // tag repeating the id attribute) confirmed against real session JSONL on disk.
+    #[test]
+    fn classify_v2_1_328_pasted_content_becomes_user_msg() {
+        let content = "Please review this:\n<pasted_content id=\"abc123\">fn main() {}</pasted_content id=\"abc123\">\nThanks!";
+        let e = make_entry("user", Some(json!(content)));
+        match classify(e) {
+            Some(ClassifiedMsg::User(u)) => {
+                assert!(
+                    !u.text.contains("<pasted_content"),
+                    "pasted_content wrapper tag must be stripped: {:?}",
+                    u.text
+                );
+                assert!(
+                    u.text.contains("fn main() {}"),
+                    "pasted text must be preserved: {:?}",
+                    u.text
+                );
+                assert!(
+                    u.text.contains("Please review this:") && u.text.contains("Thanks!"),
+                    "surrounding typed text must be preserved: {:?}",
                     u.text
                 );
             }
@@ -2697,6 +2741,87 @@ mod tests {
         }
     }
 
+    // --- Issue #398: a future block shape (e.g. a JS-driven "Code Mode" tool call) may carry
+    // no `text` field at all. The generic fallback must keep the whole raw block in
+    // content_json so merge_ai_buffer can still render its payload instead of a bare
+    // placeholder. ---
+
+    #[test]
+    fn classify_meta_unrecognized_block_without_text_keeps_raw_json() {
+        let e = Entry {
+            entry_type: "user".to_string(),
+            uuid: "uuid-meta-raw-json".to_string(),
+            timestamp: "2026-11-12T10:00:00Z".to_string(),
+            message: EntryMessage {
+                role: "user".to_string(),
+                content: Some(json!([
+                    {"type": "tool_result", "tool_use_id": "toolu_1", "content": "done"},
+                    {"type": "js_tool_result", "results": [1, 2, 3]}
+                ])),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::AI(ai)) => {
+                let b = ai
+                    .blocks
+                    .iter()
+                    .find(|b| b.block_type == "js_tool_result")
+                    .expect("unrecognized block must survive extraction");
+                assert!(
+                    b.text.is_empty(),
+                    "no text field was present on the raw block"
+                );
+                let raw = b
+                    .content_json
+                    .as_ref()
+                    .expect("raw block must be kept in content_json");
+                assert_eq!(
+                    raw.get("results")
+                        .and_then(|v| v.as_array())
+                        .map(|a| a.len()),
+                    Some(3)
+                );
+            }
+            other => panic!("Expected meta AI message, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_assistant_unrecognized_block_without_text_keeps_raw_json() {
+        let e = Entry {
+            entry_type: "assistant".to_string(),
+            uuid: "uuid-assistant-raw-json".to_string(),
+            timestamp: "2026-11-12T10:00:00Z".to_string(),
+            message: EntryMessage {
+                role: "assistant".to_string(),
+                content: Some(json!([
+                    {"type": "js_tool_call", "script": "await tools.Bash({command: 'ls'})"}
+                ])),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::AI(ai)) => {
+                assert_eq!(ai.blocks.len(), 1);
+                let b = &ai.blocks[0];
+                assert_eq!(b.block_type, "js_tool_call");
+                assert!(b.text.is_empty());
+                let raw = b
+                    .content_json
+                    .as_ref()
+                    .expect("raw block must be kept in content_json");
+                assert_eq!(
+                    raw.get("script").and_then(|v| v.as_str()),
+                    Some("await tools.Bash({command: 'ls'})")
+                );
+            }
+            other => panic!("Expected AI message, got {other:?}"),
+        }
+    }
+
     #[test]
     fn classify_successful_tool_result_does_not_merge_tool_use_result() {
         // is_error:false must never pull in toolUseResult fields, even if present —
@@ -2798,6 +2923,47 @@ mod tests {
                     ai.blocks[0].tool_denial_kind, "",
                     "a normal tool_result must not carry a denial kind"
                 );
+            }
+            other => panic!("Expected meta AI, got {other:?}"),
+        }
+    }
+
+    // --- Issue #399: MCP protocol version 2026-07-28 (v2.1.292+ for local stdio servers,
+    // v2.1.295 for claude.ai connectors, v2.1.299 for cloud/Remote Control connectors) adds
+    // `resultType`, `ttlMs`, and `cacheScope` fields to a `tool_result` content block. These are
+    // just extra sibling keys next to `tool_use_id`/`content`/`is_error` — extract_meta_blocks
+    // only reads those three known keys off the block, so the new MCP metadata is silently and
+    // safely ignored rather than breaking extraction. ---
+
+    #[test]
+    fn classify_tool_result_ignores_mcp_protocol_2026_07_28_fields() {
+        let e = Entry {
+            entry_type: "user".to_string(),
+            uuid: "uuid-mcp-399".to_string(),
+            timestamp: "2026-10-10T10:00:00Z".to_string(),
+            message: super::super::entry::EntryMessage {
+                role: "user".to_string(),
+                content: Some(json!([{
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_mcp_399",
+                    "content": "mcp tool output",
+                    "is_error": false,
+                    "resultType": "structured",
+                    "ttlMs": 60000,
+                    "cacheScope": "session"
+                }])),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        match classify(e) {
+            Some(ClassifiedMsg::AI(ai)) => {
+                assert_eq!(ai.blocks.len(), 1);
+                let b = &ai.blocks[0];
+                assert_eq!(b.tool_id, "toolu_mcp_399");
+                assert_eq!(b.content, "mcp tool output");
+                assert!(!b.is_error);
             }
             other => panic!("Expected meta AI, got {other:?}"),
         }
@@ -4773,5 +4939,55 @@ mod tests {
             classify(e).is_none(),
             "queued_command attachment bookkeeping must remain noise"
         );
+    }
+
+    // --- Issue #405: claimed that a mod's `prompt.submit` (UserPromptSubmit) hook attachment
+    // moved from a separate system-role message into the same type:"user" entry's content array,
+    // alongside the user's own typed text. Empirically disproved by running a real UserPromptSubmit
+    // hook against the installed v2.1.330 CLI — see the matching comment block in entry.rs for the
+    // exact captured shapes. The hook_additional_context attachment needs no new classify() branch:
+    // the existing generic attachment+hookEvent rescue (added for PreToolUse/PostToolUse/
+    // UserPromptSubmit hook results, see classify_rescues_attachment_hook_success above) keys only
+    // on a non-empty top-level attachment.hookEvent, not on the specific attachment.type string, so
+    // this new shape is already rescued into a Hook message exactly like hook_success/
+    // hook_blocking_error are. ---
+
+    #[test]
+    fn classify_rescues_attachment_hook_additional_context_for_user_prompt_submit_v2_1_330() {
+        let e = Entry {
+            entry_type: "attachment".to_string(),
+            uuid: "uuid-hook-additional-context-405".to_string(),
+            timestamp: "2026-11-21T21:21:44.779Z".to_string(),
+            attachment: Some(serde_json::json!({
+                "type": "hook_additional_context",
+                "content": ["INJECTED_MOD_CONTEXT_MARKER: this text was attached by a mod at prompt submission time"],
+                "hookName": "UserPromptSubmit",
+                "hookEvent": "UserPromptSubmit",
+                "toolUseID": "hook-e68aa0b2-6de8-4e29-8a61-5f786069c7e2"
+            })),
+            ..Default::default()
+        };
+        match classify(e) {
+            Some(ClassifiedMsg::Hook(h)) => {
+                assert_eq!(h.hook_event, "UserPromptSubmit");
+                assert_eq!(h.hook_name, "UserPromptSubmit");
+            }
+            other => {
+                panic!("Expected Hook for attachment/hook_additional_context entry, got {other:?}")
+            }
+        }
+    }
+
+    #[test]
+    fn classify_user_entry_unaffected_by_sibling_prompt_submit_hook_attachment_v2_1_330() {
+        // The actually-captured type:"user" entry for the same turn renders as a plain UserMsg
+        // with the user's own unmodified text — no mod content mixed in.
+        let e = make_entry("user", Some(serde_json::json!("say hello")));
+        match classify(e) {
+            Some(ClassifiedMsg::User(u)) => {
+                assert_eq!(u.text, "say hello");
+            }
+            other => panic!("Expected plain UserMsg, got {other:?}"),
+        }
     }
 }
