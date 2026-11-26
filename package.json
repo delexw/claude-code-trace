@@ -26,7 +26,7 @@
     "@tauri-apps/plugin-fs": "^2",
     "@tauri-apps/plugin-opener": "2.7.3",
     "@testing-library/dom": "^10.4.2",
-    "@thesvg/react": "4.0.12",
+    "@thesvg/react": "4.0.14",
     "@types/marked-terminal": "^6.1.1",
     "chart.js": "^4.6.1",
     "marked": "15.0.12",
@@ -37,13 +37,13 @@
     "react-icons": "^5.7.0",
     "react-markdown": "^10.1.0",
     "react-syntax-highlighter": "^16.1.2",
-    "react-virtuoso": "^4.18.23",
+    "react-virtuoso": "^4.18.24",
     "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
     "@playwright/test": "~1.65.1",
     "@tauri-apps/cli": "^2",
-    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/jest-dom": "^8.0.0",
     "@testing-library/react": "^16.3.3",
     "@types/node": "^26.6.6",
     "@types/react": "^19.3.0",
@@ -51,10 +51,10 @@
     "@types/react-syntax-highlighter": "^15.5.0",
     "@vitejs/plugin-react": "^6.3.0",
     "jsdom": "^31.0.1",
-    "oxfmt": "^0.78.0",
-    "oxlint": "^1.93.0",
+    "oxfmt": "^0.79.0",
+    "oxlint": "^1.94.0",
     "typescript": "^7.0.2",
     "vite": "^8.3.8",
-    "vitest": "^5.1.0"
+    "vitest": "^5.1.1"
   }
 }
